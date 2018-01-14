@@ -22,7 +22,7 @@ import Data.Time.LocalTime
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
-import Prelude hiding (takeWhile,head)
+import Prelude hiding (takeWhile)
 import qualified Data.Foldable as F
 import qualified Data.List  as L
 import qualified Data.Interval as Interval

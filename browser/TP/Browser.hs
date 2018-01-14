@@ -29,8 +29,8 @@ import TP.Widgets
 import TP.QueryWidgets
 import Types
 import SchemaQuery
+import Database.PostgreSQL.Simple
 import Postgresql.Backend (postgresOps)
-import Prelude hiding (head)
 import Control.Monad.Reader
 import System.Environment
 import Data.Ord
@@ -73,27 +73,21 @@ serverCreate metainf now = liftTable' metainf "server" row
 
 addClientLogin inf =  transactionNoLog inf $ do
     now <- liftIO getCurrentTime
-    let
-      obj = clientCreate inf now
-    i <-  insertFrom (lookMeta inf  "clients" ) obj
-    tell (maybeToList i)
+    let obj = clientCreate inf now
+    Just i@(TableModification _ _ _ _ (CreateRow (ix,_))) <-  insertFrom (lookMeta inf  "clients" ) obj
+    tell [i]
+    lift . registerDynamic . closeDynamic $ do
+      now <- liftIO getCurrentTime
+      let
+        pt = [PAttr (lookKey inf "clients" "up_time") (PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))]
+      transactionNoLog inf $ do
+        v <- patchFrom (lookMeta inf "clients") ix  pt
+        tell (maybeToList v)
+      return ()
     return i
 
 attrIdex l =  G.Idex $  fmap (\(Attr i k) -> k) l
 
-deleteClientLogin inf i= do
-  now <- liftIO getCurrentTime
-
-  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "clients"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "clients" "id") , Left (TB1 (SNumeric i),Equals))]))
-  let
-    pk = Attr (lookKey inf "clients" "id") (TB1 (SNumeric i))
-    old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
-    pt = ( G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))])
-
-  transactionNoLog inf $ do
-    v <- uncurry (updateFrom (lookMeta inf "clients") old) pt
-    tell (maybeToList v)
-    return v
 
 addServer inf =  do
     now <- liftIO getCurrentTime
@@ -119,6 +113,23 @@ deleteServer inf (TableModification _ _ _ _ (CreateRow (ix,o))) = do
   let pt = (G.getIndex (tableMeta $lookTable inf "server")o,[PAttr (lookKey inf "server" "up_time") (PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))])
   transactionNoLog inf $ uncurry (updateFrom (lookMeta inf "server")o )pt
 
+trackTable
+  :: InformationSchemaKV Key Showable
+  -> Int
+  -> Table
+  -> Int
+  -> Int
+  -> Dynamic ()
+trackTable inf cid table six ix = do
+  now <- lift getCurrentTime
+  let cpatch = liftPatch (meta inf) "clients" <$> addTable  cid now table six ix
+      dpatch now = liftPatch (meta inf) "clients" <$> removeTable  cid now table six ix
+  ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
+  putPatch (patchVar ref) [PatchRow cpatch]
+  registerDynamic(do
+    now <- getCurrentTime
+    putPatch (patchVar ref) [PatchRow $ dpatch now])
+
 removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 removeTable idClient now table  six tix = atClient idClient [PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom
         [PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
@@ -131,7 +142,7 @@ addTable idClient now table  six tix
      [PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
       TB1 $ encodeT ( ClientTableSelection (tableName table) (startTime now) [])))])]
 
-atClient idClient =  (G.Idex [num idClient],)
+atClient idClient =  (G.Idex [num idClient],) . (PAttr "id" (POpt $ Just $ patch $num idClient):)
 
 removeRow idClient now six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
@@ -149,10 +160,12 @@ addRow idClient now tdi six tix rix
 
 
 startTime now = Interval.interval (Interval.Finite now,True) (Interval.PosInf,True)
-createRow now tdi = ClientRowSelection ( startTime now) (first keyValue <$>  tdi)
+createRow now tdi = ClientRowSelection ( startTime now) (uncurry ClientPK . first keyValue <$>  tdi)
 
-instance DecodeTable (Text, FTB Showable) where
-  encodeT (i, j) = tblist [Attr "key" (txt i), Attr "val" (TB1 . SDynamic $ j)]
+instance DecodeTable ClientPK where
+  encodeT (ClientPK i j) = tblist [Attr "key" (txt i), Attr "val" (TB1 . SDynamic $ j)]
+  decodeT = ClientPK <$>   (unOnly . primS  "key") <*> (primS "val")
+
 
 instance DecodeTable ClientRowSelection where
   encodeT (ClientRowSelection now tdi) =
@@ -160,6 +173,7 @@ instance DecodeTable ClientRowSelection where
       [ Attr "up_time" (encFTB $ encodeS <$> now)
       , IT "data_index" (array (TB1 . encodeT) tdi)
       ]
+  decodeT = ClientRowSelection <$>  (primS  "up_time") <*> (nestS "data_index")
 
 instance DecodeTable ClientTableSelection where
   encodeT (ClientTableSelection table now sel) =
@@ -168,6 +182,8 @@ instance DecodeTable ClientTableSelection where
       , Attr "up_time" (encFTB$ encodeS <$> now)
       , IT "selection" (encFTB $ encodeT <$> sel)
       ]
+  decodeT = ClientTableSelection <$> ( unOnly . primS "table") <*> (primS  "up_time") <*> (nestS "selection")
+
 instance DecodeTable ClientSchemaSelection where
   encodeT (ClientSchemaSelection sch now sel) =
     tblist
@@ -175,12 +191,20 @@ instance DecodeTable ClientSchemaSelection where
       , Attr "up_time" (encFTB$ encodeS <$> now)
       , IT "selection" (encFTB $ encodeT <$> sel)
       ]
+  decodeT = ClientSchemaSelection <$> ( unOnly . primS "schema") <*> (primS  "up_time") <*> (nestS "selection")
+
 instance DecodeTable ClientState where
   encodeT (ClientState cli time sel) =
     tblist
       [ Attr "id" (TB1 (SNumeric cli))
+      , Attr "username" (TB1 (SNumeric cli))
       , Attr "up_time" (encFTB $ encodeS <$> time)
       , IT "selection" (encFTB $ encodeT <$> sel)]
+  decodeT = ClientState <$> ( unOnly . primS "id") <*> (primS  "up_time") <*> (nestS "selection")
+
+unOnly (Only i) = i
+primS s d = att . ix s $ d
+nestS s d = itt . ix s $ d
 
 time = TB1  . STime . STimestamp
 
@@ -191,27 +215,33 @@ data ClientState
     { client_id ::  Int
     , client_up_time :: Interval UTCTime
     , schema_selection :: [ClientSchemaSelection]
-    }
+    }deriving(Eq,Show)
 
 data ClientSchemaSelection
   = ClientSchemaSelection
     { schema_sel :: Int
     , schema_up_time :: Interval UTCTime
     , table_selection :: [ClientTableSelection]
-    }
+    }deriving(Eq,Show)
 
 data ClientTableSelection
   = ClientTableSelection
-    { client_table :: Text
+    { table_sel :: Text
     , table_up_time :: Interval UTCTime
     , row_selection :: [ClientRowSelection]
-    }
+    }deriving(Eq,Show)
 
 data ClientRowSelection
   = ClientRowSelection
     { row_up_time :: Interval UTCTime
-    , data_index :: Non.NonEmpty (Text ,FTB Showable)
-    }
+    , data_index :: Non.NonEmpty  ClientPK
+    }deriving(Eq,Show)
+
+data ClientPK
+  = ClientPK
+    { key :: Text
+    , value :: FTB Showable
+    }deriving(Eq,Show)
 
 addSchema :: Int -> UTCTime -> InformationSchema -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 addSchema idClient now inf tix
@@ -219,13 +249,17 @@ addSchema idClient now inf tix
       TB1 $ encodeT ( ClientSchemaSelection (schemaId inf ) (startTime now) [])))]
 
 
+removeSchema :: Int -> UTCTime -> InformationSchema -> Int ->  (TBIndex Showable,TBIdx Text Showable)
+removeSchema idClient now inf tix
+  =atClient idClient  [PInline "selection" (POpt $ Just $ PIdx tix (
+      (Just $ PAtom
+                        ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))))]
+
+
 num = TB1 . SNumeric
 
-getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("id",num clientId)]) ccli :: Maybe (TBData Key Showable)
+getClient metainf clientId ccli = G.lookup (idex metainf "clients"  [("id",num clientId)]) ccli :: Maybe (TBData Key Showable)
 
-deleteClient metainf clientId = do
-  dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
-  putPatch (patchVar dbmeta) [DropRow ( G.Idex [num clientId])]
 
 editClient six metainf inf dbmeta ccli  table tdi clientId now ix
   | fmap tableName table == Just "clients" && schemaName inf == "metadata" = return ()
@@ -234,18 +268,23 @@ editClient six metainf inf dbmeta ccli  table tdi clientId now ix
       lrow = PatchRow $ liftPatch metainf (tableName table) <$> addSchema  clientId now inf six
     putPatch (patchVar $ iniRef dbmeta ) [lrow]) table
 
+lookClient clientId metainf = do
+    (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
+    return (getClient metainf clientId <$> clientState)
 
-addClient clientId metainf inf six table row =  do
+
+
+addSchemaIO clientId metainf inf six = do
+  dbmeta  <- prerefTable metainf (lookTable metainf "clients")
+  now <- liftIO getCurrentTime
+  let new = addSchema clientId  now inf six
+  putPatch (patchVar dbmeta) [PatchRow $ liftPatch metainf "clients"  <$>new]
+  registerDynamic (do
     now <- liftIO getCurrentTime
-    let
-      tdi = fmap M.toList $ join $ (\t -> fmap (getPKM (tableMeta t) . tblist'  ) .  traverse ((\(k,v) -> fmap (Attr k) . readType (keyType k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
-    traverse (\table -> do
-      let new = liftPatch metainf "clients" <$> addTable clientId now table six 0
-      dbmeta  <- prerefTable metainf (lookTable metainf "clients")
-      putPatch (patchVar dbmeta) [PatchRow new]
-             ) table
-    (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef (lookKey (meta inf) "clients" "id") , Left (num clientId,Equals))]))
-    return (clientId, getClient metainf clientId inf <$> clientState)
+    let new = removeSchema clientId  now inf six
+    putPatch (patchVar dbmeta) [PatchRow $ liftPatch metainf "clients"  <$>new])
+
+
 
 layFactsDiv i j =  case i of
    Vertical -> "col-xs-" <> show (12 `div` fromIntegral (max 1 j))
@@ -297,15 +336,7 @@ chooserTable six inf bset cliTid cli = do
     header <- UI.h4
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
-    ui $ do
-      now <- liftIO getCurrentTime
-      let cpatch = liftPatch (meta inf) "clients" <$> addTable  (wId w) now table six ix
-          dpatch now = liftPatch (meta inf) "clients" <$> removeTable  (wId w) now table six ix
-      ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
-      putPatch (patchVar ref) [PatchRow cpatch]
-      registerDynamic(do
-        now <- getCurrentTime
-        putPatch (patchVar ref) [PatchRow $ dpatch now])
+    ui $ trackTable inf (wId w) table six ix
     body <-
       if L.null (rawUnion table)
          then

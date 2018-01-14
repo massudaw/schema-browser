@@ -23,7 +23,7 @@ import System.Environment
 import System.Process (rawSystem)
 import System.Remote.Monitoring
 import TP.Browser
-       (addClientLogin, addServer, deleteClient, deleteClientLogin,
+       (addClientLogin, addServer,
         deleteServer)
 import TP.Main
 import TP.QueryWidgets
@@ -76,23 +76,16 @@ main = do
   --  (ServerConfig <$> join (readMay <$> sp) <*> sh)
   print "Load GUI Server"
   let initGUI = do
-        Just (TableModification _ _ _ _ (CreateRow (ix,c))) <- addClientLogin metas
+        (TableModification _ _ _ _ (CreateRow (ix,c))) <- addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
                (\(Idex i) -> F.toList i) ix
         liftIO $ putStrLn $ "Initialize Client: " ++ show i
         return i
-      finalizeGUI w =
-        void $
-        closeDynamic $ do
-          liftIO $ print ("delete client " <> show (wId w))
-          deleteClient metas (fromIntegral $ wId w)
-          deleteClientLogin metas (wId w)
   forkServer "localhost" 8000
   startGUI
     (defaultConfig {jsStatic = Just "static", jsCustomHTML = Just "index.html"})
     (setup smvar args regplugs)
-    initGUI
-    finalizeGUI `catch`
+    initGUI `catch`
     (\e -> do
        putStrLn "Finish Server"
        putStrLn $ "Exit Cause: " ++ show (e :: SomeException)

@@ -8,11 +8,9 @@ import qualified Data.Text.Lazy as T
 import  Data.Aeson
 import Debug.Trace
 import qualified Data.Vector as V
-import GHC.Stack
 import GHC.Exts
 import Data.Interval as Interval
 import Data.Maybe
-import Prelude hiding (head)
 import Data.Monoid
 
 import qualified Data.Map as M
@@ -79,7 +77,7 @@ translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
 
 justError e (Just i) = i
 justError e  v = r
-  where ! r =  errorWithStackTrace e
+  where ! r =  error e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
@@ -129,8 +127,5 @@ safeTail i = tail i
 
 unFinite :: Interval.Extended a -> Maybe a
 unFinite (Interval.Finite i ) = Just i
-unFinite i  = Nothing -- errorWithStackTrace "not finite"
+unFinite i  = Nothing
 
-
-head [] = errorWithStackTrace "no head error"
-head l = L.head l

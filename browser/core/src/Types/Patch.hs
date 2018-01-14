@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -86,7 +87,6 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import qualified Data.Set as Set
 
-import Prelude hiding(head)
 
 filterDiff  = fmap (\(Diff i ) -> i) . filter isDiff
 
@@ -437,7 +437,6 @@ pattrKey (PAttr s _ ) = Set.singleton $ Inline s
 pattrKey (PFun s l _ ) = Set.singleton $ RelFun s (fst l) (relAccesGen <$> snd l)
 pattrKey (PInline s _ ) = Set.singleton $ Inline s
 pattrKey (PFK s _  _ ) = Set.fromList s
-
 
 applyRecordChange
    :: PatchConstr d a =>

@@ -5,7 +5,7 @@ import Types
 import Step.Client
 import Data.Time
 import qualified Types.Index as G
-import Control.Arrow
+import Control.Arrow hiding(first)
 import SchemaQuery
 import Control.Monad.RWS hiding(pass)
 import Environment
@@ -16,7 +16,7 @@ import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
 import Postgresql.Printer
 import Step.Host
-import Postgresql.Codegen
+import Postgresql.Sql.Printer
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
@@ -256,16 +256,21 @@ applyPatch
      Connection -> KVMetadata PGKey ->(TBIndex Showable ,TBIdx PGKey Showable) -> IO (TBIndex Showable ,TBIdx PGKey Showable)
 applyPatch conn m patch@(G.Idex kold,skv)  = do
     print up
-    execute conn (fromString $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
+    execute conn (fromString $ T.unpack up)  (concat (fmap attrPatchValue skv) <> koldPk ) >> return patch
   where
     equality k = k <> "="  <> "?"
-    koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
+    koldPk = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
     attrPatchName (PAttr k p ) = escapeReserved (keyValue k) <> "=" <> nestP(keyValue k) p
       where nestP k (PInter True (b,j)) = "lowerI(" <> k <> "," <> "?" <>" ," <> (T.pack $show j)<> ")"
             nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
             nestP k (PatchSet l) = F.foldl' nestP k  l
             nestP k i = "?"
-    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB PGKey Showable
+    attrPatchValue (PAttr  k v) = (\(Primitive l k,v) -> (Primitive l (textToPrim k), create v)) <$> nestP [] (keyType k) v
+      where nestP o (Primitive l s ) (PInter True (Finite b, j)) = o ++[(Primitive []s,b)]
+            nestP o (Primitive l s ) (PInter False (Finite b,j)) = o ++ [(Primitive []s,b)]
+            nestP o p (PatchSet l) = F.foldl' (flip nestP p) o  l
+            nestP o p i = o ++ [(p,i)]
+
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
@@ -326,7 +331,7 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
       d <- insertPatch  inf (conn  inf) j  table
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf)table . createRow' m <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ compact $ deftable inf table <> patch d)  )
+      return $ TableModification Nothing (l) (snd $ username inf)table . createRow' m <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (traceShowId $create $ compact $ traceShowId (deftable inf table) <> traceShowId (patch d))  )
 
 
 deleteMod :: KVMetadata Key -> TBIndex Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

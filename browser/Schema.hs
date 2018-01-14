@@ -6,7 +6,8 @@ import Serializer
 import System.Environment
 import Data.Either
 import qualified Data.Aeson as A
-import Postgresql.Sql
+import Postgresql.Sql.Parser
+import Postgresql.Sql.Types
 import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -27,7 +28,6 @@ import Types.Patch
 import Control.Monad.RWS
 import qualified Types.Index as G
 import SchemaQuery
-import Prelude hiding (head)
 import Data.Unique
 import qualified Data.Foldable as F
 import Data.Maybe
@@ -191,9 +191,9 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            i3 =  addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
            pks = M.fromList $ (\(_,t)-> (S.fromList$ rawPK t ,t)) <$> HM.toList i3
            i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
-           unionT (s,n ,_ ,Select{}) = (n,id)
-           unionT (s,n,_,SqlUnion (Select _ (FromRaw _ i) _ )  (Select _ (FromRaw _ j) _) )
-             = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup (T.pack . BS.unpack $ t) i3 )<$>  [i,j] )))
+           unionT (s,n ,_ ,SQLRSelect{}) = (n,id)
+           unionT (s,n,_,SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _)  (SQLRSelect _ (Just (SQLRReference _ j)) _ )  )
+             = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup t i3 )<$>  [i,j] )))
        let
            i3u = foldr (uncurry HM.adjust. swap ) i3 (unionT <$> ures)
            i2u = foldr (uncurry M.adjust. swap) i2 (first (\tn -> justError ("no union table" ++ show tn ). fmap (\(_,i,_,_) ->S.fromList $ F.toList i)  $ M.lookup tn (M.fromList res)) . unionT <$> ures)
@@ -207,8 +207,8 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        let colMap =  fmap IM.fromList $ HM.fromListWith mappend $ (\((t,_),k) -> (t,[(keyPosition k,k)])) <$>  HM.toList keyMap
        let inf = InformationSchema schemaId schema (unOnly <$> listToMaybe color) (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ (\i -> (keyFastUnique i,i)) <$> F.toList keyMap) (M.filterWithKey (\k v -> notElem (tableName v ) convert) i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
            convert = concatMap (\(_,_,_,n) -> deps  n) ures
-           deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
-           deps Select{} = []
+           deps (SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _ )  (SQLRSelect _ (Just (SQLRReference _ j)) _ ) ) =  [i,j]
+           deps SQLRSelect{} = []
 
 
        liftIO $print (schema,keyMap)

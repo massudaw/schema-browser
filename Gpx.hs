@@ -24,7 +24,7 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text as TE
 
 
-import Prelude hiding ((.),id,head,elem)
+import Prelude hiding ((.),id,elem)
 import qualified Prelude
 import Control.Category
 

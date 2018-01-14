@@ -105,6 +105,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
           toFiel [] (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
           toFiel i j = error ("toFiel" ++ show (i,j))
 
+
 instance  TF.ToField (TB PGKey Showable)  where
   toField  = TF.toField . firstTB (Le.over keyTypes (fmap textToPrim))
 

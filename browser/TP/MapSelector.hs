@@ -37,7 +37,6 @@ import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
-import Prelude hiding (head)
 import Control.Monad.Reader
 import Schema
 import Data.Maybe

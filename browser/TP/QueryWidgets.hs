@@ -64,7 +64,6 @@ import Graphics.UI.Threepenny.Core hiding (apply, delete)
 import Graphics.UI.Threepenny.Internal (ui)
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
-import Prelude hiding (head)
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -107,7 +106,7 @@ execute inf t (idp,p) = fmap join . traverse (\ v -> fmap (join . eitherToMaybe)
   where
     table = lookTable inf t
     actiona f v =  fmap (join .  fmap (diff v . liftTable' inf t)) . f  $  mapKey' keyValue v
-    actiond f v = fmap (join . fmap (diff v . apply v . liftPatch inf t)) . f $ mapKey' keyValue v
+    actiond f v = fmap (join . fmap (traceShowId .diff v .traceShowId . apply v .traceShowId . traceShow v. liftPatch inf t)) . f $ mapKey' keyValue v
     exec p@(PurePlugin _) = actiona (pluginAction' p)
     exec p@(DiffPurePlugin _) = actiond (pluginActionDiff' p)
     exec p@(DiffIOPlugin _) = actiond (pluginActionDiff' p)
@@ -438,13 +437,13 @@ buildFKS inf constr table refs plugmods  ftb@k oldItems srefs =  F.foldl'  run (
 
 eiTableDiff
   :: InformationSchema
-     -> Table
-     -> SelPKConstraint
-     -> ColumnTidings
-     -> PluginRef (TBData CoreKey Showable)
-     -> TBData CoreKey ()
-     -> Tidings (Maybe (TBData CoreKey Showable))
-     -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
+  -> Table
+  -> SelPKConstraint
+  -> ColumnTidings
+  -> PluginRef (TBData CoreKey Showable)
+  -> TBData CoreKey ()
+  -> Tidings (Maybe (TBData CoreKey Showable))
+  -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
 eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   oldItems <- ui $ cacheTidings preOldItems
   plugins <- ui $ loadPlugins inf
@@ -616,7 +615,6 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let authorize =  ((fmap unArray . unSOptional' . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (onDiff (isRight . patchCheckInf inf m) (const False) <$>  inscrudp) (liftA2 (\j -> maybe True (not. flip containsGist j)) gist inscrud)
-  ui $ onEventIO (rumors inscrudp) (print .fmap (patchCheckInf inf m ))
   insertB <- UI.button
       # set UI.class_ "btn btn-sm"
       # set text "INSERT"
@@ -1008,7 +1006,7 @@ buildPrim fm tdi i = case i of
                step <- ui $ stepper  ini ev
                return (TrivialWidget (tidings step ev) f)
             "video/mp4" -> do
-               let binarySrc = (\(SBinary i) -> "data:" <> T.unpack "video/mp4"<> ";base64," <>  (BSC.unpack $ B64.encode i) )
+               let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
                clearB <- UI.button # set UI.text "clear"
                file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
                fchange <- fileChange file
@@ -1017,7 +1015,7 @@ buildPrim fm tdi i = case i of
                let fty = ("source",UI.src,maybe "" binarySrc  ,[])
                ini <- currentValue (facts tdi2)
                let f = (\i -> do
-                    f <- pdfFrame fty  i # set UI.type_ "video/mp4"
+                    f <- pdfFrame fty  i # set UI.type_ (T.unpack mime)
                     mkElement "video" # set children (pure f) # set (UI.strAttr "width" ) "320" # set (UI.strAttr "height" ) "240" # set (UI.strAttr "controls") ""# set (UI.strAttr "autoplay") ""
                        ) <$> facts tdi2
                    pdfFrame (elem,sr , call,st) pdf = mkElement elem  # set sr (call  pdf)
@@ -1138,7 +1136,7 @@ findPRel l (Rel k op j) =  do
   return $ fmap (k,) v
 recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
 recoverPFK ori rel i =
-  PFK rel (catMaybes (defaultAttrs <$> ori) ++  fmap (\(i,j) -> PAttr i (join $ fmap patch j)) (zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
+  PFK rel (catMaybes (defaultAttrs <$> ori) ++  fmap (\(i,j) -> PAttr i (join $ fmap patch j)) (traceShow (L.sort ori,fmap fst i,rel) . zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
 
 attrToTuple  (Attr k v ) = (k,v)
 
@@ -1335,7 +1333,7 @@ fkUITableGen ::
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
-  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> plmods) (fmap liftFK <$>oldItems)
+  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) ( fmap (fmap (traceShowId .fmap liftPFK )) <$> plmods) (fmap liftFK <$>oldItems)
     where (targetSchema,target) = findRefTableKey preinf table rel
           inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
           setattr = keyAttr <$> unkvlist ifk

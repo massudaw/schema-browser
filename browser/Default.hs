@@ -38,6 +38,7 @@ import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as S
+import Debug.Trace
 
 
 --- Generate default values  patches
@@ -68,7 +69,7 @@ defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStat
         i -> Nothing
 
 defaultFKS inf (FKJoinTable i j )
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  traverse (defaultAttrs .  _relOrigin ) i
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  nonEmpty (catMaybes ((defaultAttrs .  _relOrigin ) <$> i))
   | otherwise  = Nothing
   where isRel Rel{} = True
         isRel _ = False

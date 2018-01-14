@@ -21,7 +21,7 @@ import qualified Data.List as L
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..))
-import Prelude hiding((.),id,head)
+import Prelude hiding((.),id)
 import Data.Monoid
 import qualified Data.Bifunctor as BF
 import Utils
@@ -200,6 +200,6 @@ indexTable l t@(v)
     i <- finder (toList $ _kvvalues $ v )
     case i  of
          Attr k l -> return (k,l)
-         FKT v _ _  -> safeHead $ aattr (head $ unkvlist v)
+         FKT v _ _  -> safeHead $ aattr (justError "nohead3" $ safeHead $ unkvlist v)
          i ->  errorWithStackTrace (show i)
 

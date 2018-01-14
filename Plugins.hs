@@ -638,7 +638,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
           tbst :: Maybe (TBIdx Text Showable)
           tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 
-      returnA -< tbst
+      returnA -< traceShowId tbst
     ofx (TB1 (SText i),TB1 (SBinary r))
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r)
     ofx i = errorWithStackTrace (show i)

@@ -403,7 +403,7 @@ testPointInRange ui = do
   startGUI defaultConfig {jsPort = Just 8000} (\w -> do
                       e1 <- ui
                       addBody [e1]
-                      return () )
+                       )
 
 
 -- paint e b = element e # sink UI.style (greenRed . isJust <$> b)
@@ -413,8 +413,6 @@ paintEdit e b i  = element e # sinkDiff UI.style ((\ m n -> pure . ("background-
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
           | i /= j = "yellow"
-          -- | isNothing i && isJust j  = traceShow j "purple"
-          | i /= j = trace ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ) "yellow"
           | i == j = "blue"
           | otherwise = "green"
               where si = show i
@@ -427,7 +425,6 @@ paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","s
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
           | i /= j = "yellow"
-          -- | i /= j = trace (concat $ zipWith (\i j -> if i == j then "_" else "(" <> [i] <> "|" <> [j] <> ")" ) (show i ) ( show j)) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 
@@ -644,8 +641,8 @@ importUI f = do
     flushCallBuffer
 
 js , css :: String -> UI Element
-css ref =  mkElement "link" # set UI.href ("static/"<> ref)# set UI.rel "stylesheet"
-js ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ("static/"<> ref)
+css ref =  mkElement "link" # set UI.href ("/static/"<> ref)# set UI.rel "stylesheet"
+js ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ("/static/"<> ref)
 jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ref
 
 
@@ -654,7 +651,7 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
         ( \w ->  do
               els <- e
               addBody [els]
-              return ())(return 1) (\w -> (return ()))
+              return ())(return 1)
 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
@@ -714,6 +711,28 @@ traverseUI m inp = do
 
 line n =   set  text n
 
+accumDiffVersion
+  :: Ord k => Int -> [(Int,k)]
+     -> (Int -> k -> Dynamic b)
+     -> Tidings (S.Set k)
+     -> Dynamic
+          (Tidings (M.Map k b))
+accumDiffVersion ix0 ini f t = mdo
+  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamic (f ix) v)$ ini
+  let (del,addpre) = diffAddRemove t
+  add <- mapEvent (\((ix,_),v) -> mapM (\(ix,v)-> evalDynamic (f ix) v) $zip [ix..] (S.toList $ v) )  $(,)<$>facts bs <@>addpre
+  del2 <- mapEvent (\((ix,fin),d) -> do
+         let fins =  catMaybes $ fmap (flip M.lookup fin) d
+         _ <- traverse sequence_ $ fmap snd fins
+         return d)  ((,) <$> facts bs <@> (S.toList  <$> del ))
+  let evadd = ((\s (acc,m) -> ( acc + length s,foldr (uncurry M.insert ) m s)) <$> add )
+      evdel = ( (\s (acc,m) -> (acc,foldr (M.delete ) m s)) <$> del2 )
+  let eva = unionWith (.) evdel evadd
+  bs <- accumT  (ix0 ,M.fromList iniout)  eva
+  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  .snd <$> currentValue (facts bs))
+  return (fmap (fmap fst ) $ fmap snd $ bs)
+
+
 accumDiffCounter
   :: Ord k =>
     (Int -> k -> Dynamic b)
@@ -748,10 +767,6 @@ accumDiff  f t = accumDiffCounter (\_ -> f ) t
 evalDynamic :: (k -> Dynamic b) -> k -> IO (k,(b,[IO ()]))
 evalDynamic f l =  fmap (l,) . runDynamic $ f l
 
-closeDynamic  m = do
-  (i,v) <- runDynamic m
-  sequence_ v
-  return i
 
 diffAddRemove :: (Ord k) => Tidings (S.Set k)  -> (Event (S.Set k) ,Event (S.Set k))
 diffAddRemove l= (delete,add)

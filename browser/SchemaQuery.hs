@@ -130,7 +130,7 @@ refTable  inf (Project table (Union origin) )  = do
   refs <- mapM (refTable inf ) origin
   let
       dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)) <$>refs )
-      dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
+      dbvar (l,i,j,p,k) = DBVar2 (justError "nohead6"$ safeHead l) i j p k
   return $ dbvar dbvarMerge
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
@@ -161,7 +161,7 @@ applyBackend table (PatchRow p@(pk@(G.Idex pki),i)) = do
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
      (_,(i,o)) <- selectFrom' table Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
-     return $ L.head $ G.toList o
+     return $ justError "head7" $ safeHead $ G.toList o
         ) return oldm
    if isJust (diff old  (apply old i))
      then updateFrom m old   pk i
@@ -321,7 +321,7 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
     mmap <- liftIO $ atomically $ readTVar mvar
     let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
         dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
-        dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
+        dbvar (l,i,j,p,k) = DBVar2 (justError "head5" $ safeHead l) i j p k
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList) . snd <$>i )
 
     lf <- liftIO getCurrentTime
@@ -706,7 +706,7 @@ fullInsert' k1  v1 = do
           -- (_,(_,l)) <- tableLoader  tb Nothing Nothing []  pred
           return ret)
       else do
-        liftIO$ putStrLn $ "already exist: "  ++ (show $ G.tbpredM k1   ret)
+        liftIO$ putStrLn $ "already exist: "  ++ (show $ (G.tbpredM k1   ret,ret))
         return ret
 
 tellPatches :: [TableModification (RowPatch Key Showable)] -> TransactionM ()
@@ -770,7 +770,9 @@ fullDiffEditInsert k1 old v2 = do
         mod <- traverse (updateFrom  k1 old  (G.getIndex k1 edn)) (diff old edn)
         tell (maybeToList $ join  mod)
       else do
-        liftIO $ putStrLn "Could not diff tables"
+        liftIO . putStrLn $ "Could not diff tables: " ++ show (tableNonRef' old)
+        liftIO . putStrLn $"Could not diff tables: " ++ show  (tableNonRef' edn)
+
    return (diff old edn)
 
 
@@ -811,7 +813,7 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
                  m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit m2 o t)
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o) . traceShowId  <$> fullDiffEdit m2 o t)
           (LeftTB1  i ,LeftTB1 j) ->
             maybe (return f ) (fmap attrOptional) $ liftA2 (go (Le.over relOri unKOptional <$> rel2)) i j
           (ArrayTB1 o,ArrayTB1 l) ->
@@ -833,7 +835,7 @@ tbInsertEdit m f@(FKT pk rel2 t2) = go rel2 t2
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
                  m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist ) $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  m2 t)
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) kvlist  $ traceShow (relTable,(keyAttr <$> unkvlist pk) )$ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb). traceShowId <$> fullInsert  m2 t)
           LeftTB1 i ->
             maybe (return f ) (fmap attrOptional . go (Le.over relOri unKOptional <$> rel) ) i
           ArrayTB1 l -> do
@@ -925,7 +927,7 @@ createTableRefs inf re (Project i (Union l) ) = do
   res <- mapM (\t -> do
     ((idx,sdata),ref) <- createTableRefs inf re t
     return ((idx,createUn (keyFastUnique <$> rawPK i) (mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
-  return (foldr mappend (M.empty,G.empty) (fst <$> res) , L.head $ snd <$> res)
+  return (foldr mappend (M.empty,G.empty) (fst <$> res) ,justError "head5" $ safeHead  $ snd <$> res)
 createTableRefs inf re i = do
   liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
   let table = fmap keyFastUnique i

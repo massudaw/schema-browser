@@ -29,7 +29,8 @@ import Types.Inference
 
 import Query
 
-import Postgresql.Codegen
+import Postgresql.Sql.Types
+import Postgresql.Sql.Printer
 import Postgresql.Function
 import RuntimeTypes
 import qualified Data.Poset as P
@@ -47,7 +48,6 @@ import Data.Monoid hiding (Product)
 import qualified Data.Text as T
 
 
-import Prelude hiding (head)
 import Control.Monad
 import Control.Monad.RWS
 import Control.Applicative
@@ -175,7 +175,7 @@ expandInlineTable meta tb@( _) pre = asNewTable meta $ (\t->  do
       a <- newIT  n
       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre )) ( keyValue n)) ("ik"<> T.pack (show a))
   cols <- mapM (aliasKeys )  (sortPosition name)
-  return $ SQLRSelect cols Nothing)
+  return $ SQLRSelect cols Nothing Nothing)
 
 
 expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen SQLRow
@@ -190,7 +190,7 @@ expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta $ (\t -> do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("ik"<> T.pack (show a))
   cols <- mapM (aliasKeys )  (sortPosition name)
-  return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) "ix" ))
+  return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) "ix" )Nothing)
 
 sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattri))
 
@@ -212,7 +212,7 @@ expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
      name =  tableAttr (meta,tb)
   cols <- mapM (aliasKeys  )  (sortPosition name)
-  return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t )
+  return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing
   )
 
 

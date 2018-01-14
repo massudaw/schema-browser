@@ -27,8 +27,8 @@ import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Utils
 import Data.Bifunctor
-import Prelude hiding(head)
 import GHC.Generics
+import Safe
 import Data.Binary (Binary)
 import qualified Data.Binary as B
 import System.IO.Unsafe
@@ -523,7 +523,7 @@ tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawD
     same = filter ((tableName t ==). fkTargetTable ) rec
     notsame = filter (not . (tableName t ==). fkTargetTable  ) rec
     paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
-    paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
+    paths' = (\i -> if L.null i then [] else [MutRec i]) $ concat $ fmap ((unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
 tblist' :: Ord k => [TB k a] -> TBData k a
 tblist' = tblistM
@@ -606,7 +606,7 @@ leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
 
 attrArray :: TB Key b -> NonEmpty (TB Key Showable) -> TB Key Showable
 attrArray back@(Attr  k _) oldItems  = (\tb -> Attr k (ArrayTB1 tb)) $ (\(Attr _ v) -> v) <$> oldItems
-attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT (kvlist [Attr (kArray $ _relOrigin $  head $ keyattr (Non.head lc )) (ArrayTB1 $ head .  kattr  <$> lc)]) (_fkrelation back) (ArrayTB1 tb  ) )  $ Non.unzip $ (\(FKT lc rel tb ) -> (head $ F.toList $ _kvvalues lc , tb)) <$> oldItems
+attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT (kvlist [Attr (kArray $ _relOrigin $  justError "no head1" $ headMay $ keyattr (Non.head lc )) (ArrayTB1 $ join $ Non.fromList .  kattr  <$> lc)]) (_fkrelation back) (ArrayTB1 tb  ) )  $ Non.unzip $ (\(FKT lc rel tb ) -> (justError ("no head1" ++ show (lc,rel,tb)) $ headMay $ F.toList $ _kvvalues lc , tb)) <$> oldItems
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_tbattrkey back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 

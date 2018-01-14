@@ -226,6 +226,12 @@ test = do
   let (SIso k _ _ ) = isoTable :: IsoTable Plugins
   print k
 
+instance DecodeShowable Showable where
+  decodeS = id
+  encodeS = id
+instance DecodeTB1 FTB where
+  decFTB = id
+  encFTB = id
 instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
          DecodeTable (TableModificationK (Text, Text) (RowPatch Text a)) where
   decodeT d =
@@ -262,7 +268,7 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
       mod_key = Non.fromList $ Binary . fmap create <$> justError ("no index: " ++ show tm) (nonEmpty pidx)
   isoTable = undefined
 
-ix i d = justError ("no field " ++ show i) $ indexField (IProd Nothing i) d
+ix i d = justError ("no field " ++ show (i,d)) $ indexField (IProd Nothing i) d
 
 class DecodeShowable a where
   decodeS :: Showable -> a
@@ -321,3 +327,6 @@ unBinary (Binary i) = i
 
 att :: (Functor f, DecodeTB1 f, DecodeShowable a) => TB k Showable -> f a
 att (Attr i j) = decodeS <$> decFTB j
+
+itt :: (Functor f, DecodeTB1 f, DecodeTable a) => TB Text Showable -> f a
+itt (IT i j) = decodeT <$> decFTB j

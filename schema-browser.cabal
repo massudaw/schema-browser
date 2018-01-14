@@ -28,14 +28,13 @@ flag rebug
 
 
 executable threepenny-layer
-  ghc-options: -optl-fuse-ld=gold
   ld-options:  -fuse-ld=gold
   main-is:             Main.hs
 
   if flag(rebug)
-   ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic
+   ghc-options:         -O0 -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic -optl-fuse-ld=gold
   else
-   ghc-options:          -O1 -threaded -rtsopts
+   ghc-options:           -threaded -rtsopts
 
   OTHER-MODules:
     CnpjReceita

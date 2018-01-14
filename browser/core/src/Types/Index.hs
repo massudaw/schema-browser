@@ -64,7 +64,7 @@ import Data.Foldable (foldl')
 import Data.Char
 import qualified Data.Foldable as F
 import Data.Functor.Apply
-import Prelude hiding(head,lookup,filter)
+import Prelude hiding(lookup,filter)
 import qualified Data.Interval as Interval
 import Data.Interval (Interval,interval,lowerBound',upperBound',lowerBound,upperBound)
 import qualified Data.ExtendedReal as ER
@@ -124,7 +124,7 @@ instance (Show a,Affine a) => Affine (ER.Extended a ) where
 notNeg (DSPosition l)
   | otherwise = DSPosition l
 notNeg (DSText l)
-  | L.null dp || headS dp < 0 = def
+  | L.null dp || head dp < 0 = def
   | otherwise = DSText l
   where dp =  dropWhile (==0) l
         def = DSText []
@@ -171,8 +171,6 @@ instance Semigroup DiffShowable where
   {-# INLINE (<>) #-}
 
 
-headS [] = errorWithStackTrace "no head"
-headS i = head i
 
 class Affine f where
   type Tangent f

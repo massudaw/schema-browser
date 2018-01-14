@@ -7,11 +7,13 @@ module TP.Main where
 
 import TP.Selector
 import Data.Unique
+import qualified Data.Interval as I
 import Plugins.Schema (codeOps)
 import Control.Exception
 import qualified Data.Binary as B
 import Postgresql.Backend (connRoot, postgresOps)
 import System.Process
+import Serializer
 import Control.Concurrent.STM
 import Data.Tuple
 import TP.View
@@ -51,13 +53,14 @@ import qualified Data.ByteString.Char8 as BS
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
-import Graphics.UI.Threepenny.Internal (wId)
+import Graphics.UI.Threepenny.Internal (wId,request)
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as S
+import Snap.Core (rqURI)
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
@@ -68,8 +71,6 @@ import GHC.Stack
 col :: UI Element -> Int -> UI Element
 col i l =   i # set   UI.class_ ("col-xs-" ++ show l)
 
-
-
 borderSchema inf  = [("border", "solid 1px" <> maybe "grey" (('#':).T.unpack) (schemaColor inf))]
 
 setup
@@ -77,23 +78,25 @@ setup
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
   setCallBufferMode BufferAll
-
   let bstate = argsToState args
-  (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
+      url = fmap BS.unpack $ BS.split '/' $ BS.drop 11 $ rqURI $request w
+      iniSchema = safeHead url
+      iniTable = safeHead (tail url)
   return w # set title (host bstate <> " - " <>  dbn bstate)
+  cliTid <- ui $ lookClient (fromIntegral $ wId w) metainf
+  (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList (pure (fmap T.pack $ maybeToList iniSchema))
 
   cliId <- UI.span # set UI.text (show $ wId w)
   cliZone <- jsTimeZone
-
-  selschemas <- traverseUI (traverse (\inf -> do
+  selschemas <- ui $ accumDiffCounter (\six -> runUI w . (\inf -> do
     menu <- checkedWidget (pure True)
     body <- UI.div# set UI.class_ "row"
-    (cli,cliTid) <- ui $ addClient  (fromIntegral $ wId w) metainf inf 0 (join $ lookTableM inf . T.pack  <$> tablename bstate) (rowpk bstate)
+    ui $ addSchemaIO (fromIntegral $ wId w) metainf inf six
     metadataNav <- sequenceA $  M.fromList
-                       [("Map",fmap (^._2) <$>mapWidgetMeta inf)
-                       ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
-                       ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
-                       ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)]
+               [("Map",fmap (^._2) <$>mapWidgetMeta inf)
+               ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf)
+               ,("Account",fmap (^._2) <$> accountWidgetMeta inf)
+               ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)]
     element menu # set UI.class_ "col-xs-1"
     nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i ->
         UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # set UI.style (noneShow (maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav) ))
@@ -114,20 +117,13 @@ setup smvar args plugList w = void $ do
       let
         kitems = F.toList (pkMap inf)
         schId = int $ schemaId inf
-        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] $ pure $ Nested [keyRef "selection"](pure $ keyRef "table")) iv
-                    in  join $ (fmap (fmap (\(TB1 (SText t)) -> t) .  unArray) . unSOptional)  . Non.head . unArray  <$> join (fmap unSOptional' i)
-
-      cliIni <- currentValue (facts cliTid)
-      iniKey <- currentValue (facts initKey)
-      let
+        initKey = pure (maybeToList $ (\s -> if schemaName inf == T.pack s then lookTable inf . T.pack<$> iniTable   else Nothing) =<< iniSchema )
         buttonStyle lookDesc k e = Just <$> do
            label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
            element e # set UI.class_ "col-xs-1"
            UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
 
-      bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  (schemaName inf) (snd (username inf)) (pure iniKey)
-
+      bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  (schemaName inf) (snd (username inf)) initKey
       posSel <- positionSel
       bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
       (sidebar,calendarT) <- calendarSelector
@@ -173,14 +169,6 @@ setup smvar args plugList w = void $ do
                         set children els
                   "Change" ->
                       case schemaName inf of
-                        {-"gmail" -> do
-                          b <- UI.button # set text "sync"
-                          (dbvar,(m,t))  <- ui $ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
-                          itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
-                          itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
-                          do
-                            (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
-                            listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
                         i -> do
                           let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
                           dash <- metaAllTableIndexA inf "master_modification_table" pred
@@ -200,26 +188,27 @@ setup smvar args plugList w = void $ do
                 return bdo# set UI.style [("height","90vh"),("overflow","auto")]
                 return  (buttonStyle, const True)
           "Browser" -> do
-                subels <- chooserTable  0 inf  bset cliTid  cli
-                element bdo  # set children  (pure subels) # set UI.style [("height","90vh"),("overflow","auto")]
-                return  (buttonStyle, const True)
+            subels <- chooserTable  six  inf  bset cliTid (wId w)
+            element bdo  # set children  (pure subels) # set UI.style [("height","90vh"),("overflow","auto")]
+            return  (buttonStyle, const True)
           i -> errorWithStackTrace (show i)
            )  (triding nav)
       return tfilter
-    return container ))   ( evDB)
+    return container ))   (S.fromList <$> evDB)
   header <- UI.div # set UI.class_ "row" # set  children (cliId : chooserItens)
-  top <- layoutSel onShiftAlt  selschemas # set UI.class_ "row"
+  top <- layoutSel onShiftAlt  (F.toList <$> selschemas )# set UI.class_ "row"
   addBody [header,top]
 
 
-listDBS ::  InformationSchema -> Text -> Dynamic (Tidings [(Text,Text)])
+listDBS ::  InformationSchema -> Text -> Dynamic (Tidings (M.Map Text Text))
 listDBS metainf db = do
   (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
   let
-    schemas schemasTB =  liftA2 (,) sname  stype <$> F.toList  schemasTB
+    schemas schemasTB =  M.fromList $  liftA2 (,) sname  stype <$> F.toList  schemasTB
       where
         sname = untxt . lookAttr' "name"
         stype = untxt . lookAttr' "type"
+        unint (TB1 (SNumeric s))= s
         untxt (TB1 (SText s))= s
         untxt (LeftTB1 (Just (TB1 (SText s))))= s
   return (schemas  <$> collectionTid dbvar)
@@ -240,12 +229,8 @@ loginWidget userI passI =  do
         passwordT = tidings passwordB passwordE
     return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
 
-
-
-
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
-
 
 authMap smvar sargs (user,pass) schemaN =
       case schemaN of
@@ -258,7 +243,7 @@ authMap smvar sargs (user,pass) schemaN =
 loadSchema smvar schemaN user authMap  plugList =
     keyTables smvar (schemaN,T.pack user) authMap plugList
 
-databaseChooser smvar metainf sargs plugList = do
+databaseChooser smvar metainf sargs plugList init = do
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
   loadE <- UI.click load
@@ -269,10 +254,10 @@ databaseChooser smvar metainf sargs plugList = do
   let db = T.pack $ dbn sargs
   dbs <- ui $ listDBS  metainf  db
   dbsWPre <- multiListBox
-      ((\j ->  fst <$> j) <$> dbs)
-      (pure $ maybeToList $ T.pack <$> schema sargs)
-      (pure (line . T.unpack ))
-  let dbsW = TrivialWidget ((\i j ->  (\k -> justError " no schema" $ (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
+      (M.keys <$> dbs)
+      init
+      (pure (line . T.unpack))
+  let dbsW = TrivialWidget ((\i j ->  (\k -> justError (" no schema" <> show (k,j)) $ (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
   dbsWB <-  ui $stepper cc dbsWE
@@ -281,28 +266,13 @@ databaseChooser smvar metainf sargs plugList = do
   metainf <- liftIO $ metaInf smvar
   let
     genSchema e@(db,(schemaN,ty)) (user,pass) = case ty of
-          {-"rest" -> do
-              userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
-              usernamel <- flabel # set UI.text "Usuário"
-              username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
-              usernameE <-  fmap nonEmpty  <$> UI.valueChange username
-              usernameB <-  ui $stepper userEnv usernameE
+        "sql" -> do
+            let auth = authMap smvar sargs (user,pass)
+            loadSchema smvar schemaN  user auth plugList
 
-              load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (L.elem e<$> dbsWT) )
-              loadE <- UI.click load
-              ui $ onEventDyn (usernameB <@ loadE )( traverse (\ v ->do
-                let auth = authMap smvar sargs (user sargs ,pass sargs )
-                inf <- loadSchema smvar schemaN  (user sargs)  auth plugList
-                liftIO$ schemaH [inf]))
-              user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
-              UI.div # set children [user ,load] -}
-          "sql" -> do
-              let auth = authMap smvar sargs (user,pass)
-              loadSchema smvar schemaN  user auth plugList
-
-          "code" -> do
-              let auth = authMap smvar sargs (user,pass)
-              loadSchema smvar schemaN  user auth plugList
+        "code" -> do
+            let auth = authMap smvar sargs (user,pass)
+            loadSchema smvar schemaN  user auth plugList
 
   element dbsW # set UI.style [("width","140px")]
   chooserT <- traverseUI ui $ (\l i-> mapM (flip genSchema (justError "no pass" i)) l ) <$> dbsWT <*> formLogin
@@ -317,49 +287,8 @@ createVar = do
   smvar   <- atomically $newTVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
-  atomically $ newTVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
+  atomically $ newTVar  (DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
 
-{-
-testBinary = do
-  args <- getArgs
-  let db = argsToState args
-  smvar <- createVar
-  let
-    amap = authMap smvar db ("postgres", "queijo")
-  (meta,finm) <- runDynamic $ keyTables smvar  ("metadata","postgres") amap []
-  let
-    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
-  (inf,fing) <- runDynamic $ keyTables smvar  ("gmail","wesley.massuda@gmail.com") amap []
-  let start = "7629481"
-  let t = lookTable inf "messages"
-  ((i,(_,s)),_) <- runDynamic $ transactionNoLog inf $ selectFrom (tableName t) Nothing Nothing [] mempty
-  runDynamic $ mapM (\p -> transactionNoLog inf $ putPatch (patchVar (iniRef i)).  maybeToList =<<  getFrom t p) (L.take 4  $ G.toList s)
-  writeTable inf "dump_test/gmail"  (lookTable inf "messages") (iniRef i)
-  writeTable inf "dump_test/gmail"  (lookTable inf "labels") (iniRef i)
-  writeTable inf "dump_test/gmail"  (lookTable inf "attachments") (iniRef i)
-  (t,l) <- runDynamic $ readTable inf "dump_test" "gmail" (lookTable inf "messages")
-  s <- atomically $ readTVar (collectionState (iniRef i))
-  let wrong = filter (any not .fst ) (zipWith (\i j -> ([i ==j,G.getIndex i == G.getIndex j,tableNonRef' i == tableNonRef' j, liftTable' inf "messages" (mapKey' keyValue j ) == j , (liftTable' inf "messages" $ B.decode (B.encode (mapKey' keyValue j ))) == j ],(i,j)))(L.sort $ G.toList (snd t)) (L.sort $ G.toList s))
-  let readWrite j =  do
-        B.encodeFile "test" (  tableNonRef'. mapKey' keyValue <$> j )
-        o <- fmap (liftTable' inf "messages") <$>  B.decodeFile "test"
-        return $ o == (tableNonRef'<$> j)
-
-  o <- readWrite ( (G.toList (s)))
-  print (fmap fst wrong)
-  print o
-  -- mapM (putStrLn) $ take 2 $ zipWith (\si sj -> ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ))  (fmap show $L.sort $ G.toList (snd t)) (fmap show $L.sort $ G.toList s)
-  -- mapM (putStrLn) $ take 2 $ zipWith (\si sj -> ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ))  (fmap (show .tableNonRef')$L.sort $ G.toList (snd t)) (fmap (show.tableNonRef') $L.sort $ G.toList s)
-  --
-
-  -- print (G.toList (snd t))
-  -- print (G.toList (snd s))
-  sequence_ l
-  sequence_ fing
-  sequence_ finm
-  return ()
-
--}
 
 testSync  = do
   args <- getArgs

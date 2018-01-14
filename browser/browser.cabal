@@ -16,7 +16,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library 
-  ghc-options: -optl-fuse-ld=gold
+  ghc-options: -optl-fuse-ld=gold 
   ld-options:  -fuse-ld=gold
   exposed-modules:
 
@@ -25,8 +25,9 @@ library
     Postgresql.Parser
     Postgresql.Printer
     Postgresql.Types
-    Postgresql.Sql
-    Postgresql.Codegen
+    Postgresql.Sql.Parser
+    Postgresql.Sql.Printer
+    Postgresql.Sql.Types
 
     Plugins.Schema
 
@@ -58,6 +59,7 @@ library
    , base ==4.9.*
    , scientific
    , zlib
+   , snap-core
    , ghc
    , ghc-paths
    , hinotify

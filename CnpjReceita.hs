@@ -42,7 +42,7 @@ import Gpx
 import Debug.Trace
 import RuntimeTypes
 import Control.Monad.Reader
-import Prelude hiding ((.),elem,head,id)
+import Prelude hiding ((.),elem,id)
 
 
 

@@ -1,38 +1,31 @@
-module Postgresql.Sql where
+module Postgresql.Sql.Parser where
 
 import Types
+import Postgresql.Sql.Types
 import Data.Attoparsec.Char8 as A
 import Data.Either
 import Control.Applicative
 import Control.Monad
 import Data.Text(Text)
+import qualified Data.Text as T
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS
 
 import Database.PostgreSQL.Simple
 
-data ColumnName
-  = Column ByteString
-  | FullColumn ByteString ByteString
-  deriving(Show)
 
-data ColumnRef
-  = RenameColumn Value ByteString
-  | KeepColumn Value
-  deriving(Show)
-
-name = A.takeWhile1 (not . (`elem` (";() .,"::String)))
+name = T.pack . BS.unpack <$> A.takeWhile1 (not . (`elem` (";() .,"::String)))
 
 parseColumn = full <|> simple
     where
-      simple = Column <$> name
+      simple = SQLAReference Nothing <$> name
       full = do
         table <-  name
         char '.'
         column <- name
-        return (FullColumn table column)
+        return (SQLAReference (Just table) column)
 
-parseColumnRef  = rename  <|> fmap KeepColumn  value
+parseColumnRef  = rename  <|> fmap SQLAValue value
   where
       rename = do
         old <- value
@@ -40,46 +33,7 @@ parseColumnRef  = rename  <|> fmap KeepColumn  value
         string "AS" <|> string "as"
         many1 space
         new <- name
-        return (RenameColumn old new )
-
-
-data OpenTable
-  = FromCommand Command ByteString
-  | FromRaw ByteString ByteString
-  | Empty
-  | Join OpenTable OpenTable String
-  deriving(Show)
-
-data Command
-  = Select [ColumnRef] OpenTable (Maybe Where)
-  | SqlUnion Command Command
-  | SqlIntersect Command Command
-  | SqlExcept Command Command
-  deriving(Show)
-
-data BooleanTree
-  = Or  BooleanTree BooleanTree
-  | And BooleanTree  BooleanTree
-  | NotB BooleanTree
-  | Prim Pred
-  deriving Show
-
-data Value
-  =  Ref ColumnName
-  |  Lit ByteString
-  |  ApplyFun ByteString [Value]
-  |  Cast Value ByteString
-  deriving Show
-
-data Pred
-  =  InfixOperator ByteString Value Value
-  |  UnaryOperator ByteString Value
-  |  Boolean Value
-  deriving Show
-
-data Where
-  = Where  BooleanTree
-  deriving Show
+        return (SQLARename (SQLAValue old) new )
 
 testParseColumn = parseOnly select "SELECT col1, table1.col1 , table1.col1 as col2 , col1 as col2 FROM sch1.table1 WHERE ( true AND (NOT true) ) OR false"
 parseColList = sepBy parseColumnRef (many space >> char ','>> many space)
@@ -93,19 +47,19 @@ union operation = do
   i1 <- operation
   many space >> string "UNION" >> many space
   i2 <- operation
-  return $ SqlUnion i1 i2
+  return $ SQLRUnion i1 i2
 
 intersect  operation = do
   i1 <- operation
   many space >> string "INTERSECT" >> many space
   i2 <- operation
-  return $ SqlUnion i1 i2
+  return $ SQLRIntersect i1 i2
 
 except operation = do
   i1 <- operation
   many space >> string "EXCEPT" >> many space
   i2 <- operation
-  return $ SqlUnion i1 i2
+  return $ SQLRExcept i1 i2
 
 
 
@@ -123,7 +77,7 @@ select = do
   many space
   t <- table
   f <- maybeFilter
-  return $ Select  list  t f
+  return $ SQLRSelect list  (Just t) f
 
 table = rawTable
 
@@ -133,12 +87,12 @@ rawTable = do
   s <- name
   char '.'
   t <- name
-  return $ FromRaw s t
+  return $ SQLRReference (Just s) t
 
 value =  tryFun function (tryFun cast (boolean <|> paren <|> ref))
   where
     tryFun f i = f i <|> i
-    boolean = Lit <$> (string "true" <|> string "false")
+    boolean = Lit . T.pack .BS.unpack <$> (string "true" <|> string "false")
     paren = (char '(' >> many space ) *> value <* (many space >> char ')')
     ref =  Ref <$> parseColumn
     cast i  =  do
@@ -162,24 +116,22 @@ paren v = (char '(' >> many space ) *> v <* (many space >> char ')')
 predi = tree
   where
     tree = and <|> or <|> notP <|> prim
-    notP = fmap NotB $ string "NOT"  >> many space >> prim
-    prim = (Prim . Boolean <$>  value) <|> paren tree
+    notP = fmap SQLPNot $ string "NOT"  >> many space >> prim
+    prim = (SQLPredicate . Boolean <$>  value) <|> paren tree
     and =   do
       vl <- prim
       many space
       string "AND"
       many space
       vr <- prim
-      return (And vl vr)
+      return (SQLPAnd vl vr)
     or =   do
       vl <- prim
       many space
       string "OR"
       many space
       vr <- prim
-      return (And vl vr)
-
-
+      return (SQLPOr vl vr)
 
 
 maybeFilter = fmap Just whereClause <|> return Nothing
@@ -188,10 +140,10 @@ whereClause =  do
   many space
   string "WHERE"
   many space
-  Where  <$> predi
+  predi
 
 
-type View = Either (ByteString,String) (Text,Text,Text,Command)
+type View = Either (ByteString,String) (Text,Text,Text,SQLRow)
 
 testViews :: String ->  IO [View]
 testViews i = do

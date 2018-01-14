@@ -55,7 +55,6 @@ import Data.Monoid hiding (Product)
 import qualified Data.Text as T
 import qualified Data.ExtendedReal as ER
 import Utils
-import Prelude hiding (head)
 import Control.Monad
 import System.IO.Unsafe
 import Control.Applicative
@@ -365,14 +364,14 @@ backPathRef ::  SqlOperation -> TBData Key Showable ->  [Column Key Showable]
 backPathRef (FKJoinTable rel t) = justError ("no back path ref "  ++ show rel ). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (_relOrigin<$> rel)
 
 backFKRefType
-  :: (Foldable f,Show (f Key ),Show a, Functor f) =>
+  :: (Show a) =>
      M.Map Key Key
      -> M.Map Key CorePrim
-     -> f Key
+     -> [Key]
      -> TBData  Key a
-     -> Maybe (f (TB Key a))
--- backFKRef i j  | traceShow (i ,j) False =  undefined
-backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
+     -> Maybe [ TB Key a]
+backFKRefType i j  k  | traceShow (i ,j,k) False =  undefined
+backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . traceShowId . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
     lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive [] tkn) v)) <$> knm <*> tknm
@@ -382,13 +381,13 @@ backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . re
 
 
 backFKRef
-  :: (Foldable f,Show (f Key ),Show a, Functor f) =>
+  :: (Show a) =>
      M.Map Key Key
-     -> f Key
+     -> [ Key]
      -> TBData  Key a
-     -> Maybe (f (TB Key a))
+     -> Maybe [ TB Key a]
 -- backFKRef i j  | traceShow (i ,j) False =  undefined
-backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
+backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
     lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
@@ -435,7 +434,7 @@ joinRel2 tb ref table
   | L.any (isArray.snd) ref
   = let
       !arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
-   in join .fmap ( fmap (ArrayTB1 .  Non.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,head ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
+   in join .fmap ( fmap (ArrayTB1 .  Non.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
       where
