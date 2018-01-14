@@ -62,8 +62,6 @@ except operation = do
   return $ SQLRExcept i1 i2
 
 
-
-
 operation = setop primop <|> primop <|> setop  (paren operation)
   where
     primop = select

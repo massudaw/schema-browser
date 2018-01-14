@@ -3,7 +3,6 @@ module Postgresql.Sql.Types where
 import Data.Text (Text)
 import Data.Monoid
 import qualified Data.Text as T
-
 import Types
 import Data.Attoparsec.Char8 as A
 import Data.Either
