@@ -143,9 +143,9 @@ secondary (m,s,g) = s
 primary (m,s,g) = g
 
 
-createUn :: Ord k => [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
-createUn un   =  G.fromList  transPred  .  filter (isJust . Tra.traverse (Tra.traverse unSOptional' ) . getUn (S.fromList un) . tableNonRef' )
-  where transPred  =  G.notOptional . G.getUnique un . tableNonRef'
+createUn :: (Show k ,Ord k) => [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
+createUn un   =  G.fromList  transPred  .  filter (isJust . join . fmap (Tra.traverse (Tra.traverse unSOptional' ) ) . nonEmpty . getUn (S.fromList un) . tableNonRef' )
+  where transPred  i =  justError ("empty"  ++ show (un,i)) . G.notOptionalM . G.getUnique un . tableNonRef' $ i
 
 
 applyBackend table (CreateRow (ix,t)) =
@@ -546,9 +546,9 @@ makePK table (Idex l) = tblist $ zipWith Attr  (rawPK table ) l
 -- Default Checks
 
 patchCheckInf ::  InformationSchema -> KVMetadata Key -> TBIdx Key Showable ->  Either String (TBIdx Key Showable)
-patchCheckInf inf m i = if isJust (createIfChange (i ++ defp ) :: Maybe (TBData Key Showable)) then Right i else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
+patchCheckInf inf m i = if isJust (createIfChange (defp  ++ i) :: Maybe (TBData Key Showable)) then Right i else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
-      defp = deftable inf (lookTable inf (_kvname m  ))
+      defp = defaultTable inf (lookTable inf (_kvname m  )) (create i)
       available = S.unions $ S.map _relOrigin . pattrKey <$> i
       need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
@@ -813,11 +813,11 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
                  m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o) . traceShowId  <$> fullDiffEdit m2 o t)
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o) <$> fullDiffEdit m2 o t)
           (LeftTB1  i ,LeftTB1 j) ->
             maybe (return f ) (fmap attrOptional) $ liftA2 (go (Le.over relOri unKOptional <$> rel2)) i j
           (ArrayTB1 o,ArrayTB1 l) ->
-            attrArray f  <$> Tra.sequence (Non.zipWith (go (Le.over relOri unKArray <$> rel2)) o l)
+            attrArray (FKT pk rel2 t2)  <$> Tra.sequence (Non.zipWith (go (Le.over relOri unKArray <$> rel2)) o l)
           i -> errorWithStackTrace (show i)
 
 
@@ -834,12 +834,14 @@ tbInsertEdit m f@(FKT pk rel2 t2) = go rel2 t2
           t@(TB1 l) -> do
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) kvlist  $ traceShow (relTable,(keyAttr <$> unkvlist pk) )$ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb). traceShowId <$> fullInsert  m2 t)
+                 ptable = lookTable inf $ _kvname m
+                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf ptable rel2
+             liftIO $ print (keyType . _relOrigin <$> rel)
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) kvlist  $  backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  m2 t)
           LeftTB1 i ->
             maybe (return f ) (fmap attrOptional . go (Le.over relOri unKOptional <$> rel) ) i
           ArrayTB1 l -> do
-            attrArray f <$>  Tra.traverse (go (Le.over relOri unKArray <$> rel) ) l
+            attrArray (FKT pk rel t2) <$>  Tra.traverse (go (Le.over relOri unKArray <$> rel) ) l
 
 loadFKS targetTable table = do
   inf <- ask

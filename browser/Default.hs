@@ -82,5 +82,36 @@ defaultFKS inf (FKInlineTable k i) =
 defaultFKS _ (FunctionField  k _ _ ) = defaultAttrs k
 defaultFKS inf (RecJoin     _ i ) =  defaultFKS inf i
 
+defaultTB inf (RecJoin     _ i ) _ =  defaultFKS inf i
+defaultTB _ (FunctionField  k _ _ ) _ = defaultAttrs k
+defaultTB inf (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyType k) l
+  where
+    go  (KOptional :xs) (LeftTB1 i) =
+        case i of
+          Just i -> POpt . Just <$> go xs i
+          Nothing -> Just (POpt Nothing)
+    go  [] (TB1  _) = PAtom  <$> nonEmpty (deftable rinf (lookTable rinf (snd i)))
+    go  _  _ = Nothing
+    rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
+defaultTB inf j i | traceShow (i,j,defaultFKS inf j) False = undefined
+
+defaultTB inf j@(FKJoinTable {} ) _ = defaultFKS inf j
+
+defaultTable
+  :: InformationSchemaKV Key Showable
+     -> TableK (FKey (KType (Prim KPrim (T.Text, T.Text))))
+     -> TBData Key Showable
+     -> [PathAttr (FKey (KType CorePrim)) Showable]
+defaultTable inf table v =
+  let
+    fks' =  rawFKS table
+    items = tableAttrs table
+    fkSet, funSet:: S.Set Key
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) fks'
+    funSet = S.unions $ pathRelOri <$> filter isFunction fks'
+    nonFKAttrs :: [Key]
+    nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
+
+  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (\ix -> maybe (defaultFKS inf ix) (defaultTB inf ix) (M.lookup (traceShowId $ pathRelRel ix) (unKV v))) fks'
 
 

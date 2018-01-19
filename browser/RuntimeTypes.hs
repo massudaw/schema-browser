@@ -416,7 +416,7 @@ typeCheckValuePrim f (KInterval : i) (IntervalTB1 j) = const <$> maybe (Pure ())
 typeCheckValuePrim f []  (TB1 j) = f j
 typeCheckValuePrim f i j = failure ["cant match " ++ show i ++ " with " ++ show j ]
 
-typeCheckValue f (Primitive l i)  j = typeCheckValuePrim (f i) l j
+typeCheckValue f (Primitive l i)  j = mapError (fmap (("At " ++ show l ++ " : " ++ show i)++)) $ typeCheckValuePrim (f i) l j
 
 typeCheckPrim (PInt j) (SNumeric i) = Pure ()
 typeCheckPrim PDouble (SDouble i) = Pure ()
@@ -439,12 +439,19 @@ typeCheckPrim i j  = failure ["cant match " ++ show i ++ " with " ++ show j ]
 typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
-typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
+typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> mapError (fmap ((show (keyType ._relOrigin <$> rel2)) ++)) (typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i)
   where -- FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) path
         -- path = L.find (\(Path i _ )-> i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
         ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
         ktype :: KType (Prim KPrim (Text,Text))
         ktype = const (RecordPrim  ("","")) <$> ktypeRel
+
+
+mapError :: (a -> a) -> Errors a b -> Errors a b
+mapError f (Other (Constant i)) = Other (Constant (f i))
+mapError f (Pure i) = Pure i
+
+
 
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()

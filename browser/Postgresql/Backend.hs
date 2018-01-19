@@ -280,9 +280,11 @@ updatePatch
   ::
      Connection -> KVMetadata PGKey -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
 updatePatch conn m kv old  t = do
-    print up
-    execute conn (fromString $ T.unpack up)  (skv <> koldPk ) >> return patch
+    print  =<< (formatQuery conn qstr qargs)
+    execute conn qstr qargs >> return patch
   where
+    qstr = fromString $ T.unpack up
+    qargs = skv <> koldPk
     patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = M.toList $ getPKM m old
     equality  k =escapeReserved  (keyValue k) <> "="  <> value k
@@ -329,9 +331,11 @@ insertMod m j  = do
     Nothing ->liftIO $ do
       let
         table = lookTable inf (_kvname m)
-      d <- insertPatch  inf (conn  inf) j  table
+        ini = defaultTable inf table j ++  patch j
+      print (ini)
+      d <- insertPatch  inf (conn  inf) (create ini) table
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf)table . createRow' m <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (traceShowId $create $ compact $ traceShowId (deftable inf table) <> traceShowId (patch d))  )
+      return $ TableModification Nothing l (snd $ username inf) table . createRow' m <$> either (error . unlines ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ patch d))
 
 
 deleteMod :: KVMetadata Key -> TBIndex Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -361,9 +365,10 @@ updateMod m old pk p = do
     Just (UpdateRule i) ->  i old p
     Nothing -> liftIO$ do
       let table = lookTable inf (_kvname m)
-      patch <- updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
+          ini = defaultTable inf table kv ++  patch kv
+      patch <- updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) $ create ini )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
-      let mod =  TableModification Nothing l (snd $ username inf) table ( PatchRow $ (G.getIndex m kv,) $firstPatch (typeTrans inf) patch)
+      let mod =  TableModification Nothing l (snd $ username inf) table ( PatchRow $ (G.getIndex m kv,) $ firstPatch (typeTrans inf) patch)
       return $ Just mod
 
 patchMod :: KVMetadata Key -> TBIndex Showable -> TBIdx Key Showable-> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

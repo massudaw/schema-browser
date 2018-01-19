@@ -232,7 +232,7 @@ instance DecodeShowable Showable where
 instance DecodeTB1 FTB where
   decFTB = id
   encFTB = id
-instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
+instance (Compact a,Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
          DecodeTable (TableModificationK (Text, Text) (RowPatch Text a)) where
   decodeT d =
     TableModification

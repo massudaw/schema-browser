@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE RankNTypes #-}
@@ -262,8 +263,17 @@ class Compact f where
   compact :: [f] -> [f]
 
 
-instance (Show (Index a),Ord (Index a),PatchConstr k a) => Compact (PathAttr k a) where
+instance (Compact a, Ord k) => Compact (PathAttr k a) where
   compact = compactAttr
+
+instance Compact a => Compact (PathFTB a) where
+  compact = maybeToList . compactPatches
+
+instance (Compact a,Ord k) => Compact (TBIdx k a) where
+  compact = compactTB1
+
+instance Compact Showable where
+  compact = id
 
 instance PatchConstr k a => Patch (TB k a)  where
   type Index (TB k a) =  PathAttr k (Index a)
@@ -273,14 +283,12 @@ instance PatchConstr k a => Patch (TB k a)  where
   patch = patchAttr
 
 instance  PatchConstr k a => Patch (TBData k a)  where
-  type Index (TBData k a) =  TBIdx k (Index a)
+  type Index (TBData k a) = TBIdx k (Index a)
   diff = difftable
   applyIfChange = applyRecordChange
   createIfChange = createTB1
   patch = patchTB1
 
-instance PatchConstr k a => Compact (TBIdx k a) where
-  compact = compactTB1
 
 instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
@@ -296,6 +304,7 @@ instance Monoid Showable where
 instance Patch ()  where
   type Index () = ()
   patch = id
+
 instance Patch Showable  where
   type Index Showable = Showable
   diff  = diffPrim
@@ -306,9 +315,7 @@ instance Patch Showable  where
   patch = id
 
 
-type PatchConstr k a = (Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
-
-
+type PatchConstr k a = (Compact (Index a),Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
 
 data PathAttr k a
   = PAttr k (PathFTB a)
@@ -324,6 +331,7 @@ patchfkt i = errorWithStackTrace (show i)
 unAtom (PatchSet (PAtom l Non.:| _ ) ) =  l
 unAtom (PAtom i ) = i
 unAtom i =errorWithStackTrace (show   i)
+
 
 instance (Binary k ,Binary a) => Binary (PathAttr k a)
 instance (NFData k ,NFData a) => NFData (PathAttr k a)
@@ -345,28 +353,29 @@ firstPatchAttr f (PFK rel k   b ) = PFK (fmap (fmap f) rel)  (fmap (firstPatchAt
 
 
 
-compactTB1 :: (Ord a , Show a, Ord b ,Show b) => [TBIdx a b] -> [TBIdx a b ]
-compactTB1  = pure . concat --fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i,j))  (\(_,_,p) -> p) i
+-- compactTB1 :: (PatchConstr a b)  => [TBIdx a b] -> [TBIdx a b ]
+compactTB1  i =  L.transpose  $ compact .  snd <$> groupSplit2  pattrKey id (join i)
 
-compactAttr :: (Ord a , Show a, Ord b ,Show b,Ord (Index b) ,Show (Index b)) => [PathAttr a b ] -> [PathAttr a b ]
+compactAttr :: (Compact b,Ord a) => [PathAttr a b ] -> [PathAttr a b ]
 compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
   where
     pathProj (PAttr i j)  = Right (Right j)
     pathProj (PFun i rel j)  = Right (Right j)
     pathProj (PInline i j)  = Left j
-    pathProj (PFK i p  j)  = Right (Left p)
+    pathProj (PFK i p  j)  = Right (Left (p,j))
     projectors (PAttr i j ) =  Left (Right i)
     projectors (PFun i r j ) =  Left (Left (i,r))
     projectors (PInline i j) = Left (Right i)
-    projectors (PFK i _  j) = Right (i,j)
-    recover (Left (Right i),j) = justError "cant compact" $ (fmap (PAttr i) $ compactPatches $ rights $ rights j) <|>  (fmap (PInline i ) $ compactPatches $lefts j)
-    recover (Left (Left (i,r)),j) = PFun i r (justError "cant comapct pattr" $ compactPatches $ rights $ rights j)
-    recover (Right (i,j) ,l) = PFK i (compactAttr $ concat $ lefts $ rights l)  j
-    recover i  = errorWithStackTrace $ "no item" <> (show i)
+    projectors (PFK i l  j) = Right i
+    recover (Left (Right i),j) = justError "cant compact" $ (fmap (PAttr i) $ compactPatches . rights $ rights j) <|>  (fmap (PInline i ) $ compactPatches $lefts j)
+    recover (Left (Left (i,r)),j) = PFun i r (justError "cant comapct pattr" $ compactPatches . rights $ rights j)
+    recover (Right i ,l) = PFK i (compactAttr (concat fs) )  (last sn)
+      where (fs,sn) = unzip $ lefts $ rights l
+    recover i  = errorWithStackTrace $ "no item"
 
+unPAtom (PAtom i) = i
 
-
-compactPatches :: (Ord a ,Show a)=> [PathFTB  a] -> Maybe (PathFTB  a)
+compactPatches :: Compact a => [PathFTB  a] -> Maybe (PathFTB  a)
 compactPatches [] = Nothing
 compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ i
   where
@@ -380,12 +389,12 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     projectors (PInter b _  ) = PIdInter b
     projectors (PAtom _  ) =  PIdAtom
     -- projectors i = errorWithStackTrace (show i)
-    recover (PIdIdx i, j ) = PIdx i (compact j)
-    recover (PIdOpt , j ) = POpt (compact j)
+    recover (PIdIdx i, j ) = PIdx i (compactP j)
+    recover (PIdOpt , j ) = POpt (compactP j)
     recover (PIdInter i ,  j ) = justError "no patch inter" $ patchSet (catMaybes j)
-    recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
+    recover (PIdAtom , j ) =  justError "can't be empty " $ patchSet (fmap PAtom $ compact $ fmap unPAtom  $catMaybes j)
     -- recover i = errorWithStackTrace (show i)
-    compact j = compactPatches $ catMaybes j
+    compactP j = compactPatches $ catMaybes j
 
 
 
@@ -427,12 +436,13 @@ applyTB1
 applyTB1 = apply -- create applyRecord
 
 createTB1
-  :: PatchConstr d a =>
+  :: ( PatchConstr d a )=>
     (TBIdx d (Index a) ) ->
       Maybe (TBData d a)
-createTB1 k  =  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (createIfChange) k)
+createTB1 k  =  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap createAttrChange  (concat $ compactAttr . snd <$> groupSplit2  pattrKey id k) )
 
 
+pattrKey :: Ord k => PathAttr k t -> Set.Set (Rel k)
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
 pattrKey (PFun s l _ ) = Set.singleton $ RelFun s (fst l) (relAccesGen <$> snd l)
 pattrKey (PInline s _ ) = Set.singleton $ Inline s
