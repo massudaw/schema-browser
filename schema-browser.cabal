@@ -97,7 +97,6 @@ executable threepenny-layer
    ,semigroupoids
    , arrows
    -- Google Auth
-   , handa-gdata 
    , http-conduit, directory ,process,xml
    ,unordered-containers
    -- Pdf Parser

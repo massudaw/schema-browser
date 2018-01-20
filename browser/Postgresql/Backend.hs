@@ -403,7 +403,9 @@ loadDelayed inf m v values
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 v))
            (str,namemap) = codegen (loadDelayedQuery inf m v delayed)
            pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m(tableNonRef' values)
-       is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) (fromString $ T.unpack str) pk
+           qstr = (fromString $ T.unpack str)
+       print  =<< formatQuery (conn  inf) qstr pk
+       is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
        res <- case is of
             [i] ->return $ diff (KV filteredAttrs) (makeDelayed i)
             [] -> errorWithStackTrace "empty query"

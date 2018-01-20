@@ -105,7 +105,7 @@ lkTB (Attr k _) = do
   a<- lkAttr k
   return $ case a of
     Just a -> "k" <> T.pack (show a)
-    Nothing ->  keyValue k
+    Nothing ->keyValue  k
 
 lkTB (IT k _ ) = do
   a <-lkIT k
@@ -463,7 +463,7 @@ loadDelayedQuery
 loadDelayedQuery inf m v delayed= do
   tq <- expandBaseTable m v
   rq <- explodeRecord inf m delayed
-  out <- mapM (\i-> do
+  out <- atTable m $ mapM (\i-> do
     v <- lkTB (Attr i (TB1 ()))
     return $   v  <>  " = ?") (_kvpk m)
   let whr = T.intercalate " AND " out

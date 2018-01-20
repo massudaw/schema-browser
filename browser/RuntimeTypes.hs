@@ -49,7 +49,6 @@ import Data.Set (Set)
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 import Data.Traversable
-import Network.Google.OAuth2
 import Control.Lens.TH
 import GHC.Stack
 
@@ -115,11 +114,8 @@ backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey
 
 data Auth
   = PostAuth Connection
-  | OAuthAuth (Maybe (Text,R.Tidings OAuth2Tokens))
   | NoAuth
 
-token s = case authtoken s of
-      OAuthAuth i -> i
 conn s = case authtoken s of
       PostAuth i -> i
 

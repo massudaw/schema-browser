@@ -95,7 +95,6 @@ library
    , arrows
    , directory
    , process
-   , handa-gdata
    , xml
    , unordered-containers
    , data-interval
