@@ -17,7 +17,6 @@ import Control.Monad.Reader
 import GHC.Stack
 import RuntimeTypes
 import Query
-import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
 import Types.Patch
 import Data.Ord
@@ -29,10 +28,9 @@ import Data.Tuple
 import Data.String
 
 import Control.Applicative
+import Data.Monoid
 import Data.Maybe
 import qualified Data.List as L
-
-import Prelude hiding (takeWhile,head)
 
 import qualified Data.Foldable as F
 import qualified Data.Text as T
@@ -53,12 +51,11 @@ deftable inf table =
     items = tableAttrs table
     fkSet,funSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) fks'
-    funSet = S.unions $ pathRelOri Control.Applicative.<$> filter isFunction fks'
+    funSet = S.unions $ pathRelOri <$> filter isFunction fks'
     nonFKAttrs :: [Key]
     nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
-    fks = fks'
 
-  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks
+  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks'
 
 
 defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStatic k))
@@ -95,7 +92,7 @@ defaultTB inf (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyTy
     rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultTB inf j i | traceShow (i,j,defaultFKS inf j) False = undefined
 
-defaultTB inf j@(FKJoinTable {} ) _ = defaultFKS inf j
+defaultTB inf j@FKJoinTable {} _ = defaultFKS inf j
 
 defaultTable
   :: InformationSchemaKV Key Showable

@@ -290,7 +290,6 @@ updatePatch conn m kv old  t = do
   where
     qstr = fromString $ T.unpack up
     qargs = skv <> koldPk
-    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = M.toList $ getPKM m old
     equality  k =escapeReserved  (keyValue k) <> "="  <> value k
     koldPk = uncurry Attr <$> kold
@@ -305,8 +304,16 @@ updatePatch conn m kv old  t = do
 diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
 diffUpdateAttr  kv kold  =  fmap KV  .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . tableNonRef'  $ kv ) (unKV . tableNonRef' $ kold )
 
-differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
-
+paginate
+  :: InformationSchema
+  -> KVMetadata Key
+  -> TBData Key ()
+  -> [(Key, Order)]
+  -> Int
+  -> Int
+  -> Maybe [FTB Showable]
+  -> WherePredicate
+  -> IO (Int, [TBData Key Showable])
 paginate inf meta t order off size koldpre wherepred = do
   let ((que,name),attr) = selectQuery inf meta t koldpre order wherepred
   v <- do
