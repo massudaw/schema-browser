@@ -566,7 +566,6 @@ tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non null
       need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
 
-
 convertChanStepper0
   :: (Show v) =>
     InformationSchema -> TableK KeyUnique

@@ -18,6 +18,7 @@ module Postgresql.Printer
   ,CodegenT
   ,Address(..)
   ,selectRow
+  ,loadDelayedQuery
   ,lkTB
   ,atTable
   )
@@ -452,5 +453,20 @@ justLabel namemap meta t k = fst $ evalRWS getLabels  [Root meta] namemap
   where
     getLabels :: Codegen Text
     getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ tableNonRef2 t)
+
+loadDelayedQuery
+  :: InformationSchema
+     -> KVMetadata Key
+     -> TBData Key ()
+     -> TBData Key ()
+     -> RWST [Address Key] String NameMap Identity Text
+loadDelayedQuery inf m v delayed= do
+  tq <- expandBaseTable m v
+  rq <- explodeRecord inf m delayed
+  out <- mapM (\i-> do
+    v <- lkTB (Attr i (TB1 ()))
+    return $   v  <>  " = ?") (_kvpk m)
+  let whr = T.intercalate " AND " out
+  return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
 
 
