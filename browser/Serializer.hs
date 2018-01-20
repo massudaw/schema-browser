@@ -215,6 +215,9 @@ tableIso :: DecodeTable b => TIso b (TBData Text Showable)
 tableIso  = TIso encodeT decodeT
 
 
+unOnly :: Only a -> a
+unOnly (Only i) = i
+
 only = (unOnly ,Only)
 
 type IsoTable a = SIso (Union (Reference Text)) (TBData Text Showable)  a

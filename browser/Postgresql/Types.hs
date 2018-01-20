@@ -3,7 +3,6 @@ module Postgresql.Types where
 
 import Types
 import Types.Inference
-
 import Data.Monoid
 import Data.Tuple
 import Data.Bits
@@ -27,6 +26,7 @@ import Data.Word
 type PrimType = KType (Prim KPrim (Text,Text))
 
 type PGType = (Text,Text,Maybe Word32)
+
 type PGRecord = (Text,Text)
 
 type PGKey = FKey (KType PGPrim )

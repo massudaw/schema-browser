@@ -202,7 +202,6 @@ instance DecodeTable ClientState where
       , IT "selection" (encFTB $ encodeT <$> sel)]
   decodeT = ClientState <$> ( unOnly . primS "id") <*> (primS  "up_time") <*> (nestS "selection")
 
-unOnly (Only i) = i
 primS s d = att . ix s $ d
 nestS s d = itt . ix s $ d
 

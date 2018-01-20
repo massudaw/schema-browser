@@ -315,11 +315,11 @@ paginate
   -> WherePredicate
   -> IO (Int, [TBData Key Showable])
 paginate inf meta t order off size koldpre wherepred = do
-  let ((que,name),attr) = selectQuery inf meta t koldpre order wherepred
+  let ((que,attr),name) = selectQuery inf meta t koldpre order wherepred
   v <- do
       let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-      print quec
-      uncurry (queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
+      print  =<< formatQuery (conn  inf) quec (fromMaybe [] attr)
+      queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr)
   let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
   print estimateSize
   return (estimateSize, fmap fst v)

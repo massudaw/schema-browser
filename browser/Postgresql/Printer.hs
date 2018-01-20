@@ -236,27 +236,34 @@ selectQuery
   -> Maybe [FTB Showable]
   -> [(Key, Order)]
   -> WherePredicate
-  -> ((Text,NameMap),Maybe [Either (TB Key Showable) (PrimType ,FTB Showable)])
-selectQuery inf m t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue))
+  -> ((Text,Maybe [(PrimType ,FTB Showable)]),NameMap)
+selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
       where
-        withDecl = codegen tableQuery
         tableQuery = do
           tname <- expandBaseTable m t
           tquery <- expandQuery' inf m False t
           rec <- explodeRecord inf m t
-          return $ "SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ
-        (predquery , predvalue ) = case wherepred of
-          WherePredicate wpred -> fst $ evalRWS (printPred inf m t wpred) [Root m] (snd withDecl)
-        pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
-        (orderquery , ordevalue) =
+          order <- orderBy
+          (predquery,predvalue) <- customPredicate
+          (orderquery,ordervalue) <- ordquery
+          let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
+          let orderQ = " ORDER BY " <> T.intercalate "," order
+          return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
+        customPredicate = atTable m $ printPred inf m t wpred
+        orderBy = atTable m $ mapM (\(i,j) -> do
+            l <- lkTB (Attr i (TB1 ()))
+            return $ l <> " " <> showOrder j ) order
+        ordquery =  atTable m $ do
           let
-            unIndex = zip (_kvpk m)
-            oq = (\i ->  pure $ generateComparison (first (justLabel (snd withDecl) m t) <$> (filter ((`elem` (fmap fst i)).fst) order))) . unIndex<$> koldpre
-            koldPk :: Maybe [TB Key Showable]
-            koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
+            preds = zip (_kvpk m) <$> koldpre
+            orderpreds = (\i -> filter ((`elem` (fmap fst i)).fst) order ) <$> preds
+            koldPk :: Maybe [(PrimType,FTB Showable)]
+            koldPk =  fmap (fmap (first keyType )) preds
             pkParam =  koldPk <> (tail .reverse <$> koldPk)
-          in (oq,pkParam)
-        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel (snd withDecl) m t) <$> order)
+          oq <- traverse (traverse (\(i,v) ->  do
+            l <- lkTB (Attr i (TB1 ()))
+            return $ (l,v) ) ) orderpreds
+          return (pure .generateComparison <$> oq,pkParam)
 
 generateComparison ((k,v):[]) = k <>  dir v <> "?"
   where dir Asc = ">"

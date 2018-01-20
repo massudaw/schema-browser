@@ -224,19 +224,6 @@ instance TF.ToField Showable where
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
 
-defaultType t =
-  case _keyFunc t of
-      KOptional : i -> Just (LeftTB1 Nothing)
-      i -> Nothing
-
-
-unIntercalateAtto :: (Show a1,Alternative f )=> [f a1] -> f a -> f [a1]
-unIntercalateAtto l s = go l
-  where
-    go [e] =  fmap pure  e
-    go (e:cs) =  liftA2 (:) e  (s *> go cs)
-    go [] = error  "unIntercalateAtto empty list"
-
 -- parseAttrJSON inf i v | traceShow (i,v) False = undefined
 parseAttrJSON inf (Attr i _ )  v = do
   let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
@@ -362,19 +349,6 @@ parsePrimitiveJSON :: Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB Showa
 parsePrimitiveJSON (AtomicPrim i) v= lift $ forw . TB1 <$> parsePrimJSON i v
     where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
 
-pg_double :: Parser Double
-pg_double
-    =   (string "NaN"       *> pure ( 0 / 0))
-    <|> (string "Infinity"  *> pure ( 1 / 0))
-    <|> (string "-Infinity" *> pure (-1 / 0))
-    <|> double
-
-
-
-unOnly :: Only a -> a
-unOnly (Only i) = i
-
-
 
 instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
   get = ER.Finite <$> Sel.get
@@ -470,7 +444,6 @@ getPosition3d get = do
            else
              return (error $ "BE not implemented " <> show i  )
 
-safeMaybe e f i = maybe (error (e  <> ", input = " <> show i )) id (f i)
 
 instance F.FromField DiffTime where
   fromField  f mdat = case  mdat of
@@ -493,9 +466,6 @@ diffInterval = (do
       diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
 
 
-
-instance F.FromField a => F.FromField (Only a) where
-  fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromShowable k f = case A.parseEither (fmap fst.codegent. parseShowableJSON  parsePrimitiveJSON k) f of
                  Right i -> i
