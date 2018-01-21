@@ -440,9 +440,7 @@ selectAll meta m offset i  j k st = do
       v <- liftIO$ paginate inf meta m k offset j ( join $ fmap unref i) st
       return v
 
-
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )
-
 
 tSize = 400
 

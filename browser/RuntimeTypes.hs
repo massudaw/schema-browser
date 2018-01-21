@@ -163,6 +163,15 @@ type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()])
 
 type TableRep k v  = (KVMetadata k,[SecondaryIndex k v],TableIndex k v)
 
+instance Ord v => Compact (RowPatch k v) where
+  compact i =  concat . L.transpose $ compact .  snd <$> groupSplit2  index id i
+
+instance Address (RowPatch k v) where
+  type Idx (RowPatch k v ) = TBIndex v
+  index (PatchRow (i,_)) =  i
+  index (CreateRow (i,_)) =  i
+  index (DropRow i) =  i
+
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = (Map Key (FTB Showable),TBIdx Key Showable)
   diff (i,j) (k,l)
@@ -229,6 +238,7 @@ applyGiSTChange (m,l) (CreateRow (idx,elp)) =
     el = fmap create elp
     ix = create <$> idx
 
+
 applyTableRep
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
 applyTableRep (m,sidxs,l) (DropRow patom)
@@ -236,7 +246,7 @@ applyTableRep (m,sidxs,l) (DropRow patom)
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$>  patom )  l
-applyTableRep (m,sidxs,l) (PatchRow patom) =  (m,dixs <$> sidxs ,). snd <$>   applyGiSTChange (m,l) (PatchRow patom)
+applyTableRep (m,sidxs,l) (PatchRow patom) =  (m,dixs <$> sidxs ,). snd <$> applyGiSTChange (m,l) (PatchRow patom)
    where
      dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
 applyTableRep (m,sidxs,l) (CreateRow (ix,elp) ) =  Just  (m,didxs <$> sidxs,case G.lookup i l  of
@@ -397,8 +407,6 @@ lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
 putPatch m a= liftIO$ do
-  i <- getCurrentTime
-  -- print ("putPatch",i,length a)
   atomically $ putPatchSTM m a
 
 putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)

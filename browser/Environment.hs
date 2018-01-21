@@ -51,11 +51,11 @@ import GHC.Stack
 
 
 type PluginM ix s m  i a = Parser (Kleisli (RWST s (Index s) ()  m )) (Union ix) i  a
+
 type PluginM' ix s m  i a = Parser (Kleisli (RWST s (Index s) ()  m )) ix i  a
 
 
 newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
-
 
 instance Patch (Atom a) where
   type Index (Atom a) = [Index a]
@@ -172,14 +172,15 @@ arow :: Monad m =>
 arow  m (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Row m tidxi],manyU[Row m tidxo]) (Kleisli (withReaderT id id . op ))
 
 
+
 irow :: (Show k ,Ord k ,Monad m )=>
   (TBIndex Showable ,RowModifier)
        -> PluginM (AttributePath k ())  (Atom (TBData k Showable ))  m  i a
-       -> PluginM (Row RowModifier k )  (TableIndex k Showable )  m i a
-irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = undefined -- P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $ (withReaderT (PatchRow  . (undefined,) . last . compact ) (Atom . action ) . op ))
+       -> PluginM (Row RowModifier k )  (KVMetadata k,TableIndex k Showable )  m i a
+irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $ (withReaderT (PatchRow  . (ix,) . last . compact ) (Atom . action ) . op ))
   where
     action = case s of
-        RowPatch -> justError ("no pk " ++ show ix). G.lookup ix
+        RowPatch -> justError ("no pk " ++ show ix). G.lookup ix . snd
 
 
 -- Table
@@ -189,7 +190,7 @@ itable :: Monad m
        => t
        -> PluginM (Row pk k)  (TableIndex k Showable )  m  i a
        -> PluginM (Module t pk k )  (M.Map t (TableIndex k Showable) )  m i a
-itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Module s tidxi],manyU[Module s tidxo]) (Kleisli (withReaderT (li . (s,)) (justError ("no table "++ show s). M.lookup  s ) . op ))
+itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Module s tidxi],manyU[Module s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no table "++ show s). M.lookup  s ) . op ))
 
 atable ::( Show t ,Monad m)
        => Ord t
@@ -204,7 +205,7 @@ ischema :: (Monad m ,Show s ,Ord s)
        => s
        -> PluginM (Module t pk k)  (M.Map t (TableIndex k Showable ))  m  i a
        -> PluginM (Namespace s t pk k )  (M.Map s (M.Map t (TableIndex k Showable)))  m i a
-ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Namespace s tidxi],manyU[Namespace s tidxo]) (Kleisli (withReaderT (li . (s,)) (justError ("no schema" ++ show s). M.lookup  s ) . op ))
+ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Namespace s tidxi],manyU[Namespace s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no schema" ++ show s). M.lookup  s ) . op ))
 
 aschema :: (Monad m ,Ord s)
        => s
@@ -218,25 +219,27 @@ iuniverse   :: (Monad m ,Show u ,Ord u)
        => u
        -> PluginM (Namespace s t pk  k)  (M.Map s (M.Map t (TableIndex k Showable )))  m  i a
        -> PluginM (Universe u s t pk  k )  (M.Map u (M.Map s (M.Map t (TableIndex k Showable)))) m i a
-iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [Universe s tidxi],manyU [Universe s tidxo]) (Kleisli (withReaderT (li . (s,)) (justError ("no database " ++ show s). M.lookup  s ) . op ))
+iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [Universe s tidxi],manyU [Universe s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no database " ++ show s). M.lookup  s ) . op ))
 
 translate  r
    = case staticP r  of
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowDrop _ )]))]))],_) -> let
           lift j i = do
              inf <- ask
-             ((Just . TableModification Nothing undefined (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             now <- liftIO getCurrentTime
+             ((Just . TableModification Nothing now (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
         in ((i,m),[DropRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowCreate _ )]))]))],_) -> let
            lift j i = do
              inf <- ask
-             ((Just . TableModification Nothing undefined (snd $username inf)(lookTable inf m ). CreateRow . (undefined,). F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             now <- liftIO getCurrentTime
+             ((Just . TableModification Nothing now (snd $username inf)(lookTable inf m ). createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
         in((i,m),[CreateRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch _ )]))]))],_)  -> let
            lift j i p = do
              inf <- ask
-             ((\a-> Just . TableModification Nothing undefined (snd $username inf) (lookTable inf m ). PatchRow . (undefined,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             now <- liftIO getCurrentTime
+             ((\a-> Just . TableModification Nothing now (snd $username inf) (lookTable inf m ). PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
         in((i,m),[UpdateRule (lift (runEnv r))])
 
 
-li i = [i]

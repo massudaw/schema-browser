@@ -1103,7 +1103,6 @@ readTable inf r  t  re = do
   return (m,v)
 
 
-
 fromTable origin whr = do
   inf <- ask
   (_,(_,amap )) <- selectFromTable origin Nothing Nothing [] whr

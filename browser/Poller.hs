@@ -48,7 +48,7 @@ plugs schm authmap db plugs = do
       let
         regplugs = catMaybes $ findplug <$> plugs
         findplug :: PrePlugins -> Maybe Plugins
-        findplug p = (,p). round . unTB1 . flip index "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
+        findplug p = (,p). round . unTB1 . flip index1 "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
           where
             pred :: TBPredicate Key Showable
             pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
@@ -60,12 +60,12 @@ plugs schm authmap db plugs = do
 
 
 
-index tb item = snd $ justError ("no item" <> show (item,tb)) $ indexTable [keyRef item] (tableNonRef' tb)
+index1 tb item = snd $ justError ("no item" <> show (item,tb)) $ indexTable [keyRef item] (tableNonRef' tb)
 index2 tb item = justError ("no item" <> show (item,tb)) $ indexFieldRec item tb
 
 checkTime curr = do
     let
-      IntervalTB1 time_inter = index curr "time"
+      IntervalTB1 time_inter = index1 curr "time"
       TB1 (STime (STimestamp startLocal)) = justError "cant be null start"$ unFinite $ lowerBound time_inter
       TB1 (STime (STimestamp endLocal)) = justError "cant be null end" $unFinite $ upperBound time_inter
       start = startLocal
@@ -81,10 +81,10 @@ poller schmRef authmap db plugs is_test = do
   let
     project tb =  (schema,intervalms,p,pid)
       where
-        TB1 (SNumeric schema )= index tb "schema"
-        TB1 (SNumeric intervalms) = index tb "poll_period_ms"
+        TB1 (SNumeric schema )= index1 tb "schema"
+        TB1 (SNumeric intervalms) = index1 tb "poll_period_ms"
         TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested [keyRef "plugin"] (Many [One $ keyRef "name"]))
-        pid = index tb "plugin"
+        pid = index1 tb "plugin"
     enabled = G.toList polling
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
