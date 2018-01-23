@@ -91,13 +91,13 @@ getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
 getUnique ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ v
 
 getIndex :: Ord k => KVMetadata k -> TBData k a -> TBIndex  a
-getIndex m v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .  getPKL m $ v
+getIndex m  = getUnique (_kvpk m)
 
-getBounds :: (Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Maybe [Interval (FTB a)]
-getBounds m [] = Nothing
-getBounds m ls = Just $ zipWith  (\i j -> (ER.Finite i,True) `interval` (ER.Finite j,False)) l u
-  where Idex l = getIndex m (head ls)
-        Idex u = getIndex m (last ls)
+getBounds :: (Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
+getBounds m [] = (ER.NegInf,False) `interval` (ER.PosInf,False)
+getBounds m ls = (ER.Finite i,True) `interval` (ER.Finite j,False)
+  where i = getIndex m (head ls)
+        j = getIndex m (last ls)
 
 notOptionalM :: TBIndex  a -> Maybe (TBIndex a)
 notOptionalM (Idex m) = fmap Idex   . join . fmap nonEmpty . traverse unSOptional'  $ m
@@ -112,14 +112,18 @@ tbpredM m = notOptionalM . getIndex m
 tbpred :: (Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
 tbpred m = notOptional . getIndex m
 
-instance (Show a,Affine a) => Affine (ER.Extended a ) where
+instance Affine a => Affine [a] where
+  type Tangent [a] = [Tangent  a]
+  subtraction = zipWith subtraction
+
+instance Affine a => Affine (ER.Extended a ) where
   type Tangent (ER.Extended a) = ER.Extended (Tangent  a)
   subtraction (ER.Finite i) (ER.Finite j) = ER.Finite $ subtraction i j
-  subtraction (ER.NegInf ) i = ER.NegInf
-  subtraction (ER.PosInf ) i = ER.PosInf
-  subtraction i  (ER.PosInf ) = ER.NegInf
-  subtraction i  (ER.NegInf) = ER.PosInf
-  subtraction i j = errorWithStackTrace (show (i,j))
+  subtraction ER.NegInf  i = ER.NegInf
+  subtraction ER.PosInf  i = ER.PosInf
+  subtraction i  ER.PosInf  = ER.NegInf
+  subtraction i  ER.NegInf = ER.PosInf
+  subtraction i j = errorWithStackTrace "could not match"
 
 notNeg (DSPosition l)
   | otherwise = DSPosition l
@@ -180,9 +184,11 @@ class Positive f where
   notneg :: f -> f
 
 
-instance Affine String where
-  type Tangent String = [Int]
-  subtraction i j = diffStr i j
+newtype DiffString  = DiffString String
+
+instance Affine DiffString where
+  type Tangent DiffString = [Int]
+  subtraction (DiffString i) (DiffString j) = diffStr i j
     where
       diffStr :: String -> String -> [Int]
       diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
@@ -233,8 +239,8 @@ splitPred a e = errorWithStackTrace (show (a,e))
 
 instance Affine Position where
   type Tangent Position = DiffPosition
-  subtraction ((Position (x,y,z)) ) ((Position (a,b,c))) = DiffPosition3D (a-x,b-y,c-z)
-  subtraction ((Position2D (x,y)) ) ((Position2D (a,b))) = DiffPosition2D (a-x,b-y)
+  subtraction (Position (x,y,z)) (Position (a,b,c)) = DiffPosition3D (a-x,b-y,c-z)
+  subtraction (Position2D (x,y)) (Position2D (a,b)) = DiffPosition2D (a-x,b-y)
 
 instance Affine Int where
   type Tangent Int = Int
@@ -247,7 +253,7 @@ instance Affine Showable where
     where
       diffS :: Showable -> Showable -> DiffShowable
       diffS (SNumeric t) (SNumeric o) = DSInt $ subtraction o t
-      diffS (SText t) (SText o) = DSText $ subtraction (T.unpack o) (T.unpack t)
+      diffS (SText t) (SText o) = DSText $ subtraction (DiffString $ T.unpack o) (DiffString $T.unpack t)
       diffS (SDouble t) (SDouble o) = DSDouble $ o -t
       diffS (STime (STimestamp i )) (STime (STimestamp j)) = DSDiffTime (diffUTCTime j i)
       diffS (STime (SDate i )) (STime (SDate j)) = DSDays (diffDays j i)
@@ -260,29 +266,31 @@ instance Positive DiffShowable where
   notneg = notNeg
 
 transEither
-  :: (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> Bool)
+  :: (Show b,Affine b,ConstantGen (FTB b) , Positive (Tangent b),Semigroup (Tangent b), Range b,Ord (Tangent b) ,Ord b) => (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> Bool)
   -> Either (Node (TBIndex b)) (TBIndex b)
   -> Either (Node (TBIndex b)) (TBIndex b)
   -> Bool
 transEither f  i j  =
     case (i,j) of
         (Right (Idex i) ,Right (Idex j)) -> co (Right <$> i) (Right <$> j)
-        (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> co (Left <$> i) (Left <$> j)
-        (Right (Idex i) ,Left (TBIndexNode j)) -> co  (Right <$> i) (Left<$> j)
-        (Left (TBIndexNode i) ,Right (Idex j)) -> co (Left <$> i) (Right <$> j)
+        (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> not $ Interval.null $ i `Interval.intersection` j
+        (Right i@(Idex _ ) ,Left (TBIndexNode j)) ->not $ Interval.null $ unTBIndexNode (bound i) `Interval.intersection` j
+        (Left (TBIndexNode i) ,Right j@(Idex _)) -> not $ Interval.null $ unTBIndexNode (bound j) `Interval.intersection` i
     where co i j =  F.foldl' (&&) True (zipWith f i j)
 {-# INLINE transEither #-}
 
 
-instance Predicates (FTB v) => Predicates (TBIndex v ) where
-  type (Penalty (TBIndex v)) = [Penalty (FTB v)]
+instance (Show v,Affine v ,Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord v, Ord (Tangent v),Predicates (FTB v)) => Predicates (TBIndex v ) where
+  type (Penalty (TBIndex v)) = ER.Extended [Tangent v]
   type Query (TBIndex v) = (TBPredicate Int v)
-  data Node (TBIndex v) = TBIndexNode [Node (FTB v)] deriving (Eq,Ord,Show)
+  data Node (TBIndex v) = TBIndexNode {unTBIndexNode :: (Interval [v]) } deriving (Eq,Ord,Show)
   consistent = transEither consistent
   {-# INLINE consistent #-}
 
   -- This limit to 100 the number of index fields to avoid infinite lists
-  origin = TBIndexNode (replicate 100 G.origin)
+  origin = TBIndexNode Interval.empty
+  bound (Idex i) =  TBIndexNode  $ (fromJust . unFin . fst . lowerBound' <$> v ) `cinterval` (fromJust .unFin . fst .upperBound' <$> v)
+    where v = fmap unTB1 . pureR <$> i
   match (WherePredicate a)  (Right (Idex v)) = go a
     where
       -- Index the field and if not found return true to row filtering pass
@@ -294,19 +302,20 @@ instance Predicates (FTB v) => Predicates (TBIndex v ) where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      go (PrimColl (IProd _ i,op)) = maybe True (match op . node )  (v `atMay` i)
+      go (PrimColl (IProd _ i,op)) = maybe True (match op . node . FTBNode ) $ traverse (`atMay` i) v
       node :: Node (FTB v) -> Either (Node (FTB v )) (FTB v)
       node i = Left i
 
 
-  bound (Idex i) =  TBIndexNode $ bound <$> i
-  merge (TBIndexNode i) (TBIndexNode j) = TBIndexNode $ zipWith merge i j
-  penalty (TBIndexNode i ) (TBIndexNode j) = zipWith penalty i j
+  -- bound (Idex i) =  TBIndexNode $ (i,True) `Interval.interval` (i,True)
+  merge (TBIndexNode i) (TBIndexNode j) = TBIndexNode $ Interval.hull i j
+  penalty (TBIndexNode i ) (TBIndexNode j) = (fmap (fmap notneg) $ subtraction (fst (lowerBound' j  )) (fst $ lowerBound' i))
+    <> (fmap (fmap notneg) $ subtraction (fst $ upperBound' i  ) (fst $ upperBound' j))
   {-# INLINE penalty #-}
 
 projIdex (Idex v) = F.toList v
 
-instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
+instance Predicates (TBIndex  a )  => Monoid (G.GiST (TBIndex  a)  b) where
   mempty = G.empty
   mappend i j
     | G.size i < G.size j = ins  j (getEntries i )
@@ -317,7 +326,7 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
 
 
 indexParam :: (Int,Int)
-indexParam = (10,20)
+indexParam = (4,8)
 
 -- Attr List Predicate
 
@@ -332,7 +341,7 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-type ShowableConstr  a = (Fractional a ,Range a,ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
+type ShowableConstr  a = (Fractional a ,Range a,ConstantGen (FTB a),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
 
 
 data PathIndex  a b

@@ -15,7 +15,6 @@ module SchemaQuery
   ,lookAttr'
   ,lookAttrs'
   ,refTables
-  ,applyBackend
   ,tellPatches
   ,selectFromA
   ,selectFrom
@@ -50,6 +49,7 @@ module SchemaQuery
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
 import RuntimeTypes
+import Control.Exception (throw)
 import Data.Unique
 import Data.Semigroup(Semigroup)
 import Control.Arrow (first)
@@ -148,24 +148,6 @@ createUn un   =  G.fromList  transPred  .  filter (isJust . join . fmap (Tra.tra
   where transPred  i =  justError ("empty"  ++ show (un,i)) . G.notOptionalM . G.getUnique un . tableNonRef' $ i
 
 
-applyBackend table (CreateRow (ix,t)) =
-  insertFrom  (tableMeta table) t
-applyBackend table (DropRow t) =
-  deleteFrom  (tableMeta table) t
-applyBackend table (PatchRow p@(pk@(G.Idex pki),i)) = do
-   inf <- ask
-   let
-       m = tableMeta table
-   ref <- lift $ prerefTable inf table
-   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (fmap keyFastUnique table ) ref
-   let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
-   old <- maybe (do
-     (_,(i,o)) <- selectFrom' table Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
-     return $ justError "head7" $ safeHead $ G.toList o
-        ) return oldm
-   if isJust (diff old  (apply old i))
-     then updateFrom m old   pk i
-     else return Nothing
 
 selectFromA t a b c d = do
   inf <- ask
@@ -180,22 +162,46 @@ selectFrom t a b c d = do
 
 updateFrom  m a  pk b = do
   inf <- ask
-  (editEd $ schemaOps inf)m  a pk b
+  let
+      kv = apply a b
+      overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
+      overloadedRules = (rules $ schemaOps inf)
+      isCreate (UpdateRule _ ) = True
+      isCreate _ = False
+  case L.find isCreate  =<< overloaded of
+    Just (UpdateRule i) ->  i a b
+    Nothing -> (editEd $ schemaOps inf)m  a pk b
+
 patchFrom  m pk a   = do
   inf <- ask
   (patchEd $ schemaOps inf)  m pk a
+
 insertFrom  m a   = do
   inf <- ask
-  (insertEd $ schemaOps inf)  m a
+  let overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
+      overloadedRules = (rules $ schemaOps inf)
+      isCreate (CreateRule _ ) = True
+      isCreate _ = False
+  case L.find isCreate  =<< overloaded of
+    Just (CreateRule l) -> l a
+    Nothing -> (insertEd $ schemaOps inf)  m a
+
 getFrom   a   b = do
   inf <- ask
   (getEd $ schemaOps inf)  a b
+
 deleteFrom  m a   = do
   inf <- ask
-  a <- (deleteEd $ schemaOps inf) m a
-  tell (maybeToList a)
-  return a
-
+  let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
+      overloadedRules = (rules $ schemaOps inf)
+      isRule (DropRule _ ) = True
+      isRule _ = False
+      idx = (G.getIndex m a)
+  log <- case L.find isRule =<< overloaded of
+    Just (DropRule i) ->  i a
+    Nothing -> (deleteEd $ schemaOps inf) m a
+  tell (maybeToList log)
+  return log
 
 mergeDBRef  (j,i) (m,l) = (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )
 
@@ -349,7 +355,8 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
       return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
 -}
   -- Primitive Tables
-tableLoader table  page size presort fixed =
+tableLoader table  page size presort fixed = do
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     pageTable (\table page size presort fixed predtop  -> do
         inf <- ask
         let
@@ -438,6 +445,7 @@ childrenRefsUnique  inf table (m,sidxs,base) (FKJoinTable rel j ,evs)  =  concat
 
 
 pageTable method table page size presort fixed = do
+    liftIO $ print ("PageTable ",page,size)
     inf <- ask
     let mvar = mvarMap inf
         tableU = fmap keyFastUnique table
@@ -452,6 +460,7 @@ pageTable method table page size presort fixed = do
     let pageidx =  (fromMaybe 0 page +1) * pagesize
         hasIndex = M.lookup fixedU fixedmap
         (sq ,_)= justError "no index" hasIndex
+    liftIO $ print ("index Size",pagesize,page,size,pageidx,hasIndex)
     res <- if (isNothing (join $ fmap (M.lookup pageidx . snd) hasIndex)) || sq < pageidx -- Ignora quando página já esta carregando
          then do
            (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
@@ -459,7 +468,6 @@ pageTable method table page size presort fixed = do
            let
                  freso =  ffixed (sidx,reso)
                  predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
-                 (sq ,_)= justError "no index" hasIndex
            (nidx,ndata) <-  if
                     ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
                     && pageidx  > G.size freso ) -- O carregado é menor que a página
@@ -471,9 +479,9 @@ pageTable method table page size presort fixed = do
                    let
                        res = fmap (mapKey' keyFastUnique ) resK
                        token =  nextToken
-                       index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token $ mp)
+                       index = (estLength page pagesize (s + G.size freso) , (M.insert pageidx ) token $ mp)
                    liftIO$ do
-                     putIdx (idxChan dbvar ) (fixedU ,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
+                     putIdx (idxChan dbvar ) (fixedU ,estLength page pagesize s, pageidx ,  token)
                      putPatch (patchVar dbvar) (F.toList $ createRow' (tableMeta table)  <$> filter (\i -> isNothing $ G.lookup (G.getIndex (tableMeta table) i) reso  )   resK)
                    return (index,res <> G.toList freso)
                  else do
@@ -699,7 +707,8 @@ fullInsert' k1  v1 = do
         i@(Just (TableModification _ _ _ _ tb))  <- insertFrom k1 ret
         tell (maybeToList i)
         return $ createRow tb) (\e -> do
-          liftIO$ putStrLn $ "failed insertion: "  ++ (show e)
+          liftIO $ throw e
+          liftIO$ putStrLn $ "failed insertion: "  ++ (show (e :: SomeException))
           -- let pred = WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk k1) pki))
           -- G.Idex pki = G.getIndex k1 ret
           -- (_,(_,l)) <- tableLoader  tb Nothing Nothing []  pred
@@ -719,8 +728,8 @@ noInsert' k1 v1   = do
    KV <$>  Tra.traverse (tbInsertEdit k1)  (proj v1)
 
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
-transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
-  (md,_,mods)  <- runRWST log inf M.empty
+transactionLog inf log =  do
+  (md,_,mods)  <- withDynamic ((transactionEd $ schemaOps inf) inf ) $ runRWST log inf M.empty
   let aggr = foldr (\(TableModification id ts u  t f) m -> M.insertWith mappend t [TableModification id ts u t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
     ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
@@ -744,14 +753,14 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
 
 withDynamic :: (forall b . IO b -> IO b) -> Dynamic a -> Dynamic a
 withDynamic  f i =  do
-  (v,e) <- liftIO $ f (runDynamic i)
+  (v,e) <- liftIO . f $ (runDynamic i) `catch` (\e -> print (e :: SomeException) >> throw e )
   mapM registerDynamic e
   return v
 
 
 transaction :: InformationSchema -> TransactionM a -> Dynamic a
-transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
-  (md,_,mods)  <- runRWST log inf M.empty
+transaction inf log = do
+  (md,_,mods)  <- withDynamic ((transactionEd $ schemaOps inf) inf ) $  runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id _ _ t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
@@ -779,10 +788,10 @@ fullDiffEdit :: KVMetadata Key ->TBData Key Showable -> TBData Key Showable -> T
 fullDiffEdit =  fullDiffEditInsert
 
 fullDiffInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
-fullDiffInsert k2 v2 = do
+fullDiffInsert k1 v1 = do
    inf <- ask
-   edn <-  KV <$>  Tra.traverse (tbInsertEdit k2) (unKV v2)
-   mod <- insertFrom k2 edn
+   ret <-  KV <$>  Tra.traverse (tbInsertEdit k1) (unKV v1)
+   mod <- insertFrom k1 ret
    tell (maybeToList mod)
    return mod
 
@@ -795,7 +804,7 @@ tbDiffEditInsert k1 i j
 
 
 tbEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
--- tbEdit i j | traceShow (i,j) False = undefined
+tbEdit i j k | traceShow ("tbedit",i,j,k) False = undefined
 tbEdit m (Fun a1 _ a2) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
 tbEdit m (Attr a1 a2) (Attr k1 k2)= return $ (Attr k1 k2)
 tbEdit m (IT a1 a2) (IT k2 t2) = do
@@ -804,14 +813,14 @@ tbEdit m (IT a1 a2) (IT k2 t2) = do
   IT k2 <$> noInsert (tableMeta $ lookSTable inf r) t2
 
 tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
-  -- | traceShow (apk /= pk, (isNothing (unSOptional' a2) && isJust (unSOptional' t2) ),g,f) False = undefined
   | (apk /= pk ) || (isNothing (unSOptional' a2) && isJust (unSOptional' t2) ) =  tbInsertEdit m f
   | otherwise  = go rel2 a2 t2
   where go rel2 a2 t2 = case (a2,t2) of
           (TB1 o@ol,TB1 t@l) -> do
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
+                 ptable = lookTable inf $ _kvname m
+                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
              local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o) <$> fullDiffEdit m2 o t)
           (LeftTB1  i ,LeftTB1 j) ->
             maybe (return f ) (fmap attrOptional) $ liftA2 (go (Le.over relOri unKOptional <$> rel2)) i j
@@ -821,21 +830,20 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
 
 
 tbInsertEdit :: KVMetadata Key -> Column Key Showable -> TransactionM (Column Key Showable)
--- tbInsertEdit m i | traceShow ("insertedit",i) False = undefined
+tbInsertEdit m i | traceShow ("insertedit",i) False = undefined
 tbInsertEdit m (Attr k1 k2) = return $ (Attr k1 k2)
 tbInsertEdit m (Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit m (IT k2 t2) = do
   inf <- ask
   let RecordPrim r = _keyAtom $ keyType k2
-  IT k2 <$> noInsert m t2
+  IT k2 <$> noInsert (tableMeta $ lookSTable inf r)  t2
 tbInsertEdit m f@(FKT pk rel2 t2) = go rel2 t2
   where go rel t2 = case t2 of
           t@(TB1 l) -> do
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
                  ptable = lookTable inf $ _kvname m
-                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf ptable rel2
-             liftIO $ print (keyType . _relOrigin <$> rel)
+                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
              local (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) kvlist  $  backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  m2 t)
           LeftTB1 i ->
             maybe (return f ) (fmap attrOptional . go (Le.over relOri unKOptional <$> rel) ) i

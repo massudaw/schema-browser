@@ -20,7 +20,6 @@ module Query
   ,isTableRec'
   ,isKDelayed
   ,isKOptional
-  ,lookGist
   ,checkGist
   ,backFKRef
   ,backFKRefType
@@ -446,7 +445,6 @@ joinRel2 tb ref table
             tbel = G.lookup idx table
 
 
-lookGist un pk  = G.search (tbpred un pk)
 checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
 
 tbpredM un  = G.notOptionalM . G.getUnique un

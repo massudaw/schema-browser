@@ -125,7 +125,8 @@ data PathFTB a
 instance Patch b => Patch (Maybe b) where
   type Index (Maybe b) = Editor (Index b)
   diff i = Just . editor i
-  createIfChange  (Diff i ) =  Just $ createIfChange i
+  createIfChange (Diff i ) =  Just $ createIfChange i
+  createIfChange Delete = Nothing
   patch i = maybe Delete (Diff . patch) i
   applyIfChange i = Just . recoverEditChange i
 
@@ -156,6 +157,7 @@ instance (NFData k ,NFData a )=> NFData (RowPatch k a)
 instance (Binary k ,Binary a) => Binary (RowPatch k a)
 
 type TBIdx k a = [PathAttr k a]
+
 patchEditor i
   | L.length i == 0 = Keep
   | L.length i == 1 = maybe Keep Diff $ safeHead i
@@ -552,10 +554,12 @@ diffFTB p d (ArrayTB1 i) (ArrayTB1 j) =
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
   | otherwise =  patchSet $  catMaybes   [match True (lowerBound' i ) (lowerBound' j) ,match False (upperBound' i ) (upperBound' j) ]
-    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else Just $ patchFTB p <$> (fst $ j))  Just $ diffExtended (fst $  i) (fst $  j) )
-          diffExtended (Finite i ) (Finite j) = fmap Finite $ diffFTB p d i j
-          diffExtended _ (Finite i) = Just $ Finite $ patchFTB p  i
-          diffExtended _   i = Nothing
+    where match f = diffExtended
+            where
+              diffExtended (Finite i ,bi) (Finite j,bj) = fmap (PInter f . (,bj) . Finite) $ diffFTB p d i j
+              diffExtended _ (Finite i,bi) = Just $ PInter f  (Finite $ patchFTB p  i,bi)
+              diffExtended _   (PosInf,bi) = if not f then Just (PInter f (PosInf,bi)) else Nothing
+              diffExtended _   (NegInf,bi) = if f then Just (PInter f (NegInf,bi)) else Nothing
 
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace ("diffError" <> show (i,j))

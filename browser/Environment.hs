@@ -227,19 +227,19 @@ translate  r
           lift j i = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((Just . TableModification Nothing now (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             ((Just . TableModification Nothing now (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
         in ((i,m),[DropRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowCreate _ )]))]))],_) -> let
            lift j i = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((Just . TableModification Nothing now (snd $username inf)(lookTable inf m ). createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             ((Just . TableModification Nothing now (snd $username inf)(lookTable inf m ). createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
         in((i,m),[CreateRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch _ )]))]))],_)  -> let
            lift j i p = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((\a-> Just . TableModification Nothing now (snd $username inf) (lookTable inf m ). PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) Control.Applicative.<$> j (Atom $ mapKey' keyValue i)
+             ((\a-> Just . TableModification Nothing now (snd $username inf) (lookTable inf m ). PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
         in((i,m),[UpdateRule (lift (runEnv r))])
 
 

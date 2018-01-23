@@ -56,11 +56,7 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 
-instance UI.ToJS (G.Node (TBIndex Showable)) where
-  render  = render . A.toJSON
 
-instance A.ToJSON (G.Node (TBIndex Showable)) where
-  toJSON (G.TBIndexNode i) = A.toJSON i
 
 instance A.ToJSON (Interval Showable) where
   toJSON i = A.toJSON [G.unFin $ fst $ lowerBound' i , G.unFin $ fst $ upperBound' i]

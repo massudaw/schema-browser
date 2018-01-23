@@ -63,10 +63,10 @@ filterFun  = M.filter (\ v-> not $ isFun v )
   where isFun (Fun _ _ _ ) = True
         isFun i = False
 
-overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
-overloaedSchema = M.intersectionWith mappend (M.fromList [(("metadata","catalog_schema"),[UpdateRule alterSchema ])]) (M.fromList (translate <$> [dropSchema,createSchema]))
-overloaedTables =  M.fromListWith (++) $ translate <$> [createTableCatalog, dropTableCatalog]
-overloaedColumns = M.fromListWith (++)  ( translate <$> [createColumnCatalog,dropColumnCatalog])
+overloadedRules = overloadedSchema <> overloadedTables <> overloadedColumns
+overloadedSchema = M.intersectionWith mappend (M.fromList [(("metadata","catalog_schema"),[UpdateRule alterSchema ])]) (M.fromList (translate <$> [dropSchema,createSchema]))
+overloadedTables =  M.fromListWith (++) (translate <$> [createTableCatalog, dropTableCatalog])
+overloadedColumns = M.fromListWith (++) (translate <$> [createColumnCatalog,dropColumnCatalog])
 
 schema_name  s
   = iforeign [(Rel s Equals "name")] (ivalue $ ifield "name" (ivalue (readV ())))
@@ -90,8 +90,14 @@ createColumnCatalog  =
           (sty,ty) <-  iinline "col_type"  . iftb PIdOpt .ivalue $ column_type -< ()
           act (\(s,t,c,sty,ty) -> do
             inf <- lift ask
-            liftIO  (execute (rootconn inf) "ALTER TABLE ?.? ADD COLUMN ? ?.? "(DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty ))
+            let sqr = "ALTER TABLE ?.? ADD COLUMN ? ?.? "
+                args = (DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty )
+            executeLogged (rootconn inf)  sqr args
             return ()) -< (s,t,c,sty,ty)
+
+executeLogged conn sqr args = liftIO $ do
+  print  =<< formatQuery conn sqr args
+  execute conn sqr args
 
 dropColumnCatalog  = do
   aschema "metadata" $
@@ -106,7 +112,7 @@ dropColumnCatalog  = do
               (ivalue (ifield "table_name" (ivalue (readV ())))) -< ()
           act (\(t,s,c) -> do
             inf <- lift ask
-            liftIO$ execute (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
+            executeLogged (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
           returnA -< ()
 
 
@@ -335,12 +341,7 @@ paginate inf meta t order off size koldpre wherepred = do
 insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 insertMod m j  = do
   inf <- ask
-  let overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
-      isCreate (CreateRule _ ) = True
-      isCreate _ = False
-  case L.find isCreate  =<< overloaded of
-    Just (CreateRule l) -> l j
-    Nothing ->liftIO $ do
+  liftIO $ do
       let
         table = lookTable inf (_kvname m)
         ini = defaultTable inf table j ++  patch j
@@ -349,34 +350,23 @@ insertMod m j  = do
       return $ TableModification Nothing l (snd $ username inf) table . createRow' m <$> either (error . unlines ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
 
 
-deleteMod :: KVMetadata Key -> TBIndex Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 deleteMod m t = do
   inf <- ask
-  let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
-      isRule (DropRule _ ) = True
-      isRule _ = False
-  log <- case L.find isRule =<< overloaded of
-    -- Just (DropRule i) ->  i t
-    Nothing ->  liftIO $  do
+  liftIO $  do
       let table = lookTable inf (_kvname m)
-      deletePatch (conn inf) (recoverFields inf <$> m)  t table
+          idx = G.getIndex m t
+      deletePatch (conn inf) (recoverFields inf <$> m) idx  table
       l <- liftIO getCurrentTime
-      return $ Just $ (TableModification Nothing l (snd $ username inf)table  $ DropRow t)
-  return $ log
+      return $ Just $ (TableModification Nothing l (snd $ username inf)table  $ DropRow idx)
 
 updateMod :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 updateMod m old pk p = do
   inf <- ask
-  let
-      kv = apply  old p
-      overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
-      isCreate (UpdateRule _ ) = True
-      isCreate _ = False
-  case L.find isCreate  =<< overloaded of
-    Just (UpdateRule i) ->  i old p
-    Nothing -> liftIO$ do
+  liftIO$ do
       let table = lookTable inf (_kvname m)
           ini = either (error . unlines ) id (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) $ create $ defaultTable inf table kv ++  patch kv)
+          kv = apply old  p
       updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) ini )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
       let mod =  TableModification Nothing l (snd $ username inf) table (PatchRow (pk  ,p))
@@ -435,8 +425,8 @@ selectAll
 selectAll meta m offset i  j k st = do
       inf <- ask
       let
-          unref (TableRef i) = allMaybes $ unFin . upperBound <$>  i
-          unref (HeadToken ) = Nothing
+          unIndex (Idex i) = i
+          unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
       v <- liftIO$ paginate inf meta m k offset j ( join $ fmap unref i) st
       return v
 
@@ -444,6 +434,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 tSize = 400
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ m j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds m i) ,l)) <$> selectAll  m j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ m j off p g s o-> (\(l,i) -> (i,(TableRef $ G.getBounds m i) ,l)) <$> selectAll  m j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (tableMeta table) (allRec' (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing

@@ -33,6 +33,7 @@ import System.INotify
 -- Dynamic Compilation
 import GHC
 import GHC.Stack
+import qualified Data.Interval as I
 import GhcMonad (liftIO)
 import Packages
 import GHC.Paths (libdir)
@@ -42,7 +43,7 @@ import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
 
-codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\_ i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
+codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\_ i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList

@@ -209,6 +209,24 @@ time = TB1  . STime . STimestamp
 
 inter i j  = IntervalTB1 $ Interval.interval (i,True) (j,True)
 
+data AuthCookies
+  = AuthCookies
+  { client :: Text
+  , cookie :: Int
+  , creation_date :: UTCTime
+  } deriving(Eq,Show)
+
+
+instance DecodeTable AuthCookies where
+  encodeT (AuthCookies cli cookie date) =
+    tblist
+      [ Attr "username" (TB1 (SText cli))
+      , Attr "cookie" (TB1  (SNumeric cookie))
+      , Attr "creation_date" (TB1  (STime (STimestamp date)))
+      ]
+  decodeT = AuthCookies <$>  (unOnly . primS  "username") <*> (unOnly .primS "cookie")<*> (unOnly .primS "creation_date")
+
+
 data ClientState
   = ClientState
     { client_id ::  Int
@@ -250,9 +268,7 @@ addSchema idClient now inf tix
 
 removeSchema :: Int -> UTCTime -> InformationSchema -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 removeSchema idClient now inf tix
-  =atClient idClient  [PInline "selection" (POpt $ Just $ PIdx tix (
-      (Just $ PAtom
-                        ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))))]
+  =atClient idClient  [PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))]
 
 
 num = TB1 . SNumeric
@@ -354,6 +370,8 @@ chooserTable six inf bset cliTid cli = do
               # set UI.id_ (T.unpack $ rawName t)
               # set UI.class_ "tab-pane"
           return (h,c)) (rawUnion table)
+        element (fst $ head els) # set UI.class_ "active"
+        element (snd $ head els) # set UI.class_ "tab-pane active"
         h <- UI.div # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
         runFunctionDelayed h $ ffi  "$(%1).find('li').click(function (e) { $('.active').removeClass('active');})" h
         b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"

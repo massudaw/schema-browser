@@ -192,8 +192,7 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 
 
 selectListUI
-  ::
-     InformationSchema
+  :: InformationSchema
      -> TableK CoreKey
      -> Element
      -> Tidings (Maybe WherePredicate)
@@ -229,11 +228,14 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
         return (offset, res3)
 
       -- Load offseted items
-      ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts predicate<@> rumors (triding offset)) $ (\(o,i) ->  do
-        traverse (transactionNoLog inf . selectFrom' table (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  []) o )
+      let
+        loadPage (pred,i) = do
+          let page = i `div` (opsPageSize (schemaOps inf) `div` pageSize)
+          transactionNoLog inf $ selectFrom' table (Just page ) Nothing  [] (fromMaybe mempty pred)
+      ui $ onEventDyn ((,) <$> facts predicate<@> rumors (triding offset)) loadPage
 
       -- Select page
-      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
+      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> res3)
       lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) ((\i -> maybe id (i$) )<$> showFK inf (tableMeta table))
       fInp <-  UI.div # set children [filterInp,getElement offset]  # set UI.class_ "row"
       return ( triding lbox ,[fInp,itemListEl])

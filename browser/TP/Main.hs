@@ -11,6 +11,7 @@ import qualified Data.Interval as I
 import Plugins.Schema (codeOps)
 import Control.Exception
 import qualified Data.Binary as B
+import System.Random
 import Postgresql.Backend (connRoot, postgresOps)
 import System.Process
 import Serializer
@@ -60,7 +61,7 @@ import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as S
-import Snap.Core (rqURI)
+import Snap.Core (cookieName,cookieValue,rqURI,rqCookies)
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
@@ -84,9 +85,7 @@ setup smvar args plugList w = void $ do
       iniTable = safeHead (tail url)
   return w # set title (host bstate <> " - " <>  dbn bstate)
   cliTid <- ui $ lookClient (fromIntegral $ wId w) metainf
-  (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList (pure (fmap T.pack $ maybeToList iniSchema))
-
-  cliId <- UI.span # set UI.text (show $ wId w)
+  (evDB,chooserItens) <- databaseChooser  (rqCookies $request w) smvar metainf bstate plugList (pure (fmap T.pack $ maybeToList iniSchema))
   cliZone <- jsTimeZone
   selschemas <- ui $ accumDiffCounter (\six -> runUI w . (\inf -> do
     menu <- checkedWidget (pure True)
@@ -195,7 +194,7 @@ setup smvar args plugList w = void $ do
            )  (triding nav)
       return tfilter
     return container ))   (S.fromList <$> evDB)
-  header <- UI.div # set UI.class_ "row" # set  children (cliId : chooserItens)
+  header <- UI.div # set UI.class_ "row" # set  children (chooserItens)
   top <- layoutSel onShiftAlt  (F.toList <$> selschemas )# set UI.class_ "row"
   addBody [header,top]
 
@@ -243,40 +242,65 @@ authMap smvar sargs (user,pass) schemaN =
 loadSchema smvar schemaN user authMap  plugList =
     keyTables smvar (schemaN,T.pack user) authMap plugList
 
-databaseChooser smvar metainf sargs plugList init = do
+databaseChooser cookies smvar metainf sargs plugList init = do
+  let rCookie = fmap (T.pack . BS.unpack . cookieValue) $ L.find ((=="auth_cookie"). cookieName ) cookies
+  (cookiesMap,_) <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
+  let loginCookie =  (\m -> maybe Nothing (\ck -> G.lookup (G.Idex [TB1 $ SText ck]) m) rCookie )  <$> collectionTid cookiesMap
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
   loadE <- UI.click load
   login <- UI.div # set children widE # set UI.class_ "row"
-  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2"
+  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2" # sink UI.style (noneShow . isJust <$> facts loginCookie)
   let
       formLogin = form widT loadE
   let db = T.pack $ dbn sargs
+      buttonString k = do
+          b <- UI.input # set UI.type_ "checkbox"
+          chkE <- UI.checkedChange b
+          return (k,(b,chkE))
+
   dbs <- ui $ listDBS  metainf  db
+  dbsInit <- currentValue (M.keys <$> facts dbs)
+  dbsWPre <- checkDivSetTGen
+              dbsInit
+              (S.fromList <$> init )
+              buttonString
+
+              (pure (\i o -> do
+                l <- UI.span # set text (T.unpack  i)
+                UI.label  # set children [l,o] # set UI.style [("padding","2px")]  ))
+{-
   dbsWPre <- multiListBox
       (M.keys <$> dbs)
       init
       (pure (line . T.unpack))
-  let dbsW = TrivialWidget ((\i j ->  (\k -> justError (" no schema" <> show (k,j)) $ (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
+-}
+  let dbsW = TrivialWidget ((\i j ->  (\k -> justError (" no schema" <> show (k,j)) $ (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> (S.toList <$> triding dbsWPre) <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
   dbsWB <-  ui $stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
   (schemaE,schemaH) <- ui newEvent
+  w <- askWindow
   metainf <- liftIO $ metaInf smvar
   let
     genSchema e@(db,(schemaN,ty)) (user,pass) = case ty of
         "sql" -> do
             let auth = authMap smvar sargs (user,pass)
-            loadSchema smvar schemaN  user auth plugList
+            gen <- liftIO randomIO
+            now <- liftIO getCurrentTime
+            let cli = AuthCookies (T.pack user) gen now
+            inf <- loadSchema smvar schemaN  user auth plugList
+            runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" gen
+            transaction metainf $ insertFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
+            return inf
 
         "code" -> do
             let auth = authMap smvar sargs (user,pass)
             loadSchema smvar schemaN  user auth plugList
 
-  element dbsW # set UI.style [("width","140px")]
-  chooserT <- traverseUI ui $ (\l i-> mapM (flip genSchema (justError "no pass" i)) l ) <$> dbsWT <*> formLogin
-  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [getElement dbsW]
+  chooserT <- traverseUI ui $ (\i -> mapM (flip genSchema (justError "no pass" i))  ) <$>  formLogin <*>dbsWT
+  schemaSel <- UI.div  # set children [getElement dbsW]
   return (chooserT,[schemaSel ,authBox] )
 
 createVar :: IO (TVar DatabaseSchema)

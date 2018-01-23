@@ -258,8 +258,8 @@ applyTableRep (m,sidxs,l) (CreateRow (ix,elp) ) =  Just  (m,didxs <$> sidxs,case
      i =  create <$> ix
 
 typecheck f a = case f a of
-              Pure i -> Right a
-              Other (Constant l) ->  Left l
+          Pure i -> Right a
+          Other (Constant l) ->  Left l
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k]) -> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (m,s,g) = t1
@@ -272,7 +272,6 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (m,s,g) = t1
 
 searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
 searchPK (WherePredicate b) (pk, g)= (\p -> G.queryL (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
-
 
 
 type DBVar = DBVar2 Showable
@@ -341,11 +340,8 @@ type PageToken = PageTokenF Showable
 deriving instance (Binary v) => Binary (PageTokenF  v)
 deriving instance (NFData v) => NFData (PageTokenF  v)
 
-data PageTokenF v
-  = PageIndex Int
-  | NextToken Text
-  | TableRef [Interval (FTB v)]
-  | HeadToken
+newtype PageTokenF v
+  = TableRef (Interval (TBIndex v))
   deriving(Eq,Ord,Show,Generic)
 
 
@@ -359,8 +355,8 @@ data SchemaEditor
   { editEd  :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , patchEd :: KVMetadata Key ->TBIndex Showable ->TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: KVMetadata Key ->TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , deleteEd :: KVMetadata Key -> TBIndex Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , listEd :: KVMetadata Key ->TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , deleteEd :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , listEd :: KVMetadata Key ->TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
@@ -444,11 +440,10 @@ typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) 
 typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
 typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> mapError (fmap ((show (keyType ._relOrigin <$> rel2)) ++)) (typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i)
-  where -- FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) path
-        -- path = L.find (\(Path i _ )-> i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
-        ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
-        ktype :: KType (Prim KPrim (Text,Text))
-        ktype = const (RecordPrim  ("","")) <$> ktypeRel
+  where
+    ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
+    ktype :: KType (Prim KPrim (Text,Text))
+    ktype = const (RecordPrim  ("","")) <$> ktypeRel
 
 
 mapError :: (a -> a) -> Errors a b -> Errors a b
@@ -485,8 +480,10 @@ liftKeys
      -> FTB1 Key a
 liftKeys inf tname = fmap (liftTable' inf tname)
 
-findRefTableKey inf ta rel =  tname2
-  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList$ rawFKS  ta)
+findRefTableKey
+  :: (Show t, Ord t) => TableK t -> [Rel t] -> (T.Text, T.Text)
+findRefTableKey ta rel =  tname2
+  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList $ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2

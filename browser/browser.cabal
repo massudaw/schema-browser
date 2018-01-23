@@ -64,6 +64,7 @@ library
    , hinotify
    , deepseq
    , ordered
+   , random
    , hashable
    , exceptions
    -- Postgresql Backend
