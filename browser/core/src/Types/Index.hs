@@ -86,6 +86,8 @@ instance (NFData a)  => NFData (TBIndex a)
 cinterval ::Ord a=> a -> a -> Interval a
 cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 
+uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
+uinterval i j = i Interval.<=..<= j
 
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
 getUnique ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ v
@@ -265,31 +267,25 @@ instance Affine Showable where
 instance Positive DiffShowable where
   notneg = notNeg
 
-transEither
-  :: (Show b,Affine b,ConstantGen (FTB b) , Positive (Tangent b),Semigroup (Tangent b), Range b,Ord (Tangent b) ,Ord b) => (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> Bool)
-  -> Either (Node (TBIndex b)) (TBIndex b)
-  -> Either (Node (TBIndex b)) (TBIndex b)
-  -> Bool
-transEither f  i j  =
-    case (i,j) of
-        (Right (Idex i) ,Right (Idex j)) -> co (Right <$> i) (Right <$> j)
-        (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> not $ Interval.null $ i `Interval.intersection` j
-        (Right i@(Idex _ ) ,Left (TBIndexNode j)) ->not $ Interval.null $ unTBIndexNode (bound i) `Interval.intersection` j
-        (Left (TBIndexNode i) ,Right j@(Idex _)) -> not $ Interval.null $ unTBIndexNode (bound j) `Interval.intersection` i
-    where co i j =  F.foldl' (&&) True (zipWith f i j)
-{-# INLINE transEither #-}
-
 
 instance (Show v,Affine v ,Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord v, Ord (Tangent v),Predicates (FTB v)) => Predicates (TBIndex v ) where
   type (Penalty (TBIndex v)) = ER.Extended [Tangent v]
   type Query (TBIndex v) = (TBPredicate Int v)
   data Node (TBIndex v) = TBIndexNode {unTBIndexNode :: (Interval [v]) } deriving (Eq,Ord,Show)
-  consistent = transEither consistent
+  consistent = transEither
+    where
+      transEither i j  =
+        case (i,j) of
+          (Right (Idex i) ,Right (Idex j)) -> F.foldl' (&&) True (zipWith consistent  (Right <$> i) (Right <$> j))
+          (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> not $ Interval.null $ i `Interval.intersection` j
+          (Right i@(Idex _ ) ,Left (TBIndexNode j)) ->not $ Interval.null $ unTBIndexNode (bound i) `Interval.intersection` j
+          (Left (TBIndexNode i) ,Right j@(Idex _)) -> not $ Interval.null $ unTBIndexNode (bound j) `Interval.intersection` i
+      {-# INLINE transEither #-}
   {-# INLINE consistent #-}
 
   -- This limit to 100 the number of index fields to avoid infinite lists
   origin = TBIndexNode Interval.empty
-  bound (Idex i) =  TBIndexNode  $ (fromJust . unFin . fst . lowerBound' <$> v ) `cinterval` (fromJust .unFin . fst .upperBound' <$> v)
+  bound (Idex i) =  TBIndexNode  $ (maybe ER.NegInf ER.Finite $ traverse ( unFin . fst . lowerBound') v ) `uinterval` (maybe ER.PosInf ER.Finite $ traverse (unFin . fst .upperBound') v)
     where v = fmap unTB1 . pureR <$> i
   match (WherePredicate a)  (Right (Idex v)) = go a
     where
@@ -470,9 +466,9 @@ instance (Ord v ,Range v) => Range (FTB v ) where
 instance Range Showable where
   pureR  i = i `cinterval` i
   {-# INLINE pureR #-}
-  appendR !(SGeo (SPosition i)) !(SGeo (SPosition j)) =  fmap (SGeo . SPosition )  $ mergeP i j
+  appendR (SGeo (SPosition i)) (SGeo (SPosition j)) =  fmap (SGeo . SPosition )  $ mergeP i j
     where
-      mergeP !(Position2D (i,j)) !(Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
+      mergeP (Position2D (i,j)) (Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
       mergeP (Position(i,j,k)) (Position (l,m,n))=  Position (min i l , min j m,min k n) `cinterval` Position (max i l , max j m,max k n)
       {-# INLINE mergeP #-}
   appendR i j = min i j  `cinterval` max i j
@@ -480,8 +476,9 @@ instance Range Showable where
 
 
 appendRI :: (Ord v ,Range v) => Interval v -> Interval v -> Interval v
-appendRI ! i  ! j  = maybe (min (lowerBound' j) (lowerBound' i )) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval`  (maybe (max (upperBound' i) (upperBound' j))upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j)) )
+appendRI  i   j  = maybe (min (lowerBound' j) (lowerBound' i )) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval`  (maybe (max (upperBound' i) (upperBound' j))upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j)) )
 {-# INLINE appendRI #-}
+
 
 instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
   data Node (FTB v) = FTBNode (Interval.Interval v) deriving (Eq,Ord,Show)

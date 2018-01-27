@@ -64,7 +64,7 @@ filterFun  = M.filter (\ v-> not $ isFun v )
         isFun i = False
 
 overloadedRules = overloadedSchema <> overloadedTables <> overloadedColumns
-overloadedSchema = M.intersectionWith mappend (M.fromList [(("metadata","catalog_schema"),[UpdateRule alterSchema ])]) (M.fromList (translate <$> [dropSchema,createSchema]))
+overloadedSchema = M.fromList (translate <$> [dropSchema,createSchema,alterSchema])
 overloadedTables =  M.fromListWith (++) (translate <$> [createTableCatalog, dropTableCatalog])
 overloadedColumns = M.fromListWith (++) (translate <$> [createColumnCatalog,dropColumnCatalog])
 
@@ -170,22 +170,21 @@ createSchema  = do
           ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
           returnA -< ()
 
-alterSchema v p= do
-      inf <- ask
-      let new = apply  v p
-          n = fromJust $ indexFieldRec (keyRef name) v
-          nnewm = indexFieldRec (keyRef name) new
-          o = fromJust $ indexFieldRec (Nested [keyRef owner] (pure $ keyRef user_name)) v
-          onewm = indexFieldRec (Nested [keyRef owner] (pure $ keyRef user_name)) new
-          name = lookKey inf "catalog_schema" "name"
-          owner= lookKey inf "catalog_schema" "owner"
-          user_name = lookKey inf "user" "usename"
-          tb = lookTable inf "catalog_schema"
-
-      traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
-      traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
-      l <- liftIO getCurrentTime
-      return $ TableModification Nothing l (snd $ username inf)  tb . PatchRow   . (G.getIndex (tableMeta tb) new,) <$> diff v new
+alterSchema = do
+  aschema "metadata" $
+    atable "catalog_schema" $
+      arow RowPatch $
+        proc _ -> do
+          (n,nnewm) <- ifield "name"
+              (ivalue (changeV ()))-< ()
+          Just (o,onewm) <- iforeign [(Rel "owner" Equals "oid")]
+              (iopt $ ivalue (ifield "usename" ((ivalue (changeV ()))) )) -< ()
+          act (\(n,o,onewm,nnewm) -> do
+            inf <- lift ask
+            (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted n, DoubleQuoted new)) onewm
+            (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
+              ) -< (n,o,onewm,nnewm)
+          returnA -< ()
 
 dropSchema = do
   aschema "metadata" $

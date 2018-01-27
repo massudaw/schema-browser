@@ -28,40 +28,49 @@ import Debug.Trace
 
 import System.Process(callCommand)
 
-siapi3Page protocolo ano cgc_cpf nota =
+siapi3Page ano cgc_cpf nota =
   withOpenSSL $
   Sess.withSessionWith (opensslManagerSettings context) $
     \session -> do
       Sess.get session prefeituraLoginCookie
-      pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
+      pr <- Sess.post session prefeituraLoginFormUrl0 (prefeituraForm ano cgc_cpf)
+      print (pr ^. responseBody)
+      r <- Sess.get session "https://www10.goiania.go.gov.br/SicaePortal/HomePage.aspx"
       r <- Sess.get session (BSC.unpack $ prefeituraConsutalNota nota)
       let html =  replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString) . BSL.toStrict  <$> (r ^? responseBody)
-      file <- traverse (htmlToPdf (nota <> protocolo)) html
-      return $ SBinary  <$> file
+      file <- traverse (htmlToPdf (nota )) html
+      return $ SBinary <$> file
 
-notaXML protocolo ano cgc_cpf nota =
+notaXML ano cgc_cpf nota =
   withOpenSSL $
   Sess.withSessionWith (opensslManagerSettings context) $
     \session -> do
       Sess.get session prefeituraLoginCookie
-      pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
+      pr <- Sess.post session prefeituraLoginFormUrl0 (prefeituraForm ano cgc_cpf)
       r <- Sess.get session (BSC.unpack $ prefeituraConsultaXML nota)
       return . join $ (\i -> if BSC.isPrefixOf "<GerarNfseResposta" i then Just i else Nothing). BSL.toStrict <$> ( r  ^? responseBody)
 
-prefeituraNotaXML i j k l= fmap SBinary <$>  notaXML i j k l
+prefeituraNotaXML  j k l= fmap SBinary <$>  notaXML  j k l
 
-prefeituraNota protocolo ano cgc_cpf nota =
-    siapi3Page protocolo ano cgc_cpf nota
+test =do
+  let unSBinary (SBinary i) = i
+  out <- prefeituraNota "23531045172" "denise17" "245"
+  traverse (BS.writeFile "test.pdf" . unSBinary) out
 
-prefeituraForm :: BS.ByteString -> BS.ByteString -> BS.ByteString -> [FormParam]
-prefeituraForm inscricao user pass =
-    [ "txt_nr_inscricao" := inscricao
-    , "txt_nr_usuario" := user
-    , "txt_info_senha" := pass
+prefeituraNota ano cgc_cpf nota =
+    siapi3Page ano cgc_cpf nota
+
+prefeituraForm ::  BS.ByteString -> BS.ByteString -> [FormParam]
+prefeituraForm user pass = [
+  "SEDETECGOTheme_wt38$block$wtLoginContent$wtUserNameInput":=user,
+  "SEDETECGOTheme_wt38$block$wtLoginContent$wtPasswordInput":=pass,
+  "SEDETECGOTheme_wt38$block$wtLoginContent$wt8":=("ENTRAR" :: String) ,
+  "SEDETECGOTheme_wt38$block$WebPatterns_wt1$block$wt4$wt43$wtCheckbox$wt36":=("on" :: String)
     ]
 
 prefeituraConsultaXML nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w2.asp?nota=" <> nota
-prefeituraLoginCookie = "http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00000f5.asp?sigla=snfse"
-prefeituraLoginFormUrl = "http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
+prefeituraLoginCookie = "http://www10.goiania.go.gov.br/Internet/"
+prefeituraLoginFormUrl0 = "http://www10.goiania.go.gov.br/Internet/Login.aspx"
+prefeituraLoginFormUrl1 = "http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
 prefeituraConsutalNota nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
 

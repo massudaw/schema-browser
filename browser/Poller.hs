@@ -41,6 +41,7 @@ import qualified Data.HashMap.Strict as HM
 
 
 
+plugs :: TVar DatabaseSchema -> t1 -> t -> [PrePlugins] -> IO [Plugins]
 plugs schm authmap db plugs = do
   inf <- metaInf schm
   regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
@@ -61,6 +62,7 @@ plugs schm authmap db plugs = do
 
 
 index1 tb item = snd $ justError ("no item" <> show (item,tb)) $ indexTable [keyRef item] (tableNonRef' tb)
+
 index2 tb item = justError ("no item" <> show (item,tb)) $ indexFieldRec item tb
 
 checkTime curr = do

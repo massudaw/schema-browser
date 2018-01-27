@@ -50,9 +50,8 @@ import GHC.Stack
 
 
 
-type PluginM ix s m  i a = Parser (Kleisli (RWST s (Index s) ()  m )) (Union ix) i  a
 
-type PluginM' ix s m  i a = Parser (Kleisli (RWST s (Index s) ()  m )) ix i  a
+type PluginM ix s m  i a = Parser (Kleisli (RWST (s,Index s) (Index s) ()  m )) (Union ix) i  a
 
 
 newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
@@ -98,11 +97,24 @@ indexTIDM PIdOpt  (LeftTB1 l) = l
 liftTID (PIdIdx ix) l = PIdx ix (Just l)
 liftTID PIdOpt  l = POpt $ Just l
 
+unliftTID (PIdIdx ix)  (PIdx ix1 l)
+  | ix == ix1 = l
+  | otherwise = Nothing
+unliftTID PIdOpt  (POpt l) = l
 
 readM  v =  P ( Many [One v],Many[]) (Kleisli (const get ))
-readV v = P ( Many [One v],Many[]) (Kleisli (\_ -> unAtom' <$> ask ))
+readV v = P ( Many [One v],Many[]) (Kleisli (\_ ->  (\(Atom i,j) -> foldl apply i j )  <$> ask ))
+deltaV  v = P ( Many [One v],Many[]) (Kleisli (\_ ->  (\(Atom i,j) -> j )  <$> ask ))
+oldV  v = P ( Many [One v],Many[]) (Kleisli (\_ ->  (\(Atom i,j) -> i)  <$> ask ))
+changeV  v = P ( Many [One v],Many[]) (Kleisli (\_ ->  (\(Atom i,j) -> (i,foldl apply i j))  <$> ask ))
 writeV v = P ( Many[],Many [One v]) (Kleisli (\i ->   tell  [i] ))
 
+withReaderT4
+  :: Functor n =>
+     (t2 -> t3)
+     -> (t3 -> t2)
+     -> (t1 -> t) -> RWST (t, t2) t2 s n b -> RWST (t1, t3) t3 s n b
+withReaderT4 g h f = mapRWST (fmap (\(r,s,w) -> (r,s,g w ))) . withRWST  (\(i,p) j -> ((f i,h p) ,j))
 
 withReaderT g f = mapRWST (fmap (\(r,s,w) -> (r,s,g w ))) . withRWST  (\i j -> (f i ,j))
 
@@ -110,29 +122,31 @@ withReaderT2 g f a = do
   env <- ask
   mapRWST (fmap (\(r,s,w) -> (r, s,g env w ))) . withRWST  (\i j -> (f i ,j)) $ a
 
-withReaderT3 f g  a= do
-  env <- ask
-  maybe (return Nothing) (\_ -> withRWST  (\i j -> (justError "no opt" $ g  i ,j)) .  mapRWST (fmap (\(r,s,w) -> (Just r,s, f w )))  $ a)  (g env)
+withReaderT3 f h g  a= do
+  (env ,_)<- ask
+  maybe (return Nothing) (\_ -> withRWST (\(i,p) j -> ((justError "no opt" $ g  i,h p) ,j)) .  mapRWST (fmap (\(r,s,w) -> (Just r,s, f w )))  $ a)  (g env)
 
 -- Primitive Value
+
 ivalue :: (Monad m ,Show s) =>
   PluginM v  (Atom s) m i a
   -> PluginM (PathIndex PathTID v)  (Atom (FTB s) ) m i a
-ivalue (P (tidxi ,tidxo) (Kleisli op) )  = P (TipPath <$> tidxi,TipPath  <$> tidxo) (Kleisli (withReaderT (fmap  PAtom) (fmap unTB1) . op ))
+ivalue (P (tidxi ,tidxo) (Kleisli op) )  = P (TipPath <$> tidxi,TipPath  <$> tidxo) (Kleisli (withReaderT4 (fmap  PAtom)  (fmap unPAtom) (fmap unTB1) . op ))
+
+unPAtom (PAtom i) = i
 
 
-
--- DataStructure (Array,Maybe,Interval)
 iftb :: Monad m =>
        PathTID
        -> PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i a
        -> PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i a
-iftb s   (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath s <$> tidxi,NestedPath s <$> tidxo) (Kleisli (withReaderT (fmap (liftTID s)) (fmap (indexTID s) ) . op  ))
+iftb s   (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath s <$> tidxi,NestedPath s <$> tidxo) (Kleisli (withReaderT4 (fmap (liftTID s)) (catMaybes . fmap (unliftTID s)) (fmap (indexTID s) ) . op  ))
+
 
 iopt :: Monad m =>
        PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i a
        -> PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i (Maybe a)
-iopt (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath PIdOpt <$> tidxi, NestedPath PIdOpt <$> tidxo) (Kleisli (withReaderT3 (fmap (liftTID PIdOpt)) (traverse (indexTIDM PIdOpt) ) . op  ))
+iopt (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath PIdOpt <$> tidxi, NestedPath PIdOpt <$> tidxo) (Kleisli (withReaderT3 (fmap (liftTID PIdOpt))  (catMaybes . fmap (unliftTID PIdOpt)) (traverse (indexTIDM PIdOpt) ) . op  ))
 
 
 -- Attribute indexing
@@ -140,20 +154,24 @@ ifield ::
        (Monad m ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID () )  (Atom (FTB Showable )) m i a
        -> PluginM (AttributePath k () )  (Atom (TBData k Showable ))  m i a
-ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT2 (\(Atom l@_) v -> [PAttr s <$> v]) (fmap (_tbattr .justError ("no field " ++ show s ). indexField (IProd Nothing s)   )) . op ))
+ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT4 (\ v -> [PAttr s <$> v]) (concat . fmap (fmap pvalue) ) (fmap (_tbattr .justError ("no field " ++ show s ). indexField (IProd Nothing s)   )) . op ))
+  where pvalue (PAttr _ v) = v
+
 
 iinline ::
        (Monad m ,Patch s ,Show s ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID (AttributePath k ()))  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k () )  (Atom (TBData k s))  m i a
-iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) (Kleisli (withReaderT2 (\(Atom l@_) v -> [PInline s   <$> v]) (fmap (_fkttable .justError ( "no inline " ++ show s). indexField (IProd Nothing s)   )) . op ))
+iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) (Kleisli (withReaderT4 (\v -> [PInline s   <$> v]) (concat . fmap (fmap pvalue )) (fmap (_fkttable .justError ( "no inline " ++ show s). indexField (IProd Nothing s)   )) . op ))
+  where pvalue (PInline _ v) = v
 
 
 iforeign ::
        (Monad m ,Patch s ,Show s ,Show k ,Ord k) => [Rel k]
        -> PluginM (PathIndex PathTID (AttributePath k ())  )  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k () )  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathForeign s <$> tidxo) (Kleisli (withReaderT2 (\(Atom l@_ )v -> [PFK s [] <$> v] ) (fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(IProd Nothing ._relOrigin <$> s) (Many []))   ) ). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathForeign s <$> tidxo) (Kleisli (withReaderT4 (\v -> [PFK s [] <$> v] ) (concat . fmap (fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(IProd Nothing ._relOrigin <$> s) (Many []))   ) ). op ))
+  where pvalue (PInline _ v) = v
 
 
 -- Row
@@ -169,7 +187,7 @@ arow :: Monad m =>
   RowModifier
   -> PluginM (AttributePath k ()) o m i a
   -> PluginM (Row RowModifier k ) o m i a
-arow  m (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Row m tidxi],manyU[Row m tidxo]) (Kleisli (withReaderT id id . op ))
+arow  m (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Row m tidxi],manyU[Row m tidxo]) (Kleisli op )
 
 
 
@@ -177,8 +195,9 @@ irow :: (Show k ,Ord k ,Monad m )=>
   (TBIndex Showable ,RowModifier)
        -> PluginM (AttributePath k ())  (Atom (TBData k Showable ))  m  i a
        -> PluginM (Row RowModifier k )  (KVMetadata k,TableIndex k Showable )  m i a
-irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $ (withReaderT (PatchRow  . (ix,) . last . compact ) (Atom . action ) . op ))
+irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $withReaderT4 (PatchRow  . (ix,) . concat . compact) (pure .unPatch) (Atom . action ) . op )
   where
+    unPatch (PatchRow (ix,l)) = l
     action = case s of
         RowPatch -> justError ("no pk " ++ show ix). G.lookup ix . snd
 
@@ -190,7 +209,7 @@ itable :: Monad m
        => t
        -> PluginM (Row pk k)  (TableIndex k Showable )  m  i a
        -> PluginM (Module t pk k )  (M.Map t (TableIndex k Showable) )  m i a
-itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Module s tidxi],manyU[Module s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no table "++ show s). M.lookup  s ) . op ))
+itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Module s tidxi],manyU[Module s tidxo]) (Kleisli (withReaderT4 (pure . (s,)) (last . fmap snd) (justError ("no table "++ show s). M.lookup  s ) . op ))
 
 atable ::( Show t ,Monad m)
        => Ord t
@@ -205,7 +224,7 @@ ischema :: (Monad m ,Show s ,Ord s)
        => s
        -> PluginM (Module t pk k)  (M.Map t (TableIndex k Showable ))  m  i a
        -> PluginM (Namespace s t pk k )  (M.Map s (M.Map t (TableIndex k Showable)))  m i a
-ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Namespace s tidxi],manyU[Namespace s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no schema" ++ show s). M.lookup  s ) . op ))
+ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU[Namespace s tidxi],manyU[Namespace s tidxo]) (Kleisli (withReaderT4 (pure . (s,)) (last .  fmap snd) (justError ("no schema" ++ show s). M.lookup  s ) . op ))
 
 aschema :: (Monad m ,Ord s)
        => s
@@ -219,7 +238,7 @@ iuniverse   :: (Monad m ,Show u ,Ord u)
        => u
        -> PluginM (Namespace s t pk  k)  (M.Map s (M.Map t (TableIndex k Showable )))  m  i a
        -> PluginM (Universe u s t pk  k )  (M.Map u (M.Map s (M.Map t (TableIndex k Showable)))) m i a
-iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [Universe s tidxi],manyU [Universe s tidxo]) (Kleisli (withReaderT (pure . (s,)) (justError ("no database " ++ show s). M.lookup  s ) . op ))
+iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [Universe s tidxi],manyU [Universe s tidxo]) (Kleisli (withReaderT4 (pure . (s,)) (last . fmap snd) (justError ("no database " ++ show s). M.lookup  s ) . op ))
 
 translate  r
    = case staticP r  of
@@ -227,19 +246,19 @@ translate  r
           lift j i = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((Just . TableModification Nothing now (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
+             ((Just . TableModification Nothing now (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
         in ((i,m),[DropRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowCreate _ )]))]))],_) -> let
            lift j i = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((Just . TableModification Nothing now (snd $username inf)(lookTable inf m ). createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
+             ((Just . TableModification Nothing now (snd $username inf)(lookTable inf m ). createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
         in((i,m),[CreateRule (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch _ )]))]))],_)  -> let
            lift j i p = do
              inf <- ask
              now <- liftIO getCurrentTime
-             ((\a-> Just . TableModification Nothing now (snd $username inf) (lookTable inf m ). PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i)
+             ((\a-> Just . TableModification Nothing now (snd $username inf) (lookTable inf m ). PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i, [firstPatch keyValue p])
         in((i,m),[UpdateRule (lift (runEnv r))])
 
 

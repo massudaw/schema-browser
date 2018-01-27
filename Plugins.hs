@@ -652,11 +652,10 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ DiffIOPlugin url
       i <- varTB "id_nota" -< t
       odxR "nota_xml" -<  t
       r <- atR "inscricao" (proc t -> do
-                               n <- varTB "inscricao_municipal" -< t
-                               u <- varTB "goiania_user"-< t
+                               n <- atR "user" (atR "ir_reg" (varTB "cpf_number")) -< t
                                p <- varTB "goiania_password"-< t
-                               returnA -< (, , ) n u p  ) -< t
-      b <- act (\(i, (j, k,a)) -> liftIO$ prefeituraNotaXML j k a i ) -< (,) i r
+                               returnA -< (, ) n  p  ) -< t
+      b <- act (\(i, (j, a)) -> liftIO$ prefeituraNotaXML j a i ) -< (,) i r
       let ao =  Just [PAttr "nota_xml" (POpt $ fmap (POpt . Just .PAtom)  b)]
       returnA -< ao
 
@@ -689,12 +688,11 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ IOPlugin url
     url = proc t -> do
       i <- varTB "id_nota" -< t
       odxR "nota" -<  t
-      r <- atR "inscricao" (proc t -> do
-                               n <- varTB "inscricao_municipal" -< t
-                               u <- varTB "goiania_user"-< t
+      r <- atR "inscricao" ( proc t -> do
+                               n <- atR "user" (atR "ir_reg" (varTB "cpf_number")) -< t
                                p <- varTB "goiania_password"-< t
-                               returnA -< (, , ) n u p  ) -< t
-      b <- act (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) -< (,) i r
+                               returnA -< (, ) n  p  ) -< t
+      b <- act (\(i, (j,a)) -> liftIO$ prefeituraNota j  a i ) -< (,) i r
       let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  (LeftTB1 . Just . TB1)  b)]
       returnA -< ao
 

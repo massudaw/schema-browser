@@ -107,7 +107,7 @@ instance Applicative PathFTB where
   i <*> PatchSet j = PatchSet $ fmap (i <*>  ) j
 
 data Editor  a
-  = Diff ! a
+  = Diff a
   | Delete
   | Keep
   deriving(Eq,Ord,Functor,Show)
@@ -211,7 +211,6 @@ unSOptionalP i = Just i
 unLeftItensP  :: (Show k , Show a) => PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k)) a )
 unLeftItensP = unLeftTB
   where
-
     unLeftTB (PAttr k (PatchSet l)) = PAttr (unKOptional k) . PatchSet  <$> Non.nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
     unLeftTB (PAttr k v)
       = PAttr (unKOptional k) <$> unSOptionalP v
@@ -237,7 +236,6 @@ recoverEditChange  Nothing Delete = Nothing
 recoverEditChange  _ _ = errorWithStackTrace "no edit"
 
 
-
 -- editor  i j | traceShow (i,j) False = undefined
 editor (Just i) Nothing = Delete
 editor (Just i) (Just j) = maybe Keep Diff df
@@ -247,7 +245,6 @@ editor Nothing Nothing = Keep
 
 upperPatch = PInter False
 lowerPatch = PInter True
-
 
 class Address f where
   type Idx f

@@ -1,7 +1,7 @@
 {-# LANGUAGE
     OverloadedStrings
    ,FlexibleContexts
-  ,GADTs
+   ,GADTs
    ,RecursiveDo
  #-}
 
