@@ -55,34 +55,47 @@ deftable inf table =
     nonFKAttrs :: [Key]
     nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
 
-  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks'
+  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList $ nonFKAttrs) (defaultFKS inf) fks'
 
+foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[]) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel))fks)
 
-defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStatic k))
+filterDuplicated  fun (i,l)  j = (i <> S.map _relOrigin (pathRelRel j) ,fun i j : l)
+
+evaluateKeyStatic (ConstantExpr i) = Just i
+evaluateKeyStatic (Function _ _ ) = Nothing -- evaluateKeyStatic
+
+defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateKeyStatic  =<< (keyStatic k)))
   where
     go ty  =
       case  ty of
         KOptional :i -> Just (POpt (go i))
+        KSerial :i -> Just (POpt (go i))
         i -> Nothing
 
-defaultFKS inf (FKJoinTable i j )
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  nonEmpty (catMaybes ((defaultAttrs .  _relOrigin ) <$> i))
+defaultFKS inf prev (FKJoinTable i j )
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = flip (PFK i) (POpt Nothing) <$>  nonEmpty (catMaybes ((defaultAttrs .  _relOrigin ) <$> filter (not. (`S.member` prev) ._relOrigin) i))
   | otherwise  = Nothing
   where isRel Rel{} = True
         isRel _ = False
-defaultFKS inf (FKInlineTable k i) =
+defaultFKS inf prev (FKInlineTable k i) =
   case _keyFunc $ keyType k of
     KOptional :_ -> Just (PInline k (POpt Nothing))
-    [] -> PInline k . PAtom  <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
+    KSerial :_ -> Just (PInline k (POpt Nothing))
+    [] -> PInline k . PAtom  <$> nonEmpty (deftable rinf (lookTable rinf (snd i)))
     _ ->  Nothing
   where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
-defaultFKS _ (FunctionField  k _ _ ) = defaultAttrs k
-defaultFKS inf (RecJoin     _ i ) =  defaultFKS inf i
+defaultFKS _ prev (FunctionField  k _ _ ) = defaultAttrs k
+defaultFKS inf prev (RecJoin     _ i ) =  defaultFKS inf prev i
 
-defaultTB inf (RecJoin     _ i ) _ =  defaultFKS inf i
-defaultTB _ (FunctionField  k _ _ ) _ = defaultAttrs k
-defaultTB inf (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyType k) l
+defaultTB inf prev (RecJoin     _ i ) v =  defaultTB inf prev i v
+defaultTB _ _ (FunctionField  k _ _ ) _ = defaultAttrs k
+defaultTB inf prev (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyType k) l
   where
+    go  (KSerial :xs) (LeftTB1 i) =
+        case i of
+          Just i -> POpt . Just <$> go xs i
+          Nothing -> Just (POpt Nothing)
+
     go  (KOptional :xs) (LeftTB1 i) =
         case i of
           Just i -> POpt . Just <$> go xs i
@@ -90,9 +103,9 @@ defaultTB inf (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyTy
     go  [] (TB1  _) = PAtom  <$> nonEmpty (deftable rinf (lookTable rinf (snd i)))
     go  _  _ = Nothing
     rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
-defaultTB inf j i | traceShow (i,j,defaultFKS inf j) False = undefined
+-- defaultTB inf j i | traceShow (i,j,defaultFKS inf j) False = undefined
 
-defaultTB inf j@FKJoinTable {} _ = defaultFKS inf j
+defaultTB inf prev j@FKJoinTable {} _ = defaultFKS inf prev j
 
 defaultTable
   :: InformationSchemaKV Key Showable
@@ -109,6 +122,6 @@ defaultTable inf table v =
     nonFKAttrs :: [Key]
     nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
 
-  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (\ix -> maybe (defaultFKS inf ix) (defaultTB inf ix) (M.lookup (traceShowId $ pathRelRel ix) (unKV v))) fks'
+  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (M.lookup (pathRelRel ix) (unKV v))) fks'
 
 

@@ -14,13 +14,6 @@ category:            Database
 build-type:          Simple
 
 cabal-version:       >=1.10
-flag rebug
-  description: The library uses some techniques that are highly
-                 non-deterministic, for example garbage collection
-                 and concurrency.
-                 Bugs in these subsystems are harder to find.
-                 Activating this flag will expose more of them.
-  default:     False
 
 
 -- extra-source-files:  
@@ -31,10 +24,7 @@ executable threepenny-layer
   ld-options:  -fuse-ld=gold
   main-is:             Main.hs
 
-  if flag(rebug)
-   ghc-options:         -O0 -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic -optl-fuse-ld=gold
-  else
-   ghc-options:           -threaded -rtsopts
+  ghc-options:      -O2   -threaded -rtsopts
 
   OTHER-MODules:
     CnpjReceita
@@ -57,7 +47,6 @@ executable threepenny-layer
    , core
    , exceptions
    , ordered
-   , ekg
    , blaze-builder
    , zlib
    , base == 4.9.*
@@ -95,7 +84,8 @@ executable threepenny-layer
    ,hmatrix-gsl
    ,base64-bytestring
    ,semigroupoids
-   , arrows
+   , arrows ==0.4.4.2
+   , Stream ==0.4.7.2
    -- Google Auth
    , http-conduit, directory ,process,xml
    ,unordered-containers

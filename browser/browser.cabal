@@ -16,8 +16,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library 
-  ghc-options: -optl-fuse-ld=gold 
-  ld-options:  -fuse-ld=gold
+  ghc-options: -O2
   exposed-modules:
 
     Postgresql.Backend
@@ -28,10 +27,9 @@ library
     Postgresql.Sql.Parser
     Postgresql.Sql.Printer
     Postgresql.Sql.Types
-
     Plugins.Schema
-
     Poller
+    PStream
     Default
     Serializer
     Expression
@@ -39,6 +37,7 @@ library
     Environment
     Schema
     SchemaQuery
+    ClientAccess
     TP.Main
     TP.Browser
     TP.Selector
@@ -47,10 +46,12 @@ library
     TP.Agenda
     TP.AgendaSelector
     TP.Chart
+    TP.Task
     TP.Map
     TP.MapSelector
     TP.Account
     TP.View
+    TP.Extensions
     Text
   default-extensions: TupleSections,OverloadedStrings
   build-depends:
@@ -70,6 +71,7 @@ library
    -- Postgresql Backend
    , blaze-builder
    , postgresql-simple >=0.4 && <0.6
+   , master-plan
    , postgresql-libpq
    , vector >=0.10 && <0.14
    , containers >=0.5 && <0.6
@@ -114,7 +116,10 @@ library
    , GiST
    , semigroups
    , profunctors
+   , product-profunctors
+   , contravariant
    , stm
+   , generics-sop
    , iso8601-time
   default-language:    Haskell2010
 

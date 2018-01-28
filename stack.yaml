@@ -20,14 +20,17 @@ packages:
   extra-dep: True
 - location : deps/postgresql-simple
   extra-dep: True
+- location : deps/master-plan
+  extra-dep: True
 
 extra-deps:
-  - arrows-0.4.4.1
+  - arrows-0.4.4.2
   - GenericPretty-1.2.1
   - strptime-1.0.10
   - Stream-0.4.7.2
+  - megaparsec-6.5.0
   - lazysmallcheck-0.6
-  - snap-server-1.0.2.2
+  - parser-combinators-0.4.0
   - HsOpenSSL-0.11.4.9
   - Only-0.1
 

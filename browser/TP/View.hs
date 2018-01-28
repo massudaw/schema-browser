@@ -8,8 +8,10 @@ module TP.View where
 
 import qualified Data.Aeson as A
 import Utils
+import SchemaQuery (fixrel)
 import Safe
 import qualified NonEmpty as Non
+import Data.Functor.Identity
 import Debug.Trace
 import Data.Maybe
 import qualified Graphics.UI.Threepenny as UI
@@ -23,6 +25,7 @@ import NonEmpty
 import qualified Data.Foldable as F
 import Types
 import Types.Patch
+import Environment
 import qualified Types.Index as G
 import qualified Data.Vector as V
 import qualified Data.List as L
@@ -36,16 +39,16 @@ import Query
 import Data.Interval as Interval
 import qualified Data.Text as T
 
-newtype Row = Row (TBData Key Showable)
-instance A.ToJSON Row  where
-  toJSON (Row kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (unKV kv)
+newtype TRow = TRow (TBData Key Showable)
+instance A.ToJSON TRow  where
+  toJSON (TRow kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (unKV kv)
 
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =
     case keyType k of
       Primitive [] (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
       i ->  A.toJSON v
-  toJSON (IT k v) = A.toJSON (fmap Row v)
+  toJSON (IT k v) = A.toJSON (fmap TRow v)
 
 instance A.ToJSON a => A.ToJSON (FTB a) where
     toJSON (TB1 i) = A.toJSON i
@@ -80,23 +83,16 @@ instance A.ToJSON Showable where
     toJSON (SGeo o) = A.toJSON o
     toJSON i = A.toJSON (renderPrim i)
 
-indexTyU (Many [One k] )= indexTy k
-indexTy (IProd _ k )=  keyType k
-indexTy (Nested [IProd _ xs] n) = Primitive (_keyFunc (keyType xs) ++ ty) at
-    where
-      Primitive ty at = indexTyU n
-
-
 geoPred inf tname geofields (ne,sw) = geo
   where
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
         PrimColl .
-          (, Left (makeInterval (_keyAtom nty)  (sw,ne) ,op nty))
+          fixrel . (, Left (makeInterval (_keyAtom nty)  (sw,ne) ,op nty))
             $ index
       where
-        nty= indexTy index
-        [index] =  liftAccess inf (tableName tname)  <$>  indexer f
+        nty= relType index
+        index =  liftRel inf (tableName tname)  $  indexerRel f
 
     op (Primitive f a) =  go f
       where
@@ -106,16 +102,15 @@ geoPred inf tname geofields (ne,sw) = geo
           KOptional  -> go i
           KSerial  -> go i
           KArray -> AnyOp $ go i
-          v -> errorWithStackTrace (show v)
 
 timePred inf tname evfields (incrementT,resolution) = time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
-      PrimColl . (, Left ( IntervalTB1 $ fmap (ref ty) i,op ty)) $ index
+      PrimColl . fixrel . (, Left ( IntervalTB1 $ fmap (ref ty) i,op ty)) $ index
       where
-        [index] =  liftAccess inf (tableName tname)  <$>  indexer f
-        ty = indexTy index
+        index =  liftRel inf (tableName tname) $  indexerRel f
+        ty = relType index
     op (Primitive f a) = go f
       where
         go [] = Flip Contains
@@ -124,13 +119,13 @@ timePred inf tname evfields (incrementT,resolution) = time
              KOptional -> go i
              KDelayed -> go i
              KSerial  -> go i
-             i -> errorWithStackTrace ("type not supported : " ++ show i)
+             i -> error ("type not supported : " ++ show i)
     ref (Primitive f a) =  case a of
             (AtomicPrim (PTime PDate)) ->
               TB1 . STime . SDate . utctDay
             (AtomicPrim (PTime (PTimestamp _))) ->
               TB1 . STime . STimestamp
-            v -> errorWithStackTrace (show (evfields,tname,v))
+            v -> error ("Wrong type: " ++ show (evfields,tname,v))
     i =
         (\r d ->
               Interval.interval
@@ -145,7 +140,7 @@ predicate
     -> Maybe (NonEmpty T.Text)
     -> Maybe (NonEmpty T.Text)
     -> (Maybe ([Double], [Double]), Maybe (UTCTime, String))
-    -> BoolCollection (Access Key,AccessOp Showable)
+    -> BoolCollection (Rel Key,[(Key,AccessOp Showable)])
 predicate inf tname evfields geofields (i,j) =
     AndColl $
       catMaybes [liftA2 (geoPred inf tname ) geofields i, liftA2 (timePred inf tname) evfields j]
@@ -195,18 +190,22 @@ makePos (AtomicPrim (PGeom 3 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position (a, b,z)), True)
 makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position2D (a, b)), True)
-makePos a i = errorWithStackTrace (show (a,i))
+makePos a i = error (show (a,i))
 
-writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
-writePK m r efield =
+writePK' :: T.Text -> [(T.Text ,FTB Showable )]-> FTB Showable -> T.Text
+writePK'  m r efield =
     (\i ->
-          _kvname m <> "->" <> i <> "->" <>
+          m <> "->" <> i <> "->" <>
           T.pack (renderShowable efield)) $
     T.intercalate ",," $
     fmap
         (\(i,j) ->
-               keyValue i <> "=" <> T.pack (renderShowable j)) $
-    M.toList $ getPKM  m r
+          i <> "=" <> T.pack (renderShowable j))  r
+
+
+
+writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
+writePK m r efield = writePK' (_kvname m)  (first keyValue <$> M.toList ( getPKM  m r))  efield
 
 
 readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
@@ -262,4 +261,5 @@ convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i
      convertPoint (SGeo (SPosition (Position (y,x,z)) )) = [x,y,z]
      convertPoint (SGeo (SPosition (Position2D (y,x)) )) = [x,y,0]
 
+execTable project =  runIdentity .evalEnv project . (,[]) . Atom .  mapKey' keyValue
 

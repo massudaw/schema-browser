@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda (eventWidget,eventWidgetMeta) where
+module TP.Agenda (agendaDef,eventWidget,eventWidgetMeta) where
 
 import GHC.Stack
 import Step.Host
@@ -45,6 +45,7 @@ import Data.Maybe
 import Reactive.Threepenny hiding (apply)
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import RuntimeTypes
+import Environment
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
 import Data.Monoid hiding (Product(..))
@@ -63,10 +64,9 @@ calendarAddSource cal t evs = do
 calendarRemoveSource cal t = runFunctionDelayed cal $ ffi "removeSource(%1,%2)" cal (tableName t)
 
 
-eventWidget body (incrementT,resolutionT) sel inf cliZone = do
-    dashes <- eventWidgetMeta inf cliZone
+eventWidget (incrementT,resolutionT) sel inf cliZone = do
+    dashes <- eventWidgetMeta inf
     let
-      schemaPred2 =  WherePredicate $ PrimColl (liftAccess (meta inf) "event" $ keyRef "schema",Left (int (schemaId inf),Equals))
       legendStyle lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
         in traverse (\(k@(c,tname,_,_)) -> do
@@ -76,59 +76,18 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             # set UI.style [("background-color",renderShowable c)]# set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
             ) item
 
-    choose <- buttonDivSet ["Main","Config"] (pure $ Just "Main") (\i ->  UI.button # set text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
     let
-      chooser "Config" = do
-        let
-            minf = meta inf
-            table = lookTable minf "event"
-        reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' minf table Nothing schemaPred2
-        config <- selector minf table reftb  (pure $ Just schemaPred2 ) (pure Nothing)
-        let tds = triding config
-        (cru,pretdi) <- crudUITable minf table reftb mempty [] (allRec' (tableMap minf) table) (triding config)
-        return [getElement config,cru]
-
-      chooser "Main" = do
+      chooser = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
         out <- traverseUI id $ calendarView inf Nothing cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
         out2 <- traverseUI (traverseUI (traverse (\(t,tdi) -> do
           reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables inf t
           crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) t) (pure (Just tdi)))))  (fmap snd out)
         out3 <- ui $ joinT out2
-        selector <- UI.div # sink UI.children (facts $ (fmap fst.maybeToList) <$> out3)
+        selector <- UI.div # sink UI.children (facts $ (fmap getElement .maybeToList) <$> out3)
         calendar <- UI.div # sink UI.children (facts $ fmap fst out )
         return [getElement agenda,calendar,selector]
-    els <- traverseUI chooser (triding choose)
 
-    content <- UI.div # sink children (facts els) # set UI.class_ "row"
-    element choose  # set UI.class_ "row"
+    return  (legendStyle , dashes ,chooser )
 
-    element body # set children [getElement choose,content] # set UI.style [("overflow","auto")]
 
-    return  (legendStyle , dashes )
-
-type DateChange = (String, Either (Interval UTCTime) UTCTime)
-
-readTime :: EventData -> Maybe DateChange
-readTime v = case unsafeFromJSON v of
-        [i,a,e]  -> (,) <$> Just i <*>
-          ((\i j ->
-                 Left $
-                 Interval.interval
-                     (Interval.Finite i, True)
-                     (Interval.Finite j, True)) <$>
-           parseISO8601 a <*>
-           parseISO8601 e)
-        [i,a] -> (,) <$> Just i <*> (Right <$> parseISO8601 a)
-
-eventClick:: Element -> Event String
-eventClick el = fmap fst $ filterJust $ readTime <$> domEvent "eventClick" el
-
-eventDrop :: Element -> Event DateChange
-eventDrop el = filterJust $ readTime <$> domEvent "eventDrop" el
-
-eventDragDrop :: Element -> Event DateChange
-eventDragDrop el = filterJust $ readTime <$> domEvent "drop" el
-
-eventResize :: Element -> Event DateChange
-eventResize el = filterJust $ readTime <$> domEvent "eventResize" el

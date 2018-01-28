@@ -22,12 +22,13 @@ module Query
   ,isKOptional
   ,checkGist
   ,backFKRef
-  ,backFKRefType
+  ,reflectFK
   ,backPathRef
+  ,transformKey
+  ,transformKeyList
   ,filterReflexive
   ,isReflexive
   ,isInlineRel
-  ,attrValueName
   ,mAny
   ,allRec'
   ,eitherDescPK
@@ -47,6 +48,7 @@ import Data.Unique
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
+import Debug.Trace
 import qualified Data.Traversable as Tra
 import Data.Maybe
 import qualified Data.Interval as Interval
@@ -67,20 +69,27 @@ import Control.Monad.State
 import Data.Text (Text)
 import GHC.Stack
 import Types
-import Debug.Trace
 import qualified Types.Index as G
 
 
+
+transformKeyList
+  :: (Eq b, Show a, Show b) =>
+     KType [Prim KPrim b] -> KType [Prim KPrim b] -> FTB a -> FTB a
+transformKeyList (Primitive l p) (Primitive l1 p1) v
+  | l == l1 = v
+  | all id $ zipWith isPrimReflexive p p1 = transformKPrim l l1 v
+  | otherwise = error ("cant match prim type" ++ show (p,p1))
 
 
 transformKey
   :: (Eq b, Show a, Show b) =>
      KType (Prim KPrim b) -> KType (Prim KPrim b) -> FTB a -> FTB a
 transformKey (Primitive l p) (Primitive l1 p1) v
+  | l == l1 = v
   | isPrimReflexive p p1 = transformKPrim l l1 v
   | otherwise = error ("cant match prim type" ++ show (p,p1))
 
--- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
 transformKPrim
   :: Show a =>
     [KTypePrim] -> [KTypePrim]  -> FTB a -> FTB a
@@ -88,26 +97,21 @@ transformKPrim (KSerial :i)  (KOptional :j) (LeftTB1 v)  = LeftTB1 $ transformKP
 transformKPrim (KOptional :i)  (KSerial :j) (LeftTB1 v)  = LeftTB1 $ transformKPrim i j <$> v
 transformKPrim (KOptional :j) l (LeftTB1 v)
     | isJust v = transformKPrim j l (fromJust v)
-    | otherwise = errorWithStackTrace "no transform optional nothing"
+    | otherwise = error "no transform optional nothing"
 transformKPrim (KSerial :j)  l (LeftTB1 v)
     | isJust v = transformKPrim j l (fromJust v)
     | otherwise =  LeftTB1 Nothing
-transformKPrim []   (KOptional :j ) v  = LeftTB1 . Just $ (transformKPrim [] j v)
-transformKPrim []  (KSerial :j ) v   = LeftTB1 . Just $ (transformKPrim [] j v)
-transformKPrim [] (KArray :j ) v    = ArrayTB1 . pure $ transformKPrim [] j v
+transformKPrim i (KOptional :j ) v  | i == j = LeftTB1 . Just $ (transformKPrim i j v)
+transformKPrim i (KSerial :j ) v  | i == j = LeftTB1 . Just $ (transformKPrim i j v)
+transformKPrim i (KArray :j ) v  | i == j  = ArrayTB1 . pure $ transformKPrim i j v
 transformKPrim ki kr v
     | ki == kr =  v
-    | otherwise = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
+    | otherwise = error ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 
 isKDelayed (Primitive l _)  = isJust  $ L.find (==KDelayed) l
 isKOptional (Primitive (KOptional :_ ) i) = True
 isKOptional _ = False
-
-
-attrValueName ::  TB (FKey k) a -> Text
-attrValueName (Attr i _ )= keyValue i
-attrValueName (IT i  _) = keyValue i
 
 
 --
@@ -119,13 +123,12 @@ rawFullName t  = rawSchema t <> "." <> rawName t
 
 
 tableAttrs :: Table -> [Key]
-tableAttrs r =
-  L.nub $ (rawPK r <> rawDescription r  <>rawAttrs r)
+tableAttrs r = L.nub (rawPK r <> rawDescription r  <>rawAttrs r)
 
 
 
 labelTable :: Table ->  TBData Key ()
-labelTable i = tblist $ kname <$> tableAttrs i
+labelTable i = kvlist $ kname <$> tableAttrs i
 
 
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
@@ -161,7 +164,7 @@ isPairPrimReflexive (KArray :i )  op  (KArray : j)
 isPairPrimReflexive (KArray : i )  (AnyOp op ) j = isPairPrimReflexive i op j
 isPairPrimReflexive i   (Flip IntersectOp) j = False
 isPairPrimReflexive j op (KArray :i )  = False
-isPairPrimReflexive i op  j = errorWithStackTrace $ "isPairPrimReflexive " <> show i <> " - " <> show op <> " - " <> show  j
+isPairPrimReflexive i op  j = error $ "isPairPrimReflexive " <> show i <> " - " <> show op <> " - " <> show  j
 
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
@@ -193,7 +196,7 @@ allRec'
   :: TableMap
   -> Table
   -> TBData Key ()
-allRec' invSchema r = recurseTB invSchema (tableMeta r) (rawFKS r) [] (labelTable r)
+allRec' invSchema r = recurseTB invSchema [] r
 
 
 pathToRel (FKInlineTable i _ )  = [Inline i]
@@ -207,39 +210,39 @@ findRefFK ::  [Key] -> KV Key ()  -> KV Key ()
 findRefFK fks ksbn = kvlist $ fmap (\i -> findRefIT i ksbn ) fks
 
 recursePath
-  :: KVMetadata Key
-  ->  RecState Key
+  :: RecState Key
   -> [(Set (Rel Key), TB Key ())]
   -> KV Key ()
   -> TableMap
   -> SqlOperation
   -> TB Key ()
--- recursePath _ _ _ _ _ _ o | traceShow o False = undefined
-recursePath m isRec vacc ksbn invSchema p@(FKInlineTable ifk reft)
-  =  IT ifk (recBuild p $ tb )
+recursePath  isRec vacc ksbn invSchema p@(FKInlineTable ifk reft)
+  =  IT ifk (recBuild p tb)
   where
-    tb = fun (labelTable nextT)
+    tb = fun nextT
     ks = pathToRel p
     nextT = lkSTable  invSchema reft
-    fun =  recurseTB invSchema (tableMeta nextT) (rawFKS nextT) isRec
-recursePath m isRec vacc ksbn invSchema jo@(FKJoinTable  ks reft)
-  =  FKT (findRefs  ksbn) ks (recBuild jo $ tb)
+    fun =  recurseTB invSchema  isRec
+recursePath  isRec vacc ksbn invSchema jo@(FKJoinTable  ks reft)
+  =  FKT (findRefs  ksbn) ks (recBuild jo tb)
   where
-    tb = fun (labelTable nextT)
+    tb = fun nextT
     nextT = lkSTable invSchema reft
-    findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
+    oldRef = S.unions $ fmap (S.map _relOrigin . fst) vacc
+    noldRef = filter (\i -> not $ S.member (_relOrigin i) oldRef ) (filterReflexive ks)
+    findRefs = findRefFK  (_relOrigin <$> noldRef)
     e = S.fromList $ rawPK nextT
-    fun =   recurseTB invSchema (tableMeta nextT) (rawFKS nextT) isRec
-recursePath m isRec vacc ksbn invSchema jo@(RecJoin l f)
-  = recursePath m (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema f
-recursePath m isRec vacc ksbn invSchema jo@(FunctionField k l f)
+    fun =   recurseTB invSchema  isRec
+recursePath  isRec vacc ksbn invSchema (RecJoin l f)
+  = recursePath  (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema f
+recursePath  isRec vacc ksbn invSchema (FunctionField k l f)
   = (Fun k  (l,f) (TB1 () ))
 
 
 recBuild :: SqlOperation -> (a -> FTB a)
 recBuild p =
-  case mergeFKRel ks of
-    Primitive l o ->  F.foldl' (.) id (effect <$> l) . TB1
+  case mergeFKRef (keyType . _relOrigin<$> ks) of
+    Primitive l _ ->  F.foldl' (.) id (effect <$> l) . TB1
   where
     ks = pathToRel p
     effect :: KTypePrim  -> FTB a -> FTB a
@@ -248,9 +251,12 @@ recBuild p =
 
 lkSTable invSchema (s,t) = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (HM.lookup t =<< HM.lookup s invSchema)
 
-recurseTB :: TableMap -> KVMetadata Key -> [SqlOperation] -> RecState Key  -> TBData Key () ->  TBData Key ()
-recurseTB invSchema m fks' isRec  kv =
+recurseTB :: TableMap -> RecState Key  -> Table ->  TBData Key ()
+recurseTB invSchema isRec table =
   let
+    m = tableMeta table
+    fks' = rawFKS table
+    kv = labelTable table
     items = _kvvalues kv
     fkSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction) $ fks'
@@ -261,7 +267,7 @@ recurseTB invSchema m fks' isRec  kv =
           let relFk =pathRelRel fk
               lastItem =   L.filter cond isRec
               cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
-              i = (relFk,) . recursePath m (fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) acc kv invSchema $ fk
+              i = (relFk,) . recursePath  (fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) acc kv invSchema $ fk
           in if L.length lastItem < 2
                 then i:acc
                 else acc) [] fklist
@@ -274,18 +280,18 @@ type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
 
 
 
-eitherDescPK :: Show a => KVMetadata Key -> TB3Data Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
+eitherDescPK :: Show a => KVMetadata Key -> TBData Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
 eitherDescPK kv i
-  | not (null ( _kvdesc kv) ) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
+  | not (null (_kvdesc kv)) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
   | otherwise = pk
-    where desc = (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter isJust  $  fmap unLeftItens $  (_kvvalues $ tbDesc kv i)
+    where desc =  (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter isJust  $  fmap unLeftItens $  (_kvvalues $ tbDesc kv i)
           pk = _kvvalues $ tbPK kv i
 
-tbDesc,tbPK :: Ord k => KVMetadata k -> TB3Data  k a ->  TB3Data  k a
+tbDesc, tbPK :: Ord k => KVMetadata k -> TBData  k a ->  TBData  k a
 tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) )
 tbPK kv = kvFilter (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) )
 
-kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> TB3Data  k a ->  TB3Data  k a
+kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> TBData  k a ->  TBData  k a
 kvFilter pred (KV item) = KV $ M.filterWithKey (\k _ -> pred k ) item
 
 -- Combinators
@@ -301,91 +307,42 @@ inf' = unFinite . Interval.lowerBound
 sup' = unFinite . Interval.upperBound
 
 
-data RelSort k = RelSort [Rel k] deriving (Eq,Ord)
-
--- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
-instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
-  compare (RelSort i ) (RelSort j)
-    = case (comp (out i) (inp j) , (comp (out j) (inp i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
-            -- Reverse order
-            (_ , P.LT,_,_) -> if S.size (out j) == L.length j then P.GT else P.EQ
-            -- Right order
-            (P.LT , _ ,_,_) -> P.LT
-            -- No intersection  between elements sort by inputset
-            (_,_ ,P.EQ,o) -> o
-            (_,_ ,i,_) -> i
-
-    where
-      inp j= norm $ _relInputs <$> j
-      out j = norm $ _relOutputs <$> j
-      norm  = S.fromList . concat . catMaybes
-      comp i j  | S.null (S.intersection i j ) = P.EQ
-      comp i j  | S.empty == i = P.EQ
-      comp i j  | S.empty == j  = P.EQ
-      comp i j = P.compare i j
-  compare (RelSort [i] ) (RelSort [j]) = P.compare i j
-  compare (RelSort [i] ) (RelSort j) = P.compare (S.singleton i ) (S.fromList j) <> if L.any (==P.EQ) (P.compare i <$> j) then P.LT else foldl1 mappend  (P.compare i <$> j)
-  compare (RelSort i ) (RelSort [j]) = P.compare (S.fromList i) (S.singleton j ) <> if L.any (==P.EQ) (flip P.compare j <$> i) then P.GT else foldl1 mappend (flip P.compare j <$> i)
-  compare (RelSort i ) (RelSort j ) = P.compare (S.fromList i) (S.fromList j)
-
-instance (Show i,P.Poset i )=> P.Poset (Rel i)where
-  compare  (Inline i ) (Inline j) = P.compare i j
-  compare  (Rel i _ a ) (Inline j ) = case i == j of
-                                        True -> P.GT
-                                        False -> P.compare i j
-  compare  (Inline j )(Rel i _ a )  = case i == j of
-                                        True -> P.LT
-                                        False -> P.compare j i
-  compare  (Rel i _ a ) (Rel j _ b) = P.compare i j <> P.compare a b
-  compare  n@(RelFun i  ex a ) o@(RelFun j ex2 k)  = case  (L.any (== Inline j) a,L.any (==Inline i) k)  of
-                                          (True ,_)-> P.GT
-                                          (_,True)-> P.LT
-                                          (False,False)-> P.compare (Inline i) (Inline j)
-  compare  (RelFun i e a ) j  = case L.any (== j) a  of
-                                          True -> P.GT
-                                          False -> P.compare (Inline i) j
-  compare   j (RelFun i e a )= case L.any (== j) a  of
-                                          True -> P.LT
-                                          False -> P.compare j (Inline i)
-
-  compare i j = errorWithStackTrace (show (i,j))
-
-
-instance P.Poset (FKey i)where
-  compare  i j = case compare (keyPosition i) (keyPosition j) of
-                      EQ -> P.EQ
-                      LT -> P.LT
-                      GT -> P.GT
-
-
-
 backPathRef ::  SqlOperation -> TBData Key Showable ->  [Column Key Showable]
 backPathRef (FKJoinTable rel t) = justError ("no back path ref "  ++ show rel ). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (_relOrigin<$> rel)
 
 backFKRefType
-  :: (Show a) =>
+  :: Show a =>
      M.Map Key Key
-     -> M.Map Key CorePrim
+     -> M.Map Key (KType CorePrim)
      -> [Key]
      -> TBData  Key a
      -> Maybe [ TB Key a]
-backFKRefType i j  k  | traceShow (i ,j,k) False =  undefined
-backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . traceShowId . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
+backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK . concat . fmap aattr . F.toList .  _kvvalues
   where
-    reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-    lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive [] tkn) v)) <$> knm <*> tknm
+    reorderPK  = fmap lookFKsel
+    lookFKsel (ko,v)=  (\kn tkn -> (kn , transformKey (keyType ko ) tkn v)) <$> knm <*> tknm
         where
-          knm =  M.lookup ko relTable
+          knm = M.lookup ko relTable
           tknm =  M.lookup ko relType
+
+reflectFK
+  :: Show a => [Rel Key] -> TBData Key a -> Maybe (TBData Key a)
+reflectFK [] i = pure $ KV M.empty
+reflectFK rel table =
+  kvlist <$> backFKRefType relTable relType (_relOrigin <$> rel) table
+      where
+        Primitive _ c = mergeFKRel rel
+        relTable = M.fromList $ (\i -> (_relTarget i, _relOrigin i)) <$> rel
+        unKSerial (Primitive l c ) = Primitive (filter  (/= KSerial) l) c
+        relType = M.fromList $ zip (_relTarget <$> rel ) (unKSerial .snd <$> c)
 
 
 backFKRef
-  :: (Show a) =>
+  :: Show a =>
      M.Map Key Key
-     -> [ Key]
+     -> [Key]
      -> TBData  Key a
      -> Maybe [ TB Key a]
--- backFKRef i j  | traceShow (i ,j) False =  undefined
 backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
@@ -393,15 +350,18 @@ backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reo
           where knm =  M.lookup ko relTable
 
 
-tbpred un  = G.notOptional . G.getUnique un
+tbpred m un  = G.notOptional . G.getUnique m un
+
+kvToMap :: Ord k => KV k a -> M.Map k (FTB a)
+kvToMap  = M.mapKeys (_relOrigin . head .F.toList ) . fmap _tbattr . _kvvalues
 
 tbpredFK
   ::  ( Show k,Ord k)
   => M.Map k k
   -> [k]
   -> [k]
-  -> [(k,FTB a1)] ->  Maybe (G.TBIndex a1)
-tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst )  $ v
+  -> KV k a1 ->  Maybe (G.TBIndex a1)
+tbpredFK rel un  pk2 v  = tbjust  .  Tra.traverse (Tra.traverse unSOptional) . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
         where
           flipTable = M.fromList . fmap swap .M.toList
           tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
@@ -415,8 +375,7 @@ tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . f
   -> [([k],G.GiST (G.TBIndex  a1) (G.TBIndex a1))]
   -> t (TB Identity k a1)
   -> Maybe a-}
--- searchGist  i j k l m  | traceShow (i, fmap fst l,m) False = undefined
-searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
+searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) )
   where
     lookGist rel un pk  v =  join res
       where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
@@ -432,7 +391,7 @@ joinRel2 tb ref table
   = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb ) table) (Tra.traverse (traverse unSOptional) ref )
   | L.any (isArray.snd) ref
   = let
-      !arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
+      arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
    in join .fmap ( fmap (ArrayTB1 .  Non.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
@@ -445,6 +404,6 @@ joinRel2 tb ref table
             tbel = G.lookup idx table
 
 
-checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
+checkGist t un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM t  un pk)
 
-tbpredM un  = G.notOptionalM . G.getUnique un
+tbpredM m un  = G.notOptionalM . G.getUnique m un

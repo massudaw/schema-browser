@@ -37,6 +37,7 @@ import Data.Monoid hiding (Product(..))
 
 import qualified Data.Text as T
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.HashMap.Strict as HM
 
 
@@ -49,10 +50,10 @@ plugs schm authmap db plugs = do
       let
         regplugs = catMaybes $ findplug <$> plugs
         findplug :: PrePlugins -> Maybe Plugins
-        findplug p = (,p). round . unTB1 . flip index1 "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
+        findplug p = (,p). round . unTB1 . flip index1 (liftRel inf "plugins" $ keyRef "oid") . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
           where
             pred :: TBPredicate Key Showable
-            pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
+            pred = WherePredicate $ AndColl [PrimColl $ fixrel (liftRel inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
       return regplugs
   atomically $ do
     schmRef <-readTVar schm
@@ -61,13 +62,13 @@ plugs schm authmap db plugs = do
 
 
 
-index1 tb item = snd $ justError ("no item" <> show (item,tb)) $ indexTable [keyRef item] (tableNonRef' tb)
+index1 tb item = justError ("no item" <> show (item,tb)) $ attrLookup (S.fromList [item]) (tableNonRef tb)
 
-index2 tb item = justError ("no item" <> show (item,tb)) $ indexFieldRec item tb
+index2 tb item = justError ("no item" <> show (item,tb)) $ recLookup item tb
 
-checkTime curr = do
+checkTime meta curr = do
     let
-      IntervalTB1 time_inter = index1 curr "time"
+      IntervalTB1 time_inter = index1 curr (liftRel meta "polling" $ Inline "time")
       TB1 (STime (STimestamp startLocal)) = justError "cant be null start"$ unFinite $ lowerBound time_inter
       TB1 (STime (STimestamp endLocal)) = justError "cant be null end" $unFinite $ upperBound time_inter
       start = startLocal
@@ -83,10 +84,11 @@ poller schmRef authmap db plugs is_test = do
   let
     project tb =  (schema,intervalms,p,pid)
       where
-        TB1 (SNumeric schema )= index1 tb "schema"
-        TB1 (SNumeric intervalms) = index1 tb "poll_period_ms"
-        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested [keyRef "plugin"] (Many [One $ keyRef "name"]))
-        pid = index1 tb "plugin"
+        lrel = liftRel metas "polling" .Inline
+        TB1 (SNumeric schema) = index1 tb (lrel "schema")
+        TB1 (SNumeric intervalms) = index1 tb (lrel "poll_period_ms")
+        TB1 (SText p) = index2 tb (liftRel metas "polling" $ RelAccess [keyRef "plugin"] (keyRef "name"))
+        pid = index1 tb (lrel "plugin")
     enabled = G.toList polling
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
@@ -96,25 +98,25 @@ poller schmRef authmap db plugs is_test = do
 
       schm <- atomically $ readTVar schmRef
       (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
-      (startP,_,_,current) <- checkTime (indexRow polling )
+      (startP,_,_,current) <- checkTime metas (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p
               elemp = pluginRun (_plugAction p)
               pname = _name p
               a = _bounds p
           let iter polling = do
-                  (start,end,curr,current) <- liftIO$ checkTime polling
+                  (start,end,curr,current) <- liftIO$ checkTime metas polling
                   liftIO$ putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)
                   let intervalsec = intervalms `div` 10^3
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
-                          pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
-                          predFullIn =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (fst f)
-                          predFullOut =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (snd f)
+                          pred =  WherePredicate $ fixrel . first(liftRel inf a) <$> AndColl ( catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
+                          predFullIn =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (fst f)
+                          predFullOut =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (snd f)
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
-                      let sizeL = justLook pred  l
+                      let sizeL = justLook pred  (unIndexMetadata l)
                           lengthPage s pageSize  =   res
                             where
                               res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
@@ -145,21 +147,21 @@ poller schmRef authmap db plugs is_test = do
                       liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                       let polling_log = lookTable metas "polling_log"
                       dbplog <-  refTable metas polling_log
-                      let table = (\i -> tblist
+                      let table = (\i -> kvlist
                               [ attrT ("plugin",pid )
                               , attrT ("schema",TB1 (SNumeric schema))
                               , IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
                                         nonEmpty  . concat . catMaybes $
-                                            fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId r))   ),attrT ("except",LeftTB1 Nothing)])) <$> i))
+                                            fmap (fmap (TB1 . kvlist  )) .  either (\r ->Just $ pure [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId r))   ),attrT ("except",LeftTB1 Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i
                           time  = TB1 . STime . STimestamp
-                          table2 = tblist
+                          table2 = kvlist
                               [ attrT ("plugin",pid)
                               , attrT ("schema",TB1 (SNumeric schema))
                               , attrT ("time",srange (time current) (time end))
                               ]
 
-                      transactionLog metas  $ do
+                      transactionNoLog metas  $ do
                           fktable2 <- loadFKS ( lookTable metas "polling") (liftTable' metas "polling"  table2)
                           fullDiffEdit ( lookMeta metas "polling")curr fktable2
                       return ()

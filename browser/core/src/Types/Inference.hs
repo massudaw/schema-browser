@@ -51,7 +51,7 @@ inferOp (Flip (LowerThan _)) i = i
 inferOp (Flip Equals) i = i
 inferOp IntersectOp i = i
 inferOp (Flip IntersectOp ) i = i
-inferOp o k = errorWithStackTrace ("infererror" ++ show (o,k))
+inferOp o k = error ("infererror" ++ show (o,k))
 
 
 
@@ -174,7 +174,7 @@ unify (l `TArr` r) (l' `TArr` r')  = do
   return (s2 `compose` s1)
 
 unify (l  `TArr` r) (TOp op l' r')  = do
-  s1 <- fmap traceShowId $ unify l l'
+  s1 <- unify l l'
   s2 <- unify (apply s1 r) (apply s1 r')
   return (s2 `compose` s1)
 

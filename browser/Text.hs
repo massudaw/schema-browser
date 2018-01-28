@@ -5,6 +5,7 @@ import Types.Patch
 import qualified NonEmpty as Non
 import Data.Hashable
 import Data.Ord
+import Data.Dynamic
 import Control.Monad
 import Utils
 import Control.Arrow (first)
@@ -39,13 +40,17 @@ explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> replicate i depth 
 ident :: [(Int,String)] -> String
 ident = explode '\n' '\t'
 
+renderTablePatch :: RowOperation T.Text Showable -> String
+renderTablePatch (CreateRow i) = "CreateRow " ++ ident (renderTable i)
+renderTablePatch (PatchRow i) = "PatchRow " ++ ident (renderRowPatch i)
+renderTablePatch DropRow  = "DropRow"
+
 renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
 renderRowPatch i =  concat $ renderPatch  <$> i
 
 renderTable :: Show a => TBData a Showable ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
-renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
 
 renderPatch :: Show a => PathAttr a Showable ->  [(Int,String)]
 renderPatch (PFK rel k v )
@@ -92,6 +97,8 @@ renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
         ocl j = if j then "[" else "("
         ocr j = if j then "]" else ")"
 
+renderPK (Idex i ) = L.intercalate "," $ renderShowable <$> i
+
 renderShowable = ident . renderFTB renderPrimPatch
 
 renderPrim :: Showable -> String
@@ -106,7 +113,7 @@ renderPrim (STime i)
     SDayTime a -> show a
     SPInterval a -> show a
 renderPrim (SBinary i) = "Binary= " ++ show (hash i )
-renderPrim (SDynamic s) = renderShowable s
+renderPrim (SDynamic (HDynamic s)) = fromMaybe  "can't render SDynamic" $ fmap renderShowable (fromDynamic s) <|> fmap renderPK (fromDynamic s) <|> fmap renderTablePatch (fromDynamic s)
 renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i
 
@@ -176,7 +183,7 @@ readPrim t =
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
       readBin = nonEmpty (\i-> fmap (SBinary . BS.pack ) . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
-      readCpf = traceShowId . nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
+      readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (STime . SDate . localDay . fst) . strptime "%Y-%m-%d"
       readDayTime =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
       readDayTimeMin =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M"

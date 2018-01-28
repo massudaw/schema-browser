@@ -1,20 +1,25 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE Arrows #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView) where
+module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef) where
 
 import GHC.Stack
+import Environment
+import Control.Arrow
 import Step.Host
 import Control.Monad.Writer as Writer
 import TP.View
 import TP.Selector
 import qualified Data.Interval as Interval
+import qualified Data.HashMap.Strict as HM
 import NonEmpty (NonEmpty)
 import Control.Concurrent
 import Utils
+import Data.Functor.Identity
 import Types.Patch
 import Control.Arrow
 import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
@@ -68,7 +73,8 @@ data Mode
   | Timeline
   deriving(Eq,Show,Ord)
 
-eventWidgetMeta inf cliZone= do
+
+eventWidgetMeta inf =  do
     importUI =<<  mapM js
        ["fullcalendar-3.5.0/lib/jquery-ui.min.js"
        ,"fullcalendar-3.5.0/lib/moment.min.js"
@@ -79,28 +85,44 @@ eventWidgetMeta inf cliZone= do
        ["fullcalendar-3.5.0/fullcalendar.min.css"
        ,"fullcalendar-scheduler-1.7.0/scheduler.min.css"
        ]
-    let
+    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (agendaDef inf)()
+
+
+
+agendaDef inf
+  = projectV
+    (innerJoinR
+      (fromR "tables" schemaPred2)
+      (fromR "event" schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event") fields
+   where
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
-    ui$ do
-      (_,(_,evMap )) <- transactionNoLog (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
-      return $ fmap (\e ->
-        let
-            TB1 (SText tname) = lookAttr'  "table_name" . unTB1 $ lookRef ["schema","table"] e
+      schemaPredName =  [(keyRef "table_schema",Left (txt (schemaName inf),Equals) )]
+      fields =  proc t -> do
+          SText tname <-
+              ifield "table_name" (ivalue (readV PText))  -< ()
+          efields <- iinline "event" (irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          color <- iinline "event" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+          let
             table = lookTable inf tname
-            Just (ArrayTB1 efields) = indexFieldRec (liftAccess (meta inf )"event" $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) e
-            color = lookAttr'  "color" e
             toLocalTime = fmap to
-              where to (STime (STimestamp i ))  = STime $ STimestamp $  i
-                    to (STime (SDate i )) = STime $ SDate i
-            convField ((IntervalTB1 i )) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
-            convField (LeftTB1 i) = concat $   convField <$> maybeToList i
-            convField (v) = [("start",toLocalTime $v)]
+                where
+                  to (STime (STimestamp i ))  = STime $ STimestamp $  i
+                  to (STime (SDate i )) = STime $ SDate i
+            convField (IntervalTB1 i) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
+            convField v = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
-                  where attr  = attrValue <$> lookAttrM field r
-            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) $  r),)$  projf r <$> (F.toList efields)
-            attrValue (Attr k v) = v
-         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
+            scolor =  "#" <> renderPrim color
+            projf  r efield@(SText field) = do
+                i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
+                return . M.fromList $
+                  [("id" :: Text, txt $ writePK (tableMeta table) r (TB1 efield  ) )
+                  ,("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r))
+                  ,("table",txt tname)
+                  ,("color" , txt $ T.pack  scolor )
+                  ,("field", TB1 efield )] <> convField i
+            proj r = ( projf r <$> (F.toList efields))
+
+          returnA -< (txt $ T.pack $ scolor ,table,fmap TB1 efields,proj )
 
 
 calendarView
@@ -110,7 +132,7 @@ calendarView
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
      -> t2 (t, TableK Key, NonEmpty (FTB Showable),
-            TBData Key Showable -> (a1, [Either a b]))
+          TBData Key Showable -> [Maybe a ])
     -> Tidings (S.Set (TableK Key) )
      -> Mode
      -> [Char]
@@ -138,11 +160,11 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
             let tdi = tidings tdib evsel
             ui $ onEventIO evsel hselg
             traverseUI
-              (\i ->calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
+              (\i ->calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList i)) v
                                   ) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
-      patchFrom (tableMeta t) ix (readPatch (k,i)) >>= traverse (tell . pure )))
+      patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i)) >>= (tellPatches (tableMeta t). pure )))
     return ([innerCalendar],tidings bhsel eselg)
 
 calendarSelRow readSel (agenda,resolution,incrementT) = do
@@ -171,7 +193,7 @@ addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
     reftb <- ui $ refTables' inf t Nothing pred
     let v = reftb ^. _3
     traverseUI
-      (\i -> calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
+      (\i -> calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList i)) v
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

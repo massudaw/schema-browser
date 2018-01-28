@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE Arrows #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -7,12 +8,16 @@
 module TP.Account where
 
 import GHC.Stack
+import Environment
 import TP.View
 import Data.Ord
 import Utils
 import Step.Host
 import Control.Lens (_2,(^.))
 import qualified Data.Interval as Interval
+import NonEmpty (NonEmpty)
+import qualified NonEmpty as Non
+import Data.Functor.Identity
 import Control.Concurrent
 import Types.Patch
 import Control.Arrow
@@ -33,7 +38,6 @@ import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
-import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
 import Schema
@@ -56,34 +60,58 @@ import qualified Data.Map as M
 
 
 accountWidgetMeta inf = do
-    let
-      schId = int (schemaId inf)
-      schemaPred = [(keyRef "schema",Left (schId,Equals))]
-    (_,minf,amap) <- ui $ transactionNoLog  (meta inf) $ fromTable "accounts" schemaPred >>= joinTable "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
-    cliZone <- jsTimeZone
-    return $ fmap (\e ->
-          let
-              (TB1 (SText tname)) =  lookAttr' "table_name" $ unTB1 $ lookRef  ["schema","table"] e
-              table = lookTable  inf tname
-              Just (ArrayTB1 efields ) = join $ unSOptional <$> indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
-              (ArrayTB1 afields )= lookAttr' "account" e
-              color =  lookAttr'  "color" e
-              toLocalTime = fmap to
-                where to (STime (STimestamp i ))  = STime (STimestamp $ localTimeToUTC utc $  utcToLocalTime cliZone   i)
-                      to (STime (SDate i )) = STime (SDate i)
-              convField (IntervalTB1 i ) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime )$ unFinite $ Interval.upperBound i]
-              convField (LeftTB1 i) = concat $   convField <$> maybeToList i
-              convField v = [("start",toLocalTime $v)]
-              convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
-                    where attr = lookAttr' field r
-                          accattr  = lookAttr' aafield r
-              proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
-           in (color,table,efields,afields,proj)  ) ( G.toList amap)
+    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (accountDef inf)()
+
+accountDef inf
+  = projectV
+     (innerJoinR
+        (leftJoinR
+          (innerJoinR
+            (innerJoinR
+              (fromR "tables" schemaPred)
+              (fromR "accounts" schemaPred) schemaI "account")
+            (fromR "event" schemaPred) schemaI "event")
+          (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+
+  where
+      schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
+      schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
+      schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
+      schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
+      schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+      fields =  proc t -> do
+        SText tname <-
+            ifield "table_name" (ivalue (readV PText))  -< ()
+        afields <- iinline "account" (irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
+        desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+        pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+        efields <- iinline "event" (irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        color <- iinline "account" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+        let
+          toLocalTime = fmap to
+            where
+              to (STime (STimestamp i ))  = STime $ STimestamp $  i
+              to (STime (SDate i )) = STime $ SDate i
+          convField (IntervalTB1 i) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
+          convField v = [("start",toLocalTime $v)]
+          convField i = errorWithStackTrace (show i)
+          scolor =  "#" <> renderPrim color
+          projf r desc efield@(SText field) (SText aafield)  = do
+              i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
+              accattr <- unSOptional =<< recLookupInf inf tname (indexerRel aafield) r
+              pks <- pksM
+              fields <- mapM (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
+              return . M.fromList $
+                [
+                ("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                ,("commodity", accattr )
+                ,("field", TB1 efield )] <> convField i
+          proj r = ( F.toList $ projf r desc <$> efields <*> afields)
+        returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> efields,TB1 <$> afields,proj )
 
 
-
-accountWidget body (incrementT,resolutionT) sel inf = do
+accountWidget (incrementT,resolutionT) sel inf = do
     let
       calendarSelT = liftA2 (,) incrementT resolutionT
 
@@ -92,49 +120,49 @@ accountWidget body (incrementT,resolutionT) sel inf = do
     itemListEl2 <- mapM (\i ->
       (i^. _2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes
     let
-        legendStyle lookDesc table b
-            =  do
-              let item = M.lookup table  (M.fromList  $ fmap (\i@(_,b,_,_,_)-> (b,i)) dashes )
-              traverse (\k@(c,tname,_,_,_) ->   mdo
-                header <-  UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-11"
-                element b # set UI.class_ "col-xs-1"
-                UI.label # set children [b,header]
-                         # set UI.style [("background-color",renderShowable c)] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
-                ) item
+      legendStyle lookDesc table b
+          =  do
+            let item = M.lookup table  (M.fromList  $ fmap (\i@(_,b,_,_,_)-> (b,i)) dashes )
+            traverse (\k@(c,tname,_,_,_) ->   mdo
+              header <-  UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-11"
+              element b # set UI.class_ "col-xs-1"
+              UI.label # set children [b,header]
+                       # set UI.style [("background-color",renderShowable c)] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+              ) item
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    element body # set children [calendar]
 
     let
-      calFun selected = do
-          innerCalendarSet <- M.fromList <$> mapM (\a -> (a^._2,) <$> UI.table)  selected
-          innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
-          element calendar # set children [innerCalendar]
-          _ <- mapM (\(_,table,fields,efields,proj)->  traverseUI
-            (\calT -> do
-              let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
-                  fieldKey (TB1 (SText v))=   v
-              (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
-              traverseUI
-                (\i -> do
-                  let caption =  UI.caption -- # set text (T.unpack $ maybe (rawName t) id $ rawDescription t)
-                      header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
-                      row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
-                      body = fmap row dat <> if L.null dat then [] else [totalrow totalval]
-                      dat =  concatMap (lefts . snd .proj)  $ G.toList i
+      calFun :: UI [Element]
+      calFun = do
+         els <- traverseUI
+            (\(selected ,calT )->
+              mapM (\(_,table,fields,efields,proj) -> do
+                let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
+                    fieldKey (TB1 (SText v))=   v
+                (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
+                els <- traverseUI
+                  (\i -> do
+                    let caption =  UI.caption # set text (T.unpack $ tableName table)
+                        header = UI.tr # set items (sequence [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ])
+                        row i = UI.tr # set items (sequence [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)])
+                        body = fmap row dat <> if L.null dat then [] else [totalrow totalval]
+                        dat =  concatMap (catMaybes.proj)  $ G.toList i
 
-                      totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
-                        where
-                          totalcom = sum $ justError "no" .M.lookup "commodity" <$> dat
-                          mindate = minimum $ justError "no" . M.lookup "start" <$> dat
-                          maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
-                      totalrow i = UI.tr # set items  (fmap (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
-                  element (fromJust $ M.lookup table innerCalendarSet) # set items (caption:header:body)) (collectionTid v)
-                )calendarSelT
-              ) selected
-          return ()
-    _ <- traverseUI calFun ((\i j -> filter (flip L.elem (F.toList i) .  (^. _2)) j )<$> sel <*> pure dashes)
+                        totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
+                          where
+                            totalcom = sum $ justError "no" .M.lookup "commodity" <$> dat
+                            mindate = minimum $ justError "no" . M.lookup "start" <$> dat
+                            maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
+                        totalrow i = UI.tr # set items  (mapM (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
+                    UI.table # set items (sequence $ caption:header:body)) (collectionTid v)
+                UI.div # sink UI.children (pure <$> facts els)
+                    ) (filter (flip L.elem (F.toList selected) .  (^. _2)) dashes )
+
+                ) $ (,) <$> sel <*> calendarSelT
+
+         pure <$> UI.div # sink children (facts  els)
 
 
-    return (legendStyle,dashes)
+    return (legendStyle,dashes,calFun )
 
 

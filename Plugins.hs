@@ -97,15 +97,15 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
         odxR "andamento_date" -<  t
         odxR "andamento_description" -<  t) -< t
       b <- act  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  ) -<  ( protocolo , ano )
-      let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat bv]
-          convertAndamento :: [String] -> TB2 Text Showable
-          convertAndamento [da,des] =  TB1 $ tblist $ attrT Control.Applicative.<$> ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+      let ao (sv,bv)  = Just $ kvlist   $ svt  sv <> [iat bv]
+          convertAndamento :: [String] -> KV Text Showable
+          convertAndamento [da,des] =  kvlist $ attrT Control.Applicative.<$> ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           svt bv = catMaybes $ fmap attrT . (traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) . swap) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = IT
                             "andamentos"
-                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $  fmap convertAndamento bv)
+                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $  fmap (TB1. convertAndamento ) bv)
       returnA -< join  (ao <$> uncurry (liftA2 (,)) b)
 
 
@@ -119,7 +119,7 @@ cpfCaptcha = IOPlugin url
       atR "ir_reg" (idxK"cpf_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist [IT "sess" sess ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ kvlist [IT "sess" sess ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 cnpjCaptcha = IOPlugin url
   where
@@ -130,7 +130,7 @@ cnpjCaptcha = IOPlugin url
       atR "ir_reg" (idxK"cnpj_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist [IT "sess" sess2 ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ kvlist [IT "sess" sess2 ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
@@ -242,7 +242,7 @@ germinacao = FPlugins pname tname $ PurePlugin  url
       plant <- idxK "plantio"  -< ()
       poly <- atR "planta" (idxK "periodo_germinacao" ) -< ()
       odxR "previsao_germinacao" -< ()
-      returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> tblist [Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 ((\(TB1 i) -> TB1 $ STime  . SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant  poly
+      returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> kvlist [Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 ((\(TB1 i) -> TB1 $ STime  . SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant  poly
 
 preparoInsumo = FPlugins pname tname $ PurePlugin  url
 
@@ -255,7 +255,7 @@ preparoInsumo = FPlugins pname tname $ PurePlugin  url
       plant <- idxK "producao"  -< ()
       poly <- atR "insumo" (idxK "periodo_preparo" ) -< ()
       odxR "previsao_preparo" -< ()
-      returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> tblist [Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 ((\(TB1 i) -> TB1 $ STime  .SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
+      returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> kvlist [Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 ((\(TB1 i) -> TB1 $ STime  .SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
 
 
 
@@ -272,7 +272,7 @@ areaDesign = FPlugins pname tname $ PurePlugin  url
       poly <- atR "classe" ((\ i x -> sum $ zipWith (\j i -> i * x^j ) [0..] (F.toList i)) <$> doubleA "curva") -< ()
       let
           af = (nbrFig3 a/100) * solve ar poly
-      returnA -< Just $ tblist [Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) af)]
+      returnA -< Just $ kvlist [Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) af)]
 
 designDeposito = FPlugins "Design Deposito" "deposito" $ StatefullPlugin
   [(([],[
@@ -290,7 +290,7 @@ subdivision = FPlugins "Minimal Sprinkler" "sprinkler" $ StatefullPlugin
       asp <- atR "project" (atR "dados_projeto" (doubleP "area")) -< ()
       tdur <- atR "risk" (doubleP "area_limit") -< ()
       odxR "min_regions" -< ()
-      returnA -< Just $ tblist
+      returnA -< Just $ kvlist
          [Attr "min_regions" ((TB1 . SNumeric )  (ceiling $ asp/tdur))]
 
 
@@ -309,7 +309,7 @@ minimalDesign = PurePlugin url
       let af = d * fromIntegral msc * asp * 60
           msc = ceiling $ a / asp
           msv =  tdur * af *60
-      returnA -< Just $ tblist
+      returnA -< Just $ kvlist
             [ Attr "min_supply_volume" ((TB1 . SDouble)  msv)
             , Attr "minimal_flow" ((TB1 . SDouble)  af)
             , (Attr "min_sprinkler_count" . TB1 . SNumeric ) msc]
@@ -340,7 +340,7 @@ retencaoServicos
           csll = 0.01 * v
           irpj = if (0.015 * v) < 10 then 0 else  0.015*v
           issqn = if hasIssqn then 0.05 * v else 0
-      returnA -< Just $ tblist
+      returnA -< Just $ kvlist
           [att "pis" pis
           ,att "cofins" cofins
           ,att "csll" csll
@@ -394,9 +394,9 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
                          ) -< ()
 
         b <- act (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k ) -<   ( BS.pack . renderShowable $ protocolo  ,BS.pack . renderShowable $ ano  ,cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ attrT Control.Applicative.<$> ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ kvlist  $ attrT Control.Applicative.<$> ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-        let ao  (bv,taxa) =  tblist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
+        let ao  (bv,taxa) =  kvlist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
             iat bv = IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv)
         returnA -< (\i -> [PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] []   (POpt $ Just $ PAtom $ patch i)]) .ao <$> b) -< cpf
@@ -428,7 +428,7 @@ gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
                   let
                     total :: Int
                     total = length parcelas
-                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 . Just . ArrayTB1 $  Non.zipWith (\valorParcela ix -> TB1 $ tblist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (Non.fromList [0 .. total]))
+                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 . Just . ArrayTB1 $  Non.zipWith (\valorParcela ix -> TB1 $ kvlist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (Non.fromList [0 .. total]))
                   returnA -<  pagamento ) -< par
               returnA -<  Just [pg ]
 
@@ -441,9 +441,9 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = fromIntegral p :: Int
-                  let pagamento = FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",LeftTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 $ Just valorParcela), attrT ("scheduled_date",LeftTB1 $ Just pinicio) ]) [1 .. total]))
+                  let pagamento = FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ kvlist [attrT ("id",LeftTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 $ Just valorParcela), attrT ("scheduled_date",LeftTB1 $ Just pinicio) ]) [1 .. total]))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
-              returnA -<  TB1 $ tblist [pg ] )
+              returnA -<  TB1 $ kvlist [pg ] )
 
 
 gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ IOPlugin url
@@ -456,7 +456,7 @@ gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ IOPlugin url
                   ((\v m -> v * fromIntegral m) <$> idxK "price" <*> idxK "meses")
               <*> idxK "desconto" -< ()
           pag <- pagamentoArr -< descontado
-          returnA -< Just . tblist . pure $ pag
+          returnA -< Just . kvlist . pure $ pag
 
 
 
@@ -471,7 +471,7 @@ generateEmail = IOPlugin   url
           plain <- idxK "plain" -< ()
           odxR "raw" -< ()
           mesg <- act (lift .buildmessage )-< plain
-          returnA -< Just . tblist . pure . attrT  . ("raw",) . LeftTB1 $  Just   mesg
+          returnA -< Just . kvlist . pure . attrT  . ("raw",) . LeftTB1 $  Just   mesg
 
     buildmessage :: FTB Showable -> IO (FTB Showable)
     buildmessage (TB1 (SBinary mesg ))= TB1 .SText . T.pack . BS.unpack . B64Url.encode .BSL.toStrict <$>  renderMail' (Mail (Address Nothing "wesley.massuda@gmail.com") [Address Nothing "wesley.massuda@gmail.com"] [] [] [] [[mail]])
@@ -512,10 +512,10 @@ encodeMessage = PurePlugin url
                 | otherwise =Nothing
                 where
                       Just (TB1 (SText filename ))= filenameM
-                      tb n  =  TB1 . tblist . pure . Attr n $ (LeftTB1 v)
-                      tbv n v  =  TB1 . tblist . pure . Attr n $ (LeftTB1 v)
-                      deltb n  =  TB1 . tblist . pure . Attr n $ (LeftTB1 $ Just $ LeftTB1 v)
-                      tbmix l = TB1 . tblist . pure . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  ifNull l
+                      tb n  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 v)
+                      tbv n v  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 v)
+                      deltb n  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 $ Just $ LeftTB1 v)
+                      tbmix l = TB1 . kvlist . pure . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  ifNull l
           returnA -<  mimeTable enc part
     mixed =  nameO 1 (proc t ->  do
                 liftA3 (,,)
@@ -528,7 +528,7 @@ encodeMessage = PurePlugin url
     url = proc t -> do
           res <- atR "payload" messages -< ()
           atR "message_viewer" mixed -< ()
-          returnA -< tblist . pure . IT "message_viewer"  <$>  res
+          returnA -< kvlist . pure . IT "message_viewer"  <$>  res
 
     ifNull i = if L.null i then  Nothing else Just i
     decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
@@ -545,7 +545,7 @@ pagamentoServico = FPlugins "Gerar Pagamento" tname $ IOPlugin url
                   ((\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxK "price") <*> idxK "pacote"
                         <*> idxK "desconto") -< ()
           pag <- pagamentoArr -< descontado
-          returnA -< Just . tblist . pure  $ pag
+          returnA -< Just . kvlist . pure  $ pag
 
 fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
   where
@@ -565,10 +565,10 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
               t <- getCurrentTime
               let fname = "extrato-" <> renderShowable (justError "cant be infinite " $ unFinite (upperBound range)) <> "," <> show (utctDay t) <>".ofx"
                   input = L.intercalate ";" $ ["echo \"" <> "OP" <> "\""] <> ((\i ->  "echo \"" <> renderShowable i<> "\"" ) <$> (i<>[ justError "cant be infinite " $ unFinite (upperBound range)]))
-              callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` (print)
+              callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` print
               print $ "readFile " ++ fname
               file <- BS.readFile fname
-              return (TB1 $ SText $ T.pack fname , LeftTB1 $ Just $ LeftTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite (PAtom $ STime $ SDate $ utctDay t),False))
+              return (TB1 $ SText $ T.pack fname ,  LeftTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite (PAtom $ STime $ SDate $ utctDay t),False))
                  ) -< (range, pass)
         odx  (Just $ Range True  (BinaryConstant Equals CurrentDate)) "range" -< ()
 
@@ -597,7 +597,7 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
         ) -< t
 
       b <- act (\(TB1 (SBinary i )) -> liftIO . gpx $ BS.unpack i ) -< fn
-      let ao :: Index (TB2 Text Showable)
+      let ao :: Index (FTB (KV Text Showable))
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom .  fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
           ref :: [TB Text Showable]
           ref = [uncurry Attr ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
@@ -631,10 +631,10 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
         odxR "payeeid" -< t
         ) -< t
       b <- act ofx -< (,) fn i
-      let ao :: Index (TB2 Text Showable)
+      let ao :: Index (FTB (KV Text Showable))
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch (fromJust (findFK ["account" ] row )):) <$> b)
           ref :: [TB Text Showable]
-          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find (([Inline "fitid"]==). keyattri) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
+          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find (([Inline "fitid"]==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: Maybe (TBIdx Text Showable)
           tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 
@@ -662,12 +662,12 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ DiffIOPlugin url
 checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url
   where
     tname = "nota"
-    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) .justError "not loaded" . unSOptional' <$>  idxK i
+    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) .justError "not loaded" . unSOptional <$>  idxK i
     url ::  ArrowReaderM Identity
     url = proc t -> do
       xml <- varTB "nota_xml" -< ()
       traverse odxR (snd <$> translate)  -< ()
-      returnA -< tblist <$> nonEmpty (catMaybes $ replace <$> readNota  xml)
+      returnA -< kvlist <$> nonEmpty (catMaybes $ replace <$> readNota  xml)
 
     translate =  [("valoriss","issqn_retido"),
                   ("valorpis","pis_retido"),
@@ -693,7 +693,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ IOPlugin url
                                p <- varTB "goiania_password"-< t
                                returnA -< (, ) n  p  ) -< t
       b <- act (\(i, (j,a)) -> liftIO$ prefeituraNota j  a i ) -< (,) i r
-      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  (LeftTB1 . Just . TB1)  b)]
+      let ao =  Just $ kvlist [attrT ("nota",    LeftTB1 $ fmap  (LeftTB1 . Just . TB1)  b)]
       returnA -< ao
 
 queryArtCreaData = FPlugins "Art Crea Data" tname $ IOPlugin url
@@ -730,7 +730,7 @@ queryArtCrea = FPlugins "Documento Final Art Crea" tname $ IOPlugin url
                                p <- varTB "crea_password"-< t
                                returnA -< (, , ) n u p  ) -< t
       b <- act (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) -< (,) i r
-      let ao =  Just $ tblist [attrT ("art",    LeftTB1 $ fmap (LeftTB1 . Just . TB1 ) b)]
+      let ao =  Just $ kvlist [attrT ("art",    LeftTB1 $ fmap (LeftTB1 . Just . TB1 ) b)]
       returnA -< ao
 
 
@@ -749,7 +749,7 @@ queryArtBoletoCrea = FPlugins pname tname $ IOPlugin  url
                p <- varTB "crea_password"-< t
                returnA -< (, , ) n u p  ) -< t
       b <- act (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) -< (,) i r
-      let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 . Just $  (TB1 . SBinary. BSL.toStrict)  b)]
+      let ao =  Just $ kvlist [attrT ("boleto",   LeftTB1 . Just $  (TB1 . SBinary. BSL.toStrict)  b)]
       returnA -< ao
 
 queryArtAndamento = FPlugins pname tname $  IOPlugin url
@@ -766,7 +766,7 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       v <- act (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) -< (,) i r
       let artVeri dm = ("verified_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
           artPayd dm = ("payment_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
-          artInp inp = Just $ tblist $ attrT Control.Applicative.<$> [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+          artInp inp = Just $ kvlist $ attrT Control.Applicative.<$> [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 
 plugList :: [PrePlugins]

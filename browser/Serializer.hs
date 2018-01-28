@@ -1,19 +1,28 @@
 {-# LANGUAGE DefaultSignatures,TypeFamilies, ScopedTypeVariables, DeriveFunctor,
-  OverlappingInstances,DeriveGeneric,FlexibleContexts,FlexibleInstances,TypeOperators #-}
+  DeriveGeneric,FlexibleContexts,FlexibleInstances,TypeOperators #-}
 
 module Serializer where
 
 import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Set as S
-import Data.Monoid
+import Data.Monoid -- hiding((<>))
+import qualified Data.Semigroup as S
 import Control.Arrow
+import Data.Interval (intersection)
+import Data.Functor.Contravariant.Divisible
+import Control.Applicative
 import Data.Maybe
+import Control.Monad.Reader
+import Control.Monad.Writer  hiding((<>))
 import Data.Functor.Apply
+import Data.Functor.Compose
+import Data.Functor.Identity
 import Data.Dynamic
 import Data.Profunctor.Cayley
 import qualified Data.Foldable as F
 import Data.Profunctor
+import Data.Profunctor.Product
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Interval as Interval
 import Data.Time
@@ -36,138 +45,26 @@ import qualified Data.Text as T
 import Postgresql.Parser
 import GHC.Generics
 
-class ADecodeTB1 f where
 
 class DecodeTB1 f where
-  decFTB :: FTB a -> f a
+  decFTB :: Ord a => FTB a -> f a
   decFTB = decodeIso isoFTB
-  encFTB :: f a -> FTB a
+  encFTB :: Ord a=> f a -> FTB a
   encFTB = encodeIso isoFTB
-  isoFTB :: SIso [KTypePrim]   (FTB a) (f a)
+  isoFTB :: Ord a=> SIso [KTypePrim]  (FTB a)  (f a)
+
+instance DecodeTB1 Identity where
+  decFTB (TB1 i) = Identity i
+  encFTB (Identity i) = TB1 i
+  isoFTB = SIso [] (tell . encFTB) decFTB
 
 instance DecodeTB1 Only where
   decFTB (TB1 i) = Only i
   encFTB (Only i) = TB1 i
-  isoFTB = SIso [] encFTB decFTB
-
-class DecodeTable a where
-  decodeT :: TBData Text Showable -> a
-  decodeT = decodeIso isoTable
-  encodeT :: a -> TBData Text Showable
-  encodeT = encodeIso isoTable
-  isoTable :: SIso (Union (Reference Text)) (TBData Text Showable) a
-  -- default isoTable :: (Generic a, DecodeTable' (Rep a)) => SIso (Union (Reference Text)) (TBData Text Showable) a
-  -- isoTable  = isoMap (to,from) isoTable'
-
-
-
-infixr 1 :**:
-
-data Reference k
-  = AttrRef (KType KPrim) k
-  | InlineTable (KType Text) k (Union (Reference k))
-  deriving(Eq,Ord,Show)
-
-prim :: (Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
-  k -> SIso (Union (Reference k))  (TBData k Showable) (f a)
-prim ix = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (mk. fs . fmap fsp ) (fmap bsp . bs . lk)
-    where SIso l fs bs = isoFTB
-          SIso kp fsp bsp = isoS
-          lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
-          mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
-
-
-class DecodeTable' f where
-  isoTable' :: SIso (Union (Reference Text)) (TBData Text Showable) (f a)
-
-
-instance  (Selector c , DecodeShowable a)  => DecodeTable' (S1 c (Rec0 a)) where
-  isoTable' = SIso (Many [One $ AttrRef (Primitive [] kp ) ix])  (mk. TB1 . fsp .unK1 . unM1) (M1 . K1 .  bsp  . unTB1 . lk)
-        where
-              SIso kp fsp bsp = isoS
-              lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
-              mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
-              ix = T.pack  $ selName (undefined :: S1 c f1 a)
-
-
-instance  (Functor f , Selector c , DecodeTB1 f , DecodeShowable a)  => DecodeTable' (S1 c (Rec0 (f a)) ) where
-  isoTable' = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (mk. fs . fmap fsp .unK1 . unM1) (M1 . K1 . fmap bsp . bs . lk)
-        where SIso l fs bs = isoFTB
-              SIso kp fsp bsp = isoS
-              lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
-              mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
-              ix = T.pack  $ selName (undefined :: S1 c f1 a)
-                {-
-instance  (Functor f , Selector c , DecodeTB1 f , DecodeTable a)  => DecodeTable' (S1 c (Rec0 (f a)) ) where
-  isoTable' = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (mk. fs . fmap fsp .unK1 . unM1) (M1 . K1 . fmap bsp . bs . lk)
-        where SIso l fs bs = isoFTB
-              SIso kp fsp bsp = isoTable
-              lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
-              mk = KV. M.singleton (S.singleton $ Inline ix) . IT ix
-              ix = T.pack  $ selName (undefined :: S1 c f1 a)
--}
-instance (DecodeTable' f1) => DecodeTable' (D1 c  f1 ) where
-  isoTable' = SIso k  (\(M1 l ) -> i l )  (M1 . j)
-    where
-      (SIso k i j) = isoTable'
-
-instance (DecodeTable' f1) => DecodeTable' (C1 c  f1 ) where
-  isoTable' = SIso k  (\(M1 l ) -> i l )  (M1 . j)
-    where
-      (SIso k i j) = isoTable'
-
-
-
-instance (DecodeTable' f , DecodeTable' g) => DecodeTable' (f :*: g) where
-  isoTable' =  SIso (k <> l) (\(a :*: b) -> i a <> m b) (\l ->  j l :*: n l)
-    where
-      (SIso k i j)  = isoTable'
-      (SIso l m n) = isoTable'
-
-
-data TestIso
- = TestIso {
-   metrics :: [Double],
-   key :: Maybe Int
-           }  deriving(Generic)
-
-instance DecodeTable TestIso where
-
-
-class IsoFunctor f where
-  isoMap  :: (a -> b ,b -> a) -> f a -> f b
-class Monoidal f where
-  unit :: f ()
-  (**) :: f a -> f b -> f (a,b)
-
-instance IsoFunctor (SIso m l) where
-  isoMap (f,g) (SIso l i j) = SIso l (i . g ) (f . j )
-
-
-instance (Monoid l,Monoid m) => Monoidal (SIso m l)  where
-  unit  = SIso  mempty (const mempty) (const ())
-  (**) = mergeIso
-
-
-mergeIso
-  :: (Monoid s, Monoid b) => SIso s b t1 -> SIso s b t -> SIso s b (t1, t)
-mergeIso  (SIso k i j) (SIso l m n ) =  SIso (k <> l) (\(a,b) -> i a <> m b) (j &&& n)
-
-data SIso s b a
-  = SIso
-  { stoken :: s
-  , encodeIso :: a ->b
-  , decodeIso :: b ->a
-  }
-
-
-newtype (:**:) f g a = CompFunctor
-  { unCompF :: f (g a)
-  } deriving (Functor)
-
+  isoFTB = SIso [] (tell . encFTB)  decFTB
 
 instance DecodeTB1 [] where
-  isoFTB = SIso [KOptional,KArray] encFTB decFTB
+  isoFTB = SIso [KOptional,KArray] (tell .encFTB) decFTB
     where
       decFTB (LeftTB1 i ) = maybe [] decFTB i
       decFTB (ArrayTB1 i ) = Non.toList (unTB1 <$> i)
@@ -176,160 +73,317 @@ instance DecodeTB1 [] where
 instance DecodeTB1 Interval.Interval where
   decFTB (IntervalTB1 i) = fmap unTB1 i
   encFTB i = IntervalTB1 $ fmap TB1 i
-  isoFTB = SIso [KInterval] encFTB decFTB
+  isoFTB = SIso [KInterval] (tell . encFTB) decFTB
 
 instance DecodeTB1 Non.NonEmpty  where
   decFTB (ArrayTB1 i) = fmap unTB1 i
   encFTB i = ArrayTB1 $ fmap TB1 i
-  isoFTB = SIso [KArray] encFTB decFTB
+  isoFTB = SIso [KArray] (tell . encFTB) decFTB
 
 instance DecodeTB1 Maybe  where
-  isoFTB = SIso [KOptional] encFTB decFTB
+  isoFTB = SIso [KOptional] (tell . encFTB) decFTB
     where
       decFTB (LeftTB1 i) =  fmap unTB1 i
       encFTB i = LeftTB1 $ fmap TB1  i
 
+unjoin (TB1 i) = TB1 (TB1 i)
+unjoin (LeftTB1 i ) = LeftTB1 $ fmap TB1 i
+unjoin (ArrayTB1 i ) = ArrayTB1 $ fmap TB1 i
+unjoin (IntervalTB1  i ) = IntervalTB1 $ fmap TB1 i
 
-instance DecodeTB1 g => DecodeTB1 (Maybe :**: g) where
-  isoFTB = SIso (KOptional : l) encFTB decFTB
+instance (DecodeTB1 f , Functor f,DecodeTB1 g ) => DecodeTB1 (Compose f g) where
+  isoFTB = SIso (l1 <> l) (tell . joinFTB . (snd . runWriter) . enc .  fmap ((snd . runWriter) .enc1) . getCompose) (Compose . fmap dec1. dec . unjoin)
     where
       SIso l enc dec = isoFTB
-      decFTB (LeftTB1 i) = CompFunctor $ fmap dec i
-      encFTB (CompFunctor i) = LeftTB1 $ fmap enc i
+      SIso l1 enc1 dec1 = isoFTB
+
+instance DecodeTB1 FTB where
+  isoFTB = SIso [] tell id
+
+instance DecodeTB1 Union where
+  isoFTB = itotal $ isplit3 (IsoArrow build destroy)
+      (compose . compose <$$> isoFTB)  (compose . compose <$$> isoFTB) isoFTB
+    where
+      build (Left (Left i)) = Many i
+      build (Left (Right i)) = ISum i
+      build (Right i) = One i
+      destroy (Many i) = Left (Left i)
+      destroy (ISum i) = Left (Right i)
+      destroy (One i) = Right i
 
 
-data TIso i b  = TIso { unTiso :: i -> b , tIso :: b -> i}
+data SIso s b  c
+  = SIso
+  { stoken :: s
+  , encodeIso' :: c  ->Writer b ()
+  , decodeIso :: b -> c
+  }
 
-instance Category TIso where
-  id  = TIso id id
-  TIso i j  .  TIso a b = TIso (i.a ) (b . j)
-
-traverseIso :: Functor f => TIso a b -> TIso (f a ) (f b)
-traverseIso (TIso i j)  =  TIso (fmap i) (fmap j)
-
-ftbIso :: DecodeTB1 b => TIso (b a ) (FTB a)
-ftbIso  = TIso encFTB decFTB
-
-
-tableIso :: DecodeTable b => TIso b (TBData Text Showable)
-tableIso  = TIso encodeT decodeT
+instance Ord a => Monoid (FTB a) where
+  mempty = LeftTB1 Nothing
+  mappend (LeftTB1 i ) (LeftTB1 j) =  LeftTB1 $ i <> j
+  mappend (ArrayTB1 i ) (ArrayTB1 j) =  ArrayTB1 $ i S.<> j
+  mappend (IntervalTB1 i ) (IntervalTB1 j) =  IntervalTB1 $ intersection i j
+  mappend (TB1 i ) (TB1 j) =  TB1 j
 
 
-unOnly :: Only a -> a
-unOnly (Only i) = i
+encodeIso :: Monoid b => SIso s b a -> a  -> b
+encodeIso l i =  snd $ runWriter  (encodeIso' l $ i )
 
-only = (unOnly ,Only)
+infixr 5 <$$>
+
+(<$$>) :: IsoProfunctor f => (a |-> b) -> f a -> f b
+(<$$>)  = isoMap
+
+
+decodeT :: DecodeTable a=> TBData Text Showable -> a
+decodeT = decodeIso isoTable
+
+encodeT :: DecodeTable a => a -> TBData Text Showable
+encodeT = encodeIso isoTable
+
+class DecodeTable a where
+  isoTable :: SIso (Union (Reference Text)) (TBData Text Showable) a
+
+type (|->) a b = IsoArrow  a b
+data IsoArrow a b = IsoArrow ( a -> b)  (b -> a )
+
+class IsoProfunctor f => IsoApplicative f where
+  ipure :: f a
+  iassoc :: ((a,b) |-> c) -> f a  -> f b -> f c
+
+class IsoProfunctor f => IsoDivisible f where
+  itotal :: f (Maybe a) -> f a
+  isplit :: (Either a b |-> c) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c)
+
+instance (Monoid j ,Monoid i) => IsoDivisible  (SIso i j) where
+  itotal = isoMap (IsoArrow fromJust Just )
+  isplit (IsoArrow aenc adec) fa fb =  SIso (stoken fa  `mappend` stoken fb) (void . traverse (either (encodeIso'  fa.Just ) (encodeIso' fb . Just) ). fmap adec) (\i -> fmap aenc $ (Left <$> (decodeIso fa $ i)) <|> (Right <$> (decodeIso fb $ i)) )
+    where
+          pR (Right i) = Just i
+          pR i = Nothing
+          pL (Left i) = Just i
+          pL i = Nothing
+
+
+type a :|:  b = Either a b
+
+isplit3 :: IsoDivisible f => ((a :|: b :|: c) |-> d) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c) -> f (Maybe d)
+isplit3 (IsoArrow f g) a b c = isplit (IsoArrow f g )  (isplit id a b) c
+
+isplit4 :: IsoDivisible f => ((a :|: b :|: c :|: d ) |-> e) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c) -> f (Maybe d) -> f (Maybe e)
+isplit4 (IsoArrow f g) a b c d = isplit (IsoArrow f g )  (isplit3 id a b c) d
+
+isplit5 :: IsoDivisible f => ((a :|: b :|: c :|: d :|: e ) |-> g) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c) -> f (Maybe d) -> f (Maybe e) -> f (Maybe g)
+isplit5 (IsoArrow f g) a b c d e = isplit (IsoArrow f g )  (isplit4 id a b c d) e
+
+iassoc3 :: IsoApplicative f => ((a,b,c) |-> d) -> f a  -> f b -> f c -> f d
+iassoc3 (IsoArrow f g)  a b c = iassoc   (IsoArrow f2 g2) a (iassoc  id  b c)
+  where f2 = (\(i,(j,k)) -> f (i,j,k) )
+        g2 = (\(i,j,k) ->  (i,(j,k))) . g
+
+iassoc4 :: IsoApplicative f =>((a,b,c,d) |-> e) -> f a  -> f b -> f c -> f d -> f e
+iassoc4 (IsoArrow f g)  a b c d= iassoc   (IsoArrow f2 g2) (iassoc id a b) (iassoc  id  c d)
+  where f2 = (\((i,j),(k,l)) -> f (i,j,k,l))
+        g2 = (\(i,j,k,l) ->  ((i,j),(k,l))) . g
+
+iassoc10 :: IsoApplicative z =>((a,b,c,d,e,f,g,h,i,j) |-> k) -> z a  -> z b -> z c -> z d -> z e -> z f -> z g ->z h -> z i -> z j  ->z k
+iassoc10 (IsoArrow f1 g1)  a b c d e f g h i j  = iassoc   (IsoArrow f2 g2) (iassoc5 id a b c d e ) (iassoc5  id  f g h i j)
+  where f2 = (\((i,j,k,l,m),(n,o,p,q,r)) -> f1 (i,j,k,l,m,n,o,p,q,r))
+        g2 = (\(i,j,k,l,m,n,o,p,q,r) ->  ((i,j,k,l,m),(n,o,p,q,r))) . g1
+
+iassoc11 :: IsoApplicative z =>((a,b,c,d,e,f,g,h,i,j,k) |-> l) -> z a  -> z b -> z c -> z d -> z e -> z f -> z g ->z h -> z i -> z j  ->z k -> z l
+iassoc11 (IsoArrow f1 g1)  a b c d e f g h i j k = iassoc   (IsoArrow f2 g2) (iassoc5 id a b c d e ) (iassoc6  id  f g h i j k)
+  where f2 = (\((i,j,k,l,m),(n,o,p,q,r,s)) -> f1 (i,j,k,l,m,n,o,p,q,r,s))
+        g2 = (\(i,j,k,l,m,n,o,p,q,r,s) ->  ((i,j,k,l,m),(n,o,p,q,r,s))) . g1
+
+iassoc5 :: IsoApplicative f =>((a,b,c,d,e) |-> g) -> f a  -> f b -> f c -> f d -> f e -> f g
+iassoc5 (IsoArrow f g)  a b c d  e= iassoc   (IsoArrow f2 g2) (iassoc id a b) (iassoc3  id  c d e)
+  where f2 = (\((i,j),(k,l,m)) -> f (i,j,k,l,m))
+        g2 = (\(i,j,k,l,m) ->  ((i,j),(k,l,m))) . g
+
+iassoc6 :: IsoApplicative z =>((a,b,c,d,e,f) |-> g) -> z a  -> z b -> z c -> z d -> z e -> z f -> z g
+iassoc6 (IsoArrow f1 g1)  a b c d  e f = iassoc  (IsoArrow f2 g2) (iassoc id a b) (iassoc4  id  c d e f)
+  where f2 = (\((i,j),(k,l,m,n)) -> f1 (i,j,k,l,m,n))
+        g2 = (\(i,j,k,l,m,n) ->  ((i,j),(k,l,m,n))) . g1
+
+
+instance (Monoid x , Monoid v) => IsoApplicative (SIso x v) where
+  iassoc (IsoArrow f g) pqf pqa = SIso (stoken pqf `mappend` stoken pqa) qb pb
+    where
+      pb =  liftA2 (curry f ) (decodeIso pqf) (decodeIso pqa)
+      qb = (\(i,j) -> liftA2 mappend (encodeIso' pqf $ i ) (encodeIso' pqa $ j ) ) . g
+
+
+class IsoProfunctor f  where
+  isoMap :: (a |-> c ) -> f a -> f c
+
+instance IsoProfunctor (IsoArrow a ) where
+  isoMap  = (.)
+
+instance IsoProfunctor (SIso i l ) where
+  isoMap (IsoArrow f  g) (SIso l i j) = SIso l (i . g ) (f . j )
+
+
+data Reference k
+  = AttrRef (KType KPrim) k
+  | InlineTable (KType Text) k (Union (Reference k))
+  deriving(Eq,Ord,Show)
+
+
+prim :: (Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
+  k -> SIso (Union (Reference k))  (TBData k Showable) (f a)
+prim ix = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+    where i@(SIso l fs bs) = isoFTB
+          j@(SIso kp fsp bsp) = isoS
+          lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
+          mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
+
+nestWith :: (Functor f, DecodeTB1 f) =>
+  Text -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
+nestWith ix nested = SIso (Many [One $ InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+    where i@(SIso l fs bs) = isoFTB
+          j@(SIso kp fsp bsp) = nested
+          lk =  _fkttable . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
+          mk = KV. M.singleton (S.singleton $ Inline ix) . IT ix
+
+nest :: (Functor f, DecodeTable a, DecodeTB1 f) =>
+  Text -> SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
+nest ix = nestWith ix isoTable
+
+traverseIso  (SIso g k l) (SIso f i j)=  SIso (f,g) (tell . (execWriter . i) . fmap (execWriter . k)) (fmap l . j)
+
+
+
+instance Category IsoArrow where
+  id = IsoArrow id id
+  (.)  (IsoArrow f g ) (IsoArrow l m )= IsoArrow (  f . l ) (  m . g )
+
+isoArrow (i,j) = IsoArrow i j
+
+
+only = (IsoArrow unOnly Only)
+  where
+    unOnly :: Only a -> a
+    unOnly (Only i) = i
+identity = (IsoArrow runIdentity  Identity)
+
+dynamic :: Typeable a => IsoArrow Dynamic a
+dynamic = (IsoArrow   ( justError "cant cast" . fromDynamic   )) (toDyn )
+
+compose = IsoArrow getCompose Compose
+
+mapIso (IsoArrow i j) = IsoArrow (fmap i ) (fmap j)
+
+binary = (IsoArrow unBinary  Binary)
+  where unBinary (Binary i) = i
+
+nonempty = (IsoArrow Non.toList Non.fromList)
 
 type IsoTable a = SIso (Union (Reference Text)) (TBData Text Showable)  a
 
 instance DecodeTable Plugins where
-  isoTable = mergeIso (isoMap only $ prim "ref") (isoMap only (prim "plugin"))
+  isoTable = iassoc id (identity <$$> prim "ref") (identity <$$> prim "plugin")
 
-test = do
-  let (SIso k _ _ ) = isoTable :: IsoTable Plugins
-  print k
+mapField (SIso p  i j ) (SIso (One (AttrRef (Primitive k ki) v)) a b ) = SIso (One (AttrRef (Primitive (k <> p) ki) v)) (tell . (execWriter . a) . (execWriter . i)) (j .  b)
+mapField (SIso p  i j ) (SIso (One (InlineTable (Primitive k ki) v l )) a b ) = SIso (One (InlineTable (Primitive (k <> p) ki) v l )) (tell . (execWriter  .a). (execWriter . i)) (j .  b)
 
-instance DecodeShowable Showable where
-  decodeS = id
-  encodeS = id
-instance DecodeTB1 FTB where
-  decFTB = id
-  encFTB = id
-instance (Compact a,Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
-         DecodeTable (TableModificationK (Text, Text) (RowPatch Text a)) where
-  decodeT d =
-    TableModification
-      (Just mod_id)
-      time
-      username
-      (schema, table)
-      mod_data
+mapIsoArrow (IsoArrow f g ) = IsoArrow (fmap f ) (fmap g)
+
+
+instance DecodeTable (Access Text) where
+  isoTable = itotal $ isplit (IsoArrow build destroy)
+      (nestWith "nested" (iassoc id (prim "ref") ( nest "nest"))) (prim "iprod" )
     where
-      schema = unOnly . att . ix "schema_name" $ d
-      table = unOnly . att . ix "table_name" $ d
-      mod_id = unOnly . att . ix "modification_id" $ d
-      mod_data = unBinary . unOnly . att . ix "modification_data" $ d
-      username = unOnly . att . ix "user_name" $ d
-      time = unOnly . att . ix "modification_time" $ d
-  encodeT tm@(TableModification id ts u table ip) =
-    tblist
-    [ Attr "user_name" (txt u)
-    , Attr "modification_time" (timestamp ts)
-    , Attr "table_name" (txt $ snd table)
-    , Attr "data_index" (array (TB1 . encodeS) mod_key)
-    , Attr "modification_data" (TB1 . SBinary . BSL.toStrict . B.encode $ ip)
-    , Attr "schema_name" (txt $ fst table)
-    , Attr "modification_id" (opt int id)
-    ]
-    where
-      (Idex pidx , _) =
-        case ip of
-          PatchRow (p,i) -> (p,i)
-          CreateRow (ix,i) -> (ix,patch i)
-          DropRow ix -> (ix,[])
-      mod_key :: Non.NonEmpty (Binary (FTB a))
-      mod_key = Non.fromList $ Binary . fmap create <$> justError ("no index: " ++ show tm) (nonEmpty pidx)
-  isoTable = undefined
+      build (Right i ) = IProd Nothing i
+      build (Left (i,j) )  = Nested i j
+      destroy  (IProd _ i ) = Right i
+      destroy  (Nested i j) = Left (i,j)
 
-ix i d = justError ("no field " ++ show (i,d)) $ indexField (IProd Nothing i) d
+
+instance DecodeTable (TableModificationK (Text, Text) (RowPatch Text Showable )) where
+  isoTable = iassoc5  (IsoArrow (\(a,b,c,d,e) -> TableModification a b c d e) (\(TableModification a b c d e ) -> (a,b,c,d,e)))
+      (prim "modification_id")
+      (identity <$$> prim "modification_time")
+      (identity <$$> prim "user_name")
+      (iassoc id
+          (identity <$$> prim "schema_name")
+          (identity <$$> prim "table_name"))
+      (iassoc id
+          (identity <$$> prim "data_index")
+          (identity<$$> prim "modification_data"))
 
 class DecodeShowable a where
   decodeS :: Showable -> a
   encodeS :: a -> Showable
   isoS :: SIso KPrim Showable a
 
+instance DecodeShowable Showable where
+  isoS = SIso (PDynamic "showable") tell id
+
 instance  DecodeShowable Bool where
   decodeS (SBoolean i) =  i
   encodeS i = SBoolean  i
-  isoS = SIso PBoolean encodeS decodeS
-
+  isoS = SIso PBoolean (tell . encodeS) decodeS
 
 instance  DecodeShowable BS.ByteString  where
   decodeS (SBinary i) =  i
   encodeS i = SBinary i
-  isoS = SIso PBinary encodeS decodeS
-
+  isoS = SIso PBinary (tell. encodeS) decodeS
 
 instance  DecodeShowable BSL.ByteString  where
   decodeS (SBinary i) = BSL.fromStrict i
   encodeS i = SBinary (BSL.toStrict i)
-  isoS = SIso PBinary encodeS decodeS
-
+  isoS = SIso PBinary (tell . encodeS) decodeS
 
 instance B.Binary a => DecodeShowable (Binary a) where
   decodeS (SBinary i) = Binary $ B.decode (BSL.fromStrict i)
   encodeS (Binary i) = SBinary (BSL.toStrict $ B.encode i)
-  isoS = SIso PBinary encodeS decodeS
+  isoS = SIso PBinary (tell. encodeS ) decodeS
 
 instance DecodeShowable Int where
   decodeS (SNumeric i) = i
   encodeS = SNumeric
-  isoS = SIso (PInt 8) encodeS decodeS
+  isoS = SIso (PInt 8) (tell . encodeS) decodeS
 
 instance DecodeShowable Double where
   decodeS (SDouble i) = i
   encodeS = SDouble
-  isoS = SIso PDouble encodeS decodeS
+  isoS = SIso PDouble (tell . encodeS) decodeS
 
 instance DecodeShowable Text where
   decodeS (SText i) = i
   encodeS = SText
-  isoS = SIso PText encodeS decodeS
+  isoS = SIso PText (tell . encodeS) decodeS
 
 instance DecodeShowable UTCTime where
   decodeS (STime (STimestamp i)) = i
   encodeS i = STime (STimestamp i)
-  isoS = SIso (PTime (PTimestamp Nothing) ) encodeS decodeS
+  isoS = SIso (PTime (PTimestamp Nothing) ) (tell . encodeS) decodeS
+
+instance DecodeShowable (FTB Showable)  where
+  isoS = SIso (PDynamic "ftb_showable") (tell . encodeS) decodeS
+    where
+      encodeS i  = SDynamic (HDynamic  (toDyn i))
+      decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
+
+
+instance DecodeShowable (TBIndex Showable)  where
+  isoS = SIso (PDynamic "row_index") (tell . encodeS) decodeS
+    where
+      encodeS i  = SDynamic (HDynamic  (toDyn i))
+      decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
+
+instance DecodeShowable (RowOperation Text Showable) where
+  isoS = SIso (PDynamic "row_operation") (tell . encodeS) decodeS
+    where
+      encodeS i  = SDynamic (HDynamic  (toDyn i))
+      decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
+
 
 instance DecodeShowable PrePlugins where
-  encodeS i  = SHDynamic (HDynamic  $toDyn i)
-  decodeS (SHDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
-  isoS = SIso PDynamic  encodeS decodeS
+  isoS = SIso (PDynamic "plugin") (tell . encodeS) decodeS
+    where
+      encodeS i  = SDynamic (HDynamic  $toDyn i)
+      decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
 
-unBinary (Binary i) = i
-
-att :: (Functor f, DecodeTB1 f, DecodeShowable a) => TB k Showable -> f a
-att (Attr i j) = decodeS <$> decFTB j
-
-itt :: (Functor f, DecodeTB1 f, DecodeTable a) => TB Text Showable -> f a
-itt (IT i j) = decodeT <$> decFTB j

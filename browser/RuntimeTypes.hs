@@ -1,29 +1,24 @@
 {-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
-import Control.Concurrent
 import Types
 import Types.Index as G
 import Data.Ord
 import Types.Patch
 import Text
+import qualified Data.Functor.Contravariant as C
 import qualified Data.IntMap as IM
 import Control.Exception
 import Postgresql.Types
 import Query
 import Data.Functor.Constant
-import Data.Time
-import Step.Common
 import Data.Interval(Interval)
 import qualified Data.Interval as Interval
 import Control.Applicative.Lift
-import Debug.Trace
 import GHC.Generics
-import Data.Unique
 import Data.Maybe
 import Control.DeepSeq
 import Data.Binary
-import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM
 import Control.Monad.RWS
@@ -35,7 +30,6 @@ import qualified Data.List as L
 import Control.Arrow
 import Data.Text (Text)
 import Control.Applicative
-import Control.Monad.Writer
 
 import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple hiding (Binary)
@@ -48,9 +42,7 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import Control.Monad.Reader
 import qualified Data.Foldable as F
-import Data.Traversable
 import Control.Lens.TH
-import GHC.Stack
 
 
 metaInf :: TVar DatabaseSchema -> IO InformationSchema
@@ -61,9 +53,10 @@ indexSchema smvar text = (\m -> justError ("no schema: "  ++ show text ++ " from
 
 
 type InformationSchema = InformationSchemaKV Key Showable
+
 type UserTable = (Int,Text)
 
-data TidingsAffine  a = TA  (R.Behavior a) (R.Event (Index a))
+data TidingsAffine  a = TA (R.Behavior a) (R.Event [Index a])
 
 data DatabaseSchema
   = DatabaseSchema
@@ -74,9 +67,7 @@ data DatabaseSchema
     , globalRef :: TVar (HM.HashMap Text InformationSchema )
     }
 
-type TBRef k s = (Map k (FTB s), TBData k s )
 
-type PTBRef k s = (Map k (FTB s), TBIdx k s )
 
 data InformationSchemaKV k v
   = InformationSchema
@@ -87,11 +78,10 @@ data InformationSchemaKV k v
   , authtoken :: Auth
   , _keyMapL :: HM.HashMap (Text,Text) k
   , colMap ::  HM.HashMap Text (IM.IntMap k)
-  , _backendKey :: Map Unique PGKey
-  , _keyUnique :: Map Unique k
-  , _pkMapL :: Map (Set k ) Table
+  , _backendKey :: Map KeyUnique PGKey
+  , _keyUnique :: Map KeyUnique k
+  , _pkMapL :: Map (Set k) Table
   , _tableMapL :: HM.HashMap Text Table
-  , tableSize :: Map Table Int
   , mvarMap :: TVar (Map (TableK k) (DBRef KeyUnique v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
@@ -133,6 +123,8 @@ data BrowserState
 
 type TBF  k v = (KVMetadata k ,KV k v)
 
+instance Show (InformationSchemaKV k v ) where
+  show i = show $ schemaName i
 
 tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
 tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap (tableMap . snd) (HM.toList $ depschema s))
@@ -141,119 +133,116 @@ keyMap = _keyMapL
 pkMap = _pkMapL
 
 data DBRef k v =
-  DBRef  { patchVar :: TChan [RowPatch k v]
-         , idxVar :: TVar (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)))
-         , idxChan :: TChan (WherePredicateK k , Int,Int ,PageTokenF  v)
-         , collectionState  :: TVar (KVMetadata k, [SecondaryIndex k v],TableIndex k v)
+  DBRef  { dbRefTable :: TableK k
+         , patchVar :: TChan [TableModificationU k v]
+         , idxVar :: TVar (IndexMetadata k v)
+         , idxChan :: TChan (IndexMetadataPatch k v)
+         , collectionState  :: TVar (TableRep k v)
          }
 
-data DBVar2  v=
+data DBVar2 v =
   DBVar2
-  { iniRef :: DBRef Unique v
-  , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
+  { iniRef :: DBRef KeyUnique v
+  , idxTid :: R.Tidings (IndexMetadata Key v)
   , collectionTid :: R.Tidings (TableIndex Key v)
-  , collectionSecondaryTid :: R.Tidings [SecondaryIndex Key v]
-  , collectionPatches :: R.Event [RowPatch Key v ]
+  , collectionSecondaryTid :: R.Tidings (Map [Key] (SecondaryIndex Key v))
   }
 
 
-type IndexMetadata k v = Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))
+newtype IndexMetadata k v =  IndexMetadata { unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))) } deriving(Show)
+type IndexMetadataPatch k v = (WherePredicateK k,Int,Int,PageTokenF v)
+
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
-type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
+type SecondaryIndex k v = GiST (TBIndex v) (TBIndex v,[AttributePath k (AccessOp v , FTB v)])
 
-type TableRep k v  = (KVMetadata k,[SecondaryIndex k v],TableIndex k v)
+type TableRep k v  = (KVMetadata k,M.Map [k] (SecondaryIndex k v),TableIndex k v)
 
-instance Ord v => Compact (RowPatch k v) where
-  compact i =  concat . L.transpose $ compact .  snd <$> groupSplit2  index id i
+instance (Show k ,Show v ) => Patch (InformationSchemaKV  k v )  where
+  type Index (InformationSchemaKV k v) = [TableModificationU k v]
 
-instance Address (RowPatch k v) where
-  type Idx (RowPatch k v ) = TBIndex v
-  index (PatchRow (i,_)) =  i
-  index (CreateRow (i,_)) =  i
-  index (DropRow i) =  i
 
-instance Patch (TBRef Key Showable) where
-  type Index (TBRef Key Showable) = (Map Key (FTB Showable),TBIdx Key Showable)
-  diff (i,j) (k,l)
-    | i == k =  (k ,) <$> diff j l
-    | otherwise =  Just (k,patch l)
-  patch (i,j) = (i,patch j)
-  applyIfChange (i,j) (k,l)
-    | i == k = (k,) <$> applyIfChange j l
-    | otherwise = (k,) <$> applyIfChange j l
-  createIfChange (i,j) = (i,) <$> createIfChange j
+type RefTables = ( R.Tidings (IndexMetadata CoreKey Showable)
+                 , Collection CoreKey Showable
+                 , R.Tidings (TableIndex CoreKey Showable)
+                 , R.Tidings (M.Map [Key] (SecondaryIndex Key Showable))
+                 , TChan [TableModificationU KeyUnique Showable] )
 
-type RefTables = (R.Tidings (IndexMetadata CoreKey Showable),Collection CoreKey Showable, R.Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),R.Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
+type PKConstraint = C.Predicate [Column CoreKey Showable]
 
-type PKConstraint = [Column CoreKey Showable] -> Bool
+type TBConstraint = C.Predicate (TBData CoreKey Showable)
 
-type TBConstraint = TBData CoreKey Showable -> Bool
+type SelPKConstraint = [([Set (Rel Key)],R.Tidings PKConstraint)]
 
-type SelPKConstraint = [([Column CoreKey ()],R.Tidings PKConstraint)]
-
-type SelTBConstraint = [([Column CoreKey ()],R.Tidings TBConstraint)]
+type SelTBConstraint = [([Set (Rel Key)],R.Tidings TBConstraint)]
 
 type PluginRef a = [(Union (Access Key), R.Tidings (Maybe (Index a)))]
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (KVMetadata k,G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (KVMetadata k,G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
-  applyIfChange = applyGiSTChange
+  applyUndo = applyGiSTChange
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (TableRep k a) where
-  type Index (TableRep k a) = RowPatch k (Index a)
-  applyIfChange = applyTableRep
+  type Index (TableRep k a) = [RowPatch k (Index a)]
+  applyUndo i j = F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (i,[]))  j
 
+instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
+  type Index (IndexMetadata k v) =  [(WherePredicateK k ,Int,Int,PageTokenF v)]
+  apply = (F.foldl' vapply)
+    where vapply (IndexMetadata m) (v,s,i,t) = IndexMetadata $ M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v m
 
+instance Compact (IndexMetadataPatch k v) where
+  compact i = i
+
+mapRowPatch f = Le.bimap (fmap f) (fmap f)
 applyGiSTChange ::
      (NFData k, NFData a, G.Predicates (G.TBIndex a), PatchConstr k a)
   => (KVMetadata k,G.GiST (G.TBIndex a) (TBData k a))
   -> RowPatch k (Index a)
-  -> Maybe (KVMetadata k,G.GiST (G.TBIndex a) (TBData k a))
-applyGiSTChange (m,l) (DropRow patom) =
-  Just . (m,)$G.delete (create <$> patom) G.indexParam l
-applyGiSTChange (m,l) (PatchRow (ipa, patom)) =
-  (m,) <$>case G.lookup (G.notOptional i) l of
+  -> Either String ((KVMetadata k,G.GiST (G.TBIndex a) (TBData k a)),RowPatch k (Index a))
+applyGiSTChange (m,l) (patom,DropRow ) =
+  maybe (Left $ "key dont exist" ++ show patom) Right $
+    ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch . createRow' m <$> G.lookup (create <$> patom) l
+applyGiSTChange (m,l) (ipa,PatchRow  patom) =
+  first (m,) <$>case flip G.lookup l =<< (G.notOptionalM i)  of
     Just v -> do
-      el <- applyIfChange v patom
+      (el ,u) <- applyUndo v patom
       let pkel = G.getIndex m el
       return $
-        (if pkel == i
+        ((if pkel == i
           then G.update (G.notOptional i) (const el)
           else G.insert (el, G.tbpred m el) G.indexParam .
-            G.delete (G.notOptional i) G.indexParam) l
+            G.delete (G.notOptional i) G.indexParam) l, (ipa,PatchRow u))
 
     Nothing -> do
-      el <- createIfChange patom
-      return $ G.insert (el, G.tbpred m el) G.indexParam l
+      el <-maybe (Left $ "cant create row" ++ show patom) Right $ createIfChange patom
+      return $ (G.insert (el, G.tbpred m el) G.indexParam l,(ipa,DropRow ))
   where
     i = fmap create ipa
-
-applyGiSTChange (m,l) (CreateRow (idx,elp)) =
-  (m,) <$> case G.lookup ix  l of
-    Just v ->
-      Just $
-        G.insert (el, ix) G.indexParam . G.delete ix G.indexParam $ l
-    Nothing -> Just $ G.insert (el, ix) G.indexParam l
-  where
-    el = fmap create elp
-    ix = create <$> idx
-
+applyGiSTChange (m,l) (idx,CreateRow (elp)) =
+  maybe (Left $ "cant create row" ++ show (idx,elp)) Right $
+    first (m,) <$> case G.lookup ix  l of
+      Just v -> Nothing
+      Nothing -> Just (G.insert (el, ix) G.indexParam l,(idx,DropRow ))
+    where
+      el = fmap create elp
+      ix = create <$> idx
 
 applyTableRep
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
-applyTableRep (m,sidxs,l) (DropRow patom)
-  = Just (m,didxs <$> sidxs, G.delete (create <$>  patom ) G.indexParam  l)
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableRep k a -> RowPatch k (Index a) -> Either String (TableRep k a,RowPatch k (Index a))
+applyTableRep (m,sidxs,l) (patom,DropRow )
+  = maybe (Left $ "key dont exist" ++ show patom) Right $
+    ((m, M.mapWithKey didxs sidxs, G.delete (create <$> patom) G.indexParam l), ) . mapRowPatch patch . createRow' m <$> G.lookup (create <$> patom) l
   where
-    didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
+    didxs un sidx = maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique m un <$> v)
     v = G.lookup (create <$>  patom )  l
-applyTableRep (m,sidxs,l) (PatchRow patom) =  (m,dixs <$> sidxs ,). snd <$> applyGiSTChange (m,l) (PatchRow patom)
+applyTableRep (m,sidxs,l) (ix,PatchRow patom) =  first ((m,M.mapWithKey dixs sidxs ,). snd) <$> applyUndo (m,l) (ix,PatchRow patom)
    where
-     dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
-applyTableRep (m,sidxs,l) (CreateRow (ix,elp) ) =  Just  (m,didxs <$> sidxs,case G.lookup i l  of
+     dixs un sidx = sidx--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
+applyTableRep (m,sidxs,l) (ix,CreateRow elp)  =  Right ((m,M.mapWithKey didxs sidxs,case G.lookup i l  of
           Just v ->  if v == el then l else G.insert (el,i) G.indexParam . G.delete i  G.indexParam $ l
-          Nothing -> G.insert (el,i) G.indexParam  l)
+          Nothing -> G.insert (el,i) G.indexParam  l),(ix,DropRow ))
    where
-     didxs (un,sidx) =  (un,G.insert ((G.getIndex m el,[]),G.getUnique un  el) G.indexParam sidx  )
+     didxs un sidx =  G.insert ((G.getIndex m el,[]),G.getUnique m un  el) G.indexParam sidx
      el = fmap create elp
      i =  create <$> ix
 
@@ -265,17 +254,17 @@ queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k]) -> TableRep k Sho
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (m,s,g) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g) <$> mergeSIdxs
-        notPK = WherePredicate Control.Applicative.<$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
+        notPK = WherePredicate <$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = foldl1 S.intersection <$> nonEmpty (catMaybes $ fmap (S.fromList . fmap (fst.leafValue)) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.intersection <$> nonEmpty (catMaybes $ fmap (S.fromList . fmap (fst.leafValue)) . searchPK b <$> (M.toList s))
 
 
-searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
-searchPK (WherePredicate b) (pk, g)= (\p -> G.queryL (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
+searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
+searchPK (WherePredicate b) (pk, g)= (\p -> G.projectIndex pk  (WherePredicate p) g) <$>  splitIndexPK b pk
 
 
 type DBVar = DBVar2 Showable
-type Collection k v = (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)),GiST (TBIndex   v ) (TBData k v))
+type Collection k v = (IndexMetadata k v ,GiST (TBIndex   v ) (TBData k v))
 
 type PrePlugins = FPlugins Text
 type Plugins = (Int,PrePlugins)
@@ -290,13 +279,13 @@ data FPlugins k =
       }
 
 data FPlugAction k
-  = StatefullPlugin [(([VarDef ],[VarDef]),FPlugAction k) ]
+  = StatefullPlugin [(([VarDef],[VarDef]),FPlugAction k) ]
   | IOPlugin  (ArrowReaderM IO)
   | PurePlugin (ArrowReaderM Identity)
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (TBData Text Showable) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (TBData Text Showable) m )) (Union (Access Text),Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
 
 
 pluginStatic = pluginStatic' . _plugAction
@@ -333,7 +322,15 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (RowPatch Key Showable)] (Map (Table,WherePredicate) (DBVar,Collection Key Showable)) R.Dynamic
+localInf :: (InformationSchema -> InformationSchema ) -> TransactionM a -> TransactionM a
+localInf f = local (first f)
+
+askInf :: TransactionM InformationSchema
+askInf = fmap fst ask
+
+type TableModificationU k u= TableModificationK (TableK k) (RowPatch k u )
+
+type TransactionM = RWST (InformationSchema,[TableModification (RowPatch Key Showable)]) [TableModification (RowPatch Key Showable)] () R.Dynamic
 
 type PageToken = PageTokenF Showable
 
@@ -344,28 +341,24 @@ newtype PageTokenF v
   = TableRef (Interval (TBIndex v))
   deriving(Eq,Ord,Show,Generic)
 
-
 data OverloadedRule
-  =  CreateRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
-  |  DropRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
-  |  UpdateRule  (TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
+  =  CreateRule  (TBData Key Showable -> TransactionM (RowPatch Key Showable))
+  |  DropRule  (TBData Key Showable -> TransactionM (RowPatch Key Showable))
+  |  UpdateRule  (TBData Key Showable -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable))
 
 data SchemaEditor
   = SchemaEditor
-  { editEd  :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , patchEd :: KVMetadata Key ->TBIndex Showable ->TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , insertEd :: KVMetadata Key ->TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , deleteEd :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  { editEd  :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
+  , patchEd :: KVMetadata Key ->TBIndex Showable ->TBIdx Key Showable ->TransactionM (RowPatch Key Showable)
+  , insertEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
+  , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , listEd :: KVMetadata Key ->TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
-  , joinListEd :: [(Table,TBData Key Showable, SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
-  , joinSyncEd :: [(Table,TBData Key Showable, SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , opsPageSize :: Int
   , transactionEd :: InformationSchema -> (forall a  . IO a -> IO a)
-  , rules :: M.Map (Text,Text) [OverloadedRule]
-  , historySync :: Maybe (TransactionM ())
+  , rules :: M.Map (Text,Text) [(TBData Text Showable -> Bool ,OverloadedRule)]
   }
 
 typeTrans inf = typeTransform (schemaOps inf)
@@ -376,7 +369,7 @@ argsToState  [h,ph,d,u,p,s,m,t] = BrowserState h ph d  u p (Just s) (Just t ) No
 argsToState  [h,ph,d,u,p,s,m] = BrowserState h ph d  u p  (Just s)  Nothing Nothing
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing Nothing
-argsToState i = errorWithStackTrace (show i)
+argsToState i = error (show i)
 
 lookMeta :: InformationSchema -> Text -> KVMetadata Key
 lookMeta inf = tableMeta. lookTable inf
@@ -396,17 +389,25 @@ lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
+lookKeyUnique :: InformationSchema -> Text -> KeyUnique -> Key
+lookKeyUnique inf t k = justError ("table " <> T.unpack t <> " has no key " <> show k  <> show (HM.lookup t (colMap inf))) $  M.lookup k  (_keyUnique inf)
 lookKeyPosition :: InformationSchema -> Text -> Int -> Key
 lookKeyPosition inf t k = justError ("table " <> T.unpack t <> " has no key " <> show k  <> show (HM.lookup t (colMap inf))) $  IM.lookup k =<< HM.lookup t (colMap inf)
 
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
-putPatch m a= liftIO$ do
-  atomically $ putPatchSTM m a
+fetchData i = liftIO . atomically .writeTChan (patchVar i) . force  . fmap (FetchData (dbRefTable i) .  firstPatchRow keyFastUnique )
 
-putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
-putIdx m = liftIO .atomically . writeTChan m . force
+putPatch m = liftIO. atomically . putPatchSTM m
+
+mapModification :: (Ord b,Ord a,Ord c ,Ord (Index c))=> (a -> b) ->  TableModificationK (TableK a) (RowPatch a c) -> TableModificationK (TableK b )(RowPatch b c)
+mapModification f (TableModification a b c d e ) = TableModification a b c (fmap f d) (firstPatchRow f e)
+mapModification f (FetchData d e) = FetchData (fmap f d) (firstPatchRow f e)
+
+putPatchSTM m =  writeTChan m . force. fmap (mapModification keyFastUnique)
+putIdx m = liftIO .atomically . putIdxSTM m
+putIdxSTM m =  writeTChan m . force
 
 typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
 typeCheckValuePrim f (KDelayed :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
@@ -416,7 +417,7 @@ typeCheckValuePrim f (KInterval : i) (IntervalTB1 j) = const <$> maybe (Pure ())
 typeCheckValuePrim f []  (TB1 j) = f j
 typeCheckValuePrim f i j = failure ["cant match " ++ show i ++ " with " ++ show j ]
 
-typeCheckValue f (Primitive l i)  j = mapError (fmap (("At " ++ show l ++ " : " ++ show i)++)) $ typeCheckValuePrim (f i) l j
+typeCheckValue f (Primitive l i)  j = mapError (fmap (("At " ++ show l ++ " : " ++ show i ++ "\n"++ show j )++)) $ typeCheckValuePrim (f i) l j
 
 typeCheckPrim (PInt j) (SNumeric i) = Pure ()
 typeCheckPrim PDouble (SDouble i) = Pure ()
@@ -428,9 +429,8 @@ typeCheckPrim PCnpj (SText i) = Pure ()
 typeCheckPrim PCpf (SText i) = Pure ()
 typeCheckPrim (PGeom _ _ ) (SGeo i) = Pure ()
 typeCheckPrim PBoolean (SBoolean i) = Pure ()
-typeCheckPrim PDynamic (SDynamic i ) = Pure ()
-typeCheckPrim (PTypeable _) (SHDynamic i ) = Pure ()
 typeCheckPrim (PMime _ ) (SBinary i ) = Pure ()
+typeCheckPrim (PMime "text/json" ) (SJSON i ) = Pure ()
 typeCheckPrim PBinary  (SBinary i ) = Pure ()
 typeCheckPrim (PDimensional _ _ ) (SDouble i ) = Pure ()
 typeCheckPrim PAddress  (SText i) = Pure ()
@@ -459,11 +459,12 @@ typeCheckTable c  l
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
-lookupKeyPosition= (lookKeyPosition , keyPosition)
+lookupKeyPosition= (lookKeyPosition,keyPosition )
+lookupKeyUnique = (lookKeyPosition,keyFastUnique)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname v   =  (\(KV i) -> KV $ mapFromTBList $ liftFieldF  f inf  tname <$> F.toList i) v
+liftTableF f inf  tname (KV i)  =  kvlist $ liftFieldF  f inf  tname <$> F.toList i
   where
     ta = lookTable inf tname
 
@@ -473,12 +474,6 @@ liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
 liftTable' = liftTableF lookupKeyName
 
 
-liftKeys
-  :: InformationSchema
-     -> Text
-     -> FTB1 Text a
-     -> FTB1 Key a
-liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey
   :: (Show t, Ord t) => TableK t -> [Rel t] -> (T.Text, T.Text)
@@ -499,16 +494,16 @@ liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (l
 liftFieldF (f,p) inf tname (IT rel tb) = IT (f inf tname  rel) (liftTableF (f,p) inf tname2 <$> tb)
   where FKInlineTable _ (_,tname2)  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap p) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
         ta = lookTable inf tname
-liftFieldF (f,p) inf tname (Fun  k t v) = Fun (f inf tname k ) (fmap(liftAccessF (f,p) inf tname )<$> t) v
+liftFieldF (f,p) inf tname (Fun  k t v) = Fun (f inf tname k ) (fmap(fmap (f inf tname) )<$> t) v
 
 
 
 liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField = liftFieldF lookupKeyName
 
-liftPatchRow inf t (PatchRow (k,i)) = PatchRow (k,liftPatch inf t i)
-liftPatchRow inf t (CreateRow (ix,i)) = CreateRow (ix,liftTable' inf t i)
-liftPatchRow inf t (DropRow i) = DropRow   i
+liftPatchRow inf t (k,PatchRow i) = (k,PatchRow $ liftPatch inf t i)
+liftPatchRow inf t (ix,CreateRow i) = (ix,CreateRow $ liftTable' inf t i)
+liftPatchRow inf t (ix,DropRow ) = (ix,DropRow   )
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
 liftPatch inf t  p =  fmap (liftPatchAttr inf t) p
@@ -525,13 +520,39 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
-fixPatchRow inf t (PatchRow (k,i)) = PatchRow (k,fixPatch inf  t i)
-fixPatchRow inf t (CreateRow i) = CreateRow i
-fixPatchRow inf t (DropRow i) = DropRow i
+fixPatchRow inf t (k,PatchRow i) = (k,PatchRow $ fixPatch inf  t i)
+fixPatchRow inf t (k,CreateRow i) = (k,CreateRow i)
+fixPatchRow inf t (k,DropRow ) = (k,DropRow )
 
-fixPatch ::   InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
-fixPatch _ _ =id
+fixPatch :: InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
+fixPatch _ _ = id
 
+liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first ((fst m ) inf tname)))<$> i
+
+liftASch :: TableMap  -> Text -> Text -> Rel Text  -> Rel Key
+liftASch inf s tname (Inline l) = Inline $  lookKey  l
+  where
+    tb = lookup tname =<<  lookup s inf
+    lookup i m = HM.lookup i m
+    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (tableAttrs <$>tb)
+
+liftASch inf s tname (RelAccess i c) = RelAccess (F.toList $ pathRelRel rel) (liftASch inf sch st c)
+  where
+    ref = liftASch inf s tname <$> i
+    lookup i m = justError ("no look " <> show i) $ HM.lookup i m
+    tb = lookup tname $  lookup s inf
+    rel  = justError "no fk" $ L.find (\i -> S.fromList (_relOrigin <$> ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    (sch,st) = case unRecRel rel of
+          FKJoinTable  _ l -> l
+          FKInlineTable  _ l -> l
+
+
+
+recLookupInf inf tname rel = recLookup (liftRel inf tname rel)
+
+liftRel :: InformationSchema -> Text -> Rel Text -> Rel Key
+liftRel inf = liftASch (tableMap inf ) (schemaName inf)
+liftRelM inf t r = Just $ liftRel  inf t r
 
 liftAccessM ::  InformationSchema -> Text -> Access Text  -> Maybe (Access Key)
 liftAccessM inf tname (Point i  ) =  Just $ Point i
@@ -539,62 +560,69 @@ liftAccessM inf tname (Rec i j ) =  Rec i <$> liftAccessMU inf tname  j
 liftAccessM inf tname (IProd b l) = IProd b  <$> lookKeyM inf tname l
 liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessMU inf  (snd (proj l)) c ) n)
   where
-    ref = traverse (liftAccessM inf tname) i
+    ref = traverse (lookKeyM inf tname) i
     tb = lookTable inf tname
-    n = join $ (\ ref -> L.find (\i -> S.fromList (iprodRef <$> ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)) <$> ref
+    n = join $ (\ ref -> L.find (\i -> S.fromList ref == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)) <$> ref
     proj n = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
 
-liftAccessM _ _ i = errorWithStackTrace (show i)
+liftAccessM _ _ i = error (show i)
 
 
 liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessMU inf tname)  i
 liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessMU inf tname)  i
 liftAccessMU inf tname (One i) =  One <$> liftAccessM inf tname  i
 
-liftAccessF :: (Show k ,Ord k) => LookupKey k ->InformationSchema -> Text -> Access k-> Access Key
+liftAccessF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Access k-> Access Key
 liftAccessF lk inf tname (Point i  ) =  Point i
 liftAccessF lk inf tname (Rec i j ) =  Rec i (liftAccessF lk inf tname  <$> j)
 liftAccessF lk inf tname (IProd b l) = IProd b $ fst lk inf tname l
 liftAccessF lk inf tname (Nested i c) = Nested ref (liftAccessF lk rinf (snd l)<$> c)
   where
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
-    ref = liftAccessF lk inf tname <$> i
+    ref = (fst lk) inf tname <$> i
     tb = lookTable inf tname
-    n = justError ("no fk " ++ show (i,ref,rawFKS tb) )$ L.find (\i -> S.fromList (iprodRef <$> ref)== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    n = justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (ref)== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
     l = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
-liftAccessF _ _ _  i = errorWithStackTrace (show i)
+liftAccessF _ _ _  i = error (show i)
 
 liftAccess = liftAccessF lookupKeyName
 
 liftAccessU inf t = fmap (liftAccess inf t )
 
-lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) -> (Access Key, AccessOp Showable )
-lookAccess inf tname l = Le.over Le._1 (liftAccess inf tname)  l
-
+lookAccess :: InformationSchema -> Text -> (Rel Text , [(Text,AccessOp Showable )]) -> (Rel Key, [(Key,AccessOp Showable )])
+lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (lookKey inf tname) <$> l2 )
 
 genPredicateFull
   :: Show a =>
      t
      -> Access a
-     -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
+     -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i (Nested p l) = fmap (\(a,b) -> (Nested p (Many[One a]) , b )) <$> genPredicateFullU i l
-genPredicateFull _ i = errorWithStackTrace (show i)
+genPredicateFull i (IProd b l) =  (\i -> PrimColl (Inline l,Right i ))  <$> b
+genPredicateFull i (Nested p l) = fmap (\(a,b) -> (RelAccess (fmap (Inline  ) p) a , b )) <$> genPredicateFullU i l
+genPredicateFull _ i = error (show i)
 
 genPredicateFullU
   :: Show a =>
      t
      -> Union (Access a)
-     -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
+     -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
 genPredicateFullU i (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
 genPredicateFullU i (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
 genPredicateFullU i (One l) = genPredicateFull i  l
+
+genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
+genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
+
+genPredicate o (IProd b l) =  (\i -> PrimColl (Inline l,Right (if o then i else Not i ) )) <$> b
+genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing a) else  Nothing ) <$> p
+genPredicate _ i = error (show i)
+
 
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
@@ -622,24 +650,26 @@ mergeCreate Nothing Nothing = Nothing
 mergeTB1 k  k2
   = (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2
 
-allKVRec :: InformationSchema -> KVMetadata Key ->  TB2 Key Showable -> [FTB Showable]
-allKVRec inf m = concat . F.toList . fmap (allKVRec' inf m)
+allKVRecL :: InformationSchema -> KVMetadata Key ->  FTB (KV Key Showable) -> [FTB Showable]
+allKVRecL inf m = concat . F.toList . fmap (allKVRec' inf m)
 
 allKVRec' :: InformationSchema -> KVMetadata Key -> TBData Key  Showable -> [FTB Showable]
-allKVRec' inf m e=  concatMap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> fmap _relOrigin (F.toList $ fst i) ))  $ M.toList (go  <$> eitherDescPK m e))
+allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> fmap _relOrigin (F.toList $ fst i) ))  $ M.toList (go  <$> eitherDescPK m e))
   where
-    go (FKT _  rel  tb) =  allKVRec  inf (tableMeta ta) tb
+    go (FKT l  rel  tb) = allKVRecL  inf m2 tb
       where
-        FKJoinTable  _ ref  = unRecRel $ fromJust $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
-        ta = lookSTable inf ref
-
-    go (IT  it tb) = allKVRec inf ms tb
+        FKJoinTable _ ref = unRecRel $ fromJust $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        m2 = lookSMeta inf (RecordPrim ref)
+    go (IT  it tb) = allKVRecL inf ms tb
       where
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
     go (Attr _ a) = [a]
 
-createRow' m v = CreateRow (G.getIndex m v,v)
-dropRow' m v = DropRow (G.getIndex m v)
+createRow' m v =  (G.getIndex m v,CreateRow v)
+dropRow' m v = (G.getIndex m v,DropRow )
+
 
 makeLenses ''InformationSchemaKV
+
+

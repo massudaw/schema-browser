@@ -176,7 +176,9 @@ postgresPrim =
   ,("png",PMime "image/png")
   ,("email",PMime "text/plain")
   ,("html",PMime "text/html")
-  ,("dynamic",PDynamic)
+  ,("dynamic",PDynamic "ftb_showable")
+  ,("row_index",PDynamic "row_index")
+  ,("row_operation",PDynamic "row_operation")
   ,("double precision",PDouble)
   ,("numeric",PDouble)
   ,("float8",PDouble)
@@ -196,6 +198,7 @@ postgresPrim =
   ,("smallint",PInt 2)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
+  ,("json",PMime "text/json" )
   ,("color",PColor)]
    ++( fmap PTime <$>
   [("timestamptz",PTimestamp Nothing )
@@ -244,7 +247,6 @@ renderType (Primitive [] (RecordPrim (s,t)) ) = Just $ s <> "." <> t
 renderType (Primitive [] (AtomicPrim t) ) =
   case t  of
     PBinary -> "bytea"
-    PDynamic -> "bytea"
     PDouble -> "double precision"
     PDimensional _ _ -> "dimensional"
     PText -> "character varying"

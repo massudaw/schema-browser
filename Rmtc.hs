@@ -162,10 +162,10 @@ checkOnibus inf = do
   _ <- mapM (execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i, snd $ position i,0),situacao i, nomeDestino $ destino i )) dec)
   (ref ,_)<- runDynamic $ prerefTable inf (lookTable inf "max_registro_onibus")
   print "start patch"
-  (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl (liftAccess inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ( (\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
+  (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl $ fixrel (liftRel inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ((\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
   sequence_ l
 
-  putPatch (patchVar ref ) $ fmap PatchRow  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (patch $ timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
+  fetchData  ref . fmap ( fmap PatchRow)  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (patch $ timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
   print "end checkOnibus"
 
   return ()

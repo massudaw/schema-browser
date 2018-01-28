@@ -43,13 +43,13 @@ import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
 
-codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\_ i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
+codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (error "no ops 3" ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _-> return Nothing )  mapKeyType  ((\ a -> liftIO . logTableModification a)) 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops")
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList
   [("text", PText)
   ,("int", PInt 8)
-  ,("plugin", PTypeable (typeRep (Proxy :: Proxy (FPlugins Text))))
+  ,("plugin", PDynamic "plugin")
   ]
 
 -- Type Conversions
@@ -101,27 +101,6 @@ list' (One i) = Just $ pure i
 list :: Union a -> NonEmpty a
 list = justError "empty list " . list'
 
-instance DecodeTable (Access Text) where
-  encodeT (IProd _ k) =
-    tblist
-      [ IT "iprod" (LeftTB1 . Just . TB1 . tblist $ [Attr "key" (txt k)])
-      , IT "nested" (LeftTB1 Nothing)
-      ]
-  encodeT (Nested l nest) =
-    tblist $
-    [ IT "iprod" (LeftTB1 Nothing)
-    , IT
-        "nested"
-        (LeftTB1 $
-         (\nest ->
-            TB1 . tblist $
-            [ Attr "ref" (array (txt . iprodRef) (Non.fromList l))
-            , IT "nest" (array (TB1 . encodeT) nest)
-            ]) <$>
-         (list' nest))
-    ]
-
-
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
@@ -133,26 +112,26 @@ addPlugins iniPlugList smvar = do
   let
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
         name <- nameM
-        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+        return $ kvlist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                      ,Attr "table" (txt (_bounds dyn) )
-                     ,Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
-      where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
+                     ,Attr "plugin" (TB1 $ SDynamic (HDynamic (toDyn dyn ))) ]
+          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel(keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
     row dyn = do
         name <- nameM
         let (inp,out) = pluginStatic dyn
-        return $ tblist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
-                          , Attr "table" (txt (_bounds dyn) )
-                          , IT "input" (array (TB1 .encodeT ) (list inp))
-                          , IT "output" (array (TB1 .encodeT) (list out))
-                          , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
-      where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
-  R.onEventIO event (putPatch (patchVar ( iniRef dbstats)) . pure )
+        return $ kvlist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+                     , Attr "table" (txt (_bounds dyn) )
+                     , IT "input" (array (TB1 .encodeT ) (list inp))
+                     , IT "output" (array (TB1 .encodeT) (list out))
+                     , Attr "plugin" (TB1 $ SDynamic (HDynamic (toDyn dyn ))) ]
+          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
+  R.onEventIO event (fetchData  (iniRef  dbstats). pure )
   inotify <- liftIO initINotify
   let
     modifyed (Closed i j True ) = do
       putStrLn ("### Modified Plugin: "  ++ show (i,j))
       plugList <- plugListM
-      let patchR m i = PatchRow (G.getIndex m i,patch i)
+      let patchR m i = (G.getIndex m i,PatchRow $ patch i)
       mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()
@@ -197,7 +176,7 @@ initSession modStrNames = do
                   return target
               ) modStrNames
   setTargets targets
-  addPkgDb  ".stack-work/install/x86_64-linux/lts-8.20/8.0.2/lib/x86_64-linux-ghc-8.0.2/"
+  addPkgDb  ".stack-work/install/x86_64-linux-tinfo6-nopie/lts-9.21/8.0.2/lib/x86_64-linux-ghc-8.0.2/"
   load LoadAllTargets
   modSums <- mapM
               (\modStrName -> do

@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveGeneric,StandaloneDeriving,RecordWildCards,FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
+{-# LANGUAGE TypeOperators,DeriveGeneric,StandaloneDeriving,RecordWildCards,FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
 module CnpjReceita (getCaptchaCpf,getCaptchaCnpj,getCnpjForm,convertCPF,initSess,getCpfForm,convertHtml)where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
@@ -45,83 +45,54 @@ import Control.Monad.Reader
 import Prelude hiding ((.),elem,id)
 
 
-
-boolean = SBoolean
-unboolean (SBoolean i ) = i
-attr i j = KV . mapFromTBList $ [Attr i $ TB1 j]
-binary  = SBinary
-unbinary (SBinary i ) = i
-timestamp = STime . STimestamp
-untimestamp (STime (STimestamp t)) = t
-
-timestampL = untimestamp `TIso` timestamp
-attrL k = unattr k `TIso` attr k
-
-unattr i (KV ix) = justError ("no attr " ++ show i ) $ unAtt <$> M.lookup (S.singleton $ Inline i)  ix
-  where unAtt (Attr i (TB1 v)) = v
-
-
-
 deriving instance Generic HTTP.Cookie
 instance DecodeTable HTTP.Cookie where
-  decodeT = HTTP.Cookie
-    <$> (unbinary . unattr "cookie_name" )
-    <*> (unbinary . unattr "cookie_value" )
-    <*> (untimestamp . unattr "cookie_expiry_time" )
-    <*> (unbinary . unattr "cookie_domain" )
-    <*> (unbinary . unattr "cookie_path" )
-    <*> (untimestamp . unattr "cookie_creation_time" )
-    <*> (untimestamp . unattr "cookie_last_access_time" )
-    <*> (unboolean . unattr "cookie_persistent" )
-    <*> (unboolean . unattr "cookie_host_only" )
-    <*> (unboolean . unattr "cookie_secure_only" )
-    <*> (unboolean . unattr "cookie_http_only" )
-  encodeT HTTP.Cookie{..}
-    = foldl mappend mempty [
-        attr "cookie_name"  (binary cookie_name ),
-        attr "cookie_value" (binary cookie_value),
-        attr "cookie_expiry_time" (timestamp cookie_expiry_time),
-        attr "cookie_domain" (binary cookie_domain),
-        attr "cookie_path" (binary cookie_path),
-        attr "cookie_creation_time" (timestamp cookie_creation_time),
-        attr "cookie_last_access_time" (timestamp cookie_last_access_time),
-        attr "cookie_persistent" (boolean cookie_persistent),
-        attr "cookie_host_only" (boolean cookie_host_only),
-        attr "cookie_secure_only" (boolean cookie_secure_only),
-        attr "cookie_http_only" (boolean cookie_http_only)]
+  isoTable
+    = iassoc11 (IsoArrow (\(i,j,k,l,m,n,o,p,q,r,s) -> HTTP.Cookie i j k l m n o p q r s)(\(HTTP.Cookie i j k l m n o p q r s) -> (i,j,k,l,m,n,o,p,q,r,s) ))
+      (identity <$$> prim "cookie_name")
+      (identity <$$> prim "cookie_value")
+      (identity <$$> prim "cookie_expiry_time" )
+      (identity <$$> prim "cookie_domain")
+      (identity <$$> prim "cookie_path" )
+      (identity <$$> prim "cookie_creation_time" )
+      (identity <$$> prim "cookie_last_access_time")
+      (identity <$$> prim "cookie_persistent" )
+      (identity <$$> prim "cookie_host_only" )
+      (identity <$$> prim "cookie_secure_only")
+      (identity <$$> prim "cookie_http_only")
 
+httpJar :: [Cookie] |-> HTTP.CookieJar
+httpJar = IsoArrow HTTP.createCookieJar  HTTP.destroyCookieJar
 
-httpJar = TIso HTTP.destroyCookieJar HTTP.createCookieJar
-
-cookieJar :: TIso HTTP.CookieJar (FTB (TBData Text Showable))
-cookieJar =  traverseIso tableIso . ftbIso .  httpJar
+cookieJar :: SIso ([KTypePrim], Union (Reference Text)) (FTB (TBData Text Showable)) HTTP.CookieJar
+cookieJar = (httpJar <$$> traverseIso isoTable isoFTB  )
 
 initSess :: FTB (TBData Text Showable)
-initSess =  unTiso cookieJar (HTTP.createCookieJar  [])
+initSess =  encodeIso cookieJar (HTTP.createCookieJar  [])
 
-getCaptchaCpf cookie = Sess.withSessionControl (Just $ tIso cookieJar cookie) HTTP.defaultManagerSettings $ \session ->  do
+getCaptchaCpf cookie = Sess.withSessionControl (Just $ decodeIso cookieJar cookie) HTTP.defaultManagerSettings $ \session ->  do
        print cpfhome
        r <-  Sess.getWith defaults session  cpfhome
        print cpfcaptcha
        (fmap BSL.toStrict . (^? responseBody)) <$> Sess.get session cpfcaptcha
 
 
-convertCPF out = Just (tblist . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
+convertCPF out = Just (kvlist . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
   where attr k =  Attr k
 
-getCpfForm cookie captcha nascimento cgc_cpf = Sess.withSessionControl (Just $ tIso cookieJar cookie) HTTP.defaultManagerSettings$ \ session -> do
+getCpfForm cookie captcha nascimento cgc_cpf = Sess.withSessionControl (Just $ decodeIso cookieJar cookie) HTTP.defaultManagerSettings$ \ session -> do
           print cpfpost
           pr <- traverse (Sess.post session cpfpost . protocolocpfForm nascimento cgc_cpf ) (Just captcha  )
           traverse (BSL.writeFile "cpf_name.html") (join $ fmap (^? responseBody)  pr)
           traverse (readCpfName . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 
-getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ tIso cookieJar $cookie )HTTP.defaultManagerSettings$ \ session -> do
+getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ decodeIso cookieJar $cookie )HTTP.defaultManagerSettings$ \ session -> do
        print cnpjhome
        r <-  Sess.getWith defaults  session cnpjhome
        print cnpjcaptcha
        o <- Sess.get session cnpjcaptcha
-       return (unTiso cookieJar  $ o ^. responseCookieJar , BSL.toStrict <$> (o ^? responseBody) )
+       return (encodeIso cookieJar  $ o ^. responseCookieJar , BSL.toStrict <$> (o ^? responseBody) )
 
 
 convertHtml out =
@@ -131,7 +102,7 @@ convertHtml out =
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
             fk rel i  = FKT (kvlist i )rel
             afk rel i l = fk rel i  . LeftTB1 $  ArrayTB1 . Non.fromList <$> l
-            tb attr = TB1 $ tblist attr
+            tb attr = TB1 $ kvlist attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (first(TB1 . SText)) $ filter ((not . T.isInfixOf "Não informada").fst) $ fmap ((TL.filter (not . flip L.elem ("-." :: String)) . fst) Control.Arrow.&&& (TB1 . SText .TL.strip . TL.drop 3 .  snd )) ts
@@ -154,7 +125,7 @@ convertHtml out =
         in Just  attrs
 
 getCnpjForm cookie captcha cgc_cpf
-  = Sess.withSessionControl (Just $ tIso cookieJar $cookie ) HTTP.defaultManagerSettings$ \ session ->do
+  = Sess.withSessionControl (Just $ decodeIso cookieJar $cookie ) HTTP.defaultManagerSettings$ \ session ->do
           print cnpjpost
           _ <- traverse (Sess.post session cnpjpost . protocolocnpjForm cgc_cpf ) (Just captcha)
           pr <- traverse (Sess.post session cnpjpost . protocolocnpjForm cgc_cpf ) (Just captcha)

@@ -1,14 +1,18 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Arrows #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module TP.MapSelector (mapWidgetMeta,mapSelector,mapCreate,moveend,eventClick,createLayers,legendStyle) where
+module TP.MapSelector (mapWidgetMeta,mapSelector,mapCreate,moveend,eventClick,createLayers,legendStyle,mapDef) where
 
 import Step.Host
 import qualified NonEmpty as Non
+import Environment
 import Data.String
+import Control.Arrow
+import Data.Functor.Identity
 import Foreign.JavaScript (toCode,JSFunction)
 import Utils
 import qualified Data.Sequence as S
@@ -62,7 +66,51 @@ createLayers el tname evs= runFunction $ ffi "createLayer(%1,%3,%2)" el evs tnam
 mapCreate el Nothing = runFunction $ ffi "createMap(%1,null,null,null)" el
 mapCreate el (Just (ne,sw)) = runFunction $ ffi "createMap(%1,%2,%3,null)" el  (show ne) (show sw)
 
-idx inf m c k = indexField ( liftAccess inf (_kvname m) (keyRef c))  k
+
+
+mapDef inf
+  = projectV
+     (innerJoinR
+        (leftJoinR
+          (leftJoinR
+            (innerJoinR
+              (fromR "tables" schemaPred)
+              (fromR "geo" schemaPred) schemaI "geo")
+            (fromR "event" schemaPred) schemaI "event")
+          (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+  where
+    schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
+    schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
+    schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
+    schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
+    schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+    fields =  proc t -> do
+      SText tname <-
+          ifield "table_name" (ivalue (readV PText))  -< ()
+      evfields <- iinline "event" (iopt $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+      efields <- iinline "geo" (irecord (iinline "features" (imap $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
+      desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+      pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+      features <- iinline "geo" (irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) -< ()
+      color <- iinline "geo" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+      let
+        table = lookTable inf tname
+        projf ::  (Showable , (TBData Text Showable)) -> TBData Key Showable -> Maybe A.Object
+        projf (efield@(SText field),features)  r = do
+          i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
+          pks <- pksM
+          fields <- mapM (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
+          pkfields <- mapM (\(SText i) -> fmap (i,). unSOptional =<< recLookupInf inf tname (indexerRel i) r) pks
+          return $ HM.fromList [("label", A.toJSON (HM.fromList
+                               [("position" :: Text,i)
+                               ,("id" :: Text, txt $ writePK' tname (F.toList pkfields) (TB1 efield))
+                                ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                               ]))
+                          ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
+        proj r = flip projf  r <$> zip (F.toList efields) (F.toList features)
+      returnA -< ("#" <> renderPrim color ,table,fmap TB1 efields,fmap TB1 <$> evfields,proj )
+
 
 mapWidgetMeta  inf =  do
     importUI
@@ -71,25 +119,8 @@ mapWidgetMeta  inf =  do
         ,css "leaflet.css"
         ,js "leaflet-svg-markers.min.js"
         ]
-    let
-      schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-    (_,minf,amap) <- ui . transactionNoLog (meta inf) $ fromTable "geo" schemaPred >>= joinTable "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
-    return $ (\e ->
-          let
-              TB1 (SText tname) =  lookAttr' "table_name" $ unTB1 $ lookRef ["schema","table"] e
-              table = lookTable inf tname
-              evfields = fmap unArray $ join $ unSOptional <$> indexFieldRec (liftAccess minf "geo" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
-              Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested [keyRef "features"] $ Many [One $ keyRef  "geo"] )) e
-              ArrayTB1 features = lookRef ["features"] e
-              color = lookAttr'  "color" e
-              projf  :: TBData Key Showable -> (FTB Showable , FTB (TBData Key Showable) ) -> Maybe (HM.HashMap Text A.Value)
-              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK (tableMeta table) r efield   ),("title"::Text , txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) r))])) ,("style",A.toJSON (Row <$> features))]) $ join $ convField  <$> indexFieldRec (head $ liftAccess inf tname <$> indexer field) r
-              proj r = projf r <$> zip (F.toList efields) (F.toList features)
-              convField (ArrayTB1 v) = Just [("position",ArrayTB1 v)]
-              convField (LeftTB1 v) = join $ convField  <$> v
-              convField (TB1 v ) = Just [("position", TB1 v)]
-              convField i  = errorWithStackTrace (show i)
-          in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  G.toList amap
+    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (mapDef inf)()
+
 
 legendStyle dashes lookDesc table b = traverse render item
   where
@@ -106,7 +137,7 @@ legendStyle dashes lookDesc table b = traverse render item
       M.lookup table (M.fromList $ fmap (\i@(a, b, c, _, _) -> (b, i)) dashes)
 
 mapSelector
-  :: A.ToJSON a =>
+  :: (Show a ,A.ToJSON a ) =>
      InformationSchema
      -> Tidings (Maybe (TBPredicate Key Showable))
      -> (String,
@@ -121,13 +152,11 @@ mapSelector
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 mapSelector inf pred selected mapT sel (cposE,positionT) = do
         innermap <- UI.div # set UI.style [("height","250px"),("width","100%")]
-
         (eselg,hselg) <- ui newEvent
         (egselg,hgselg) <- ui newEvent
-
+        evc <- eventClick innermap
         let
           fields = selected ^. _3
-          evc = eventClick innermap
           boundSel :: FTB Showable ->  TBData Key Showable -> Maybe (Interval Showable)
           boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ head $ indexer field)   sel
           boundsSel :: Tidings (Maybe (Interval Showable ))
@@ -149,7 +178,8 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
           pcal = liftA2 (,)   positionT mapT
 
         mapCreate  innermap (Nothing :: Maybe ([Double],[Double]))
-        onEvent (moveend innermap) (liftIO . hgselg)
+        move <- moveend innermap
+        onEvent move (liftIO . hgselg)
         traverseUI (traverse setPosition ) =<< ui (calmT positionT)
 
         fin <- (\(_,tb,fields,efields,proj) -> do
@@ -160,16 +190,15 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
                 unPred (WherePredicate e)  =e
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-            let v = reftb ^. _3
-            let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
-            onEvent evsel (liftIO . hselg)
-            traverseUI (\i ->
+            let v =  reftb ^. _3
+            traverseUI (\i -> do
               createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) v
+            let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+            onEvent evsel (liftIO . hselg)
             ) $ liftA2 (,) pred pcal
           ) selected
-        bselg <- ui $ stepper Nothing (fmap snd <$> eselg )
-        cal <- UI.div  # set children [ innermap]
-        return (TrivialWidget (tidings bselg (fmap snd <$> eselg)) cal)
+        mapSel <- ui $ stepperT Nothing (fmap snd <$> eselg )
+        return (TrivialWidget mapSel innermap)
 
 readMapPK v = case unsafeFromJSON v of
       [i,j]  -> Just (i,readBool j)
@@ -178,10 +207,10 @@ readMapPK v = case unsafeFromJSON v of
     readBool "false" = False
     readBool "true" = True
 
-eventClick:: Element -> Event (String,Bool)
-eventClick el = filterJust $ readMapPK <$> domEvent "mapEventClick" el
+eventClick:: Element -> UI (Event (String,Bool))
+eventClick el = (filterJust . fmap readMapPK) <$> domEventClient "mapEventClick" el (ffi "")
 
 
-moveend :: Element -> Event ([Double],[Double])
-moveend el = filterJust $ readPosition <$>  domEvent "moveend" el
+moveend :: Element -> UI (Event ([Double],[Double]))
+moveend el = (filterJust . fmap readPosition) <$>  domEventClient "moveend" el (ffi "")
 

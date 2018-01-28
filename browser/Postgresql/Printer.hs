@@ -26,6 +26,7 @@ module Postgresql.Printer
 
 import Utils
 import Types
+import qualified Types.Index as G
 import Types.Inference
 
 import Query
@@ -168,7 +169,7 @@ escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
 expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
 expandInlineTable meta tb@( _) pre = asNewTable meta $ (\t->  do
   let
-    name =  tableAttr (meta,tb)
+    name =  tableAttr tb
     aliasKeys (Attr n    _ )  =  do
       a <- newAttr n
       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre) ) ( keyValue n)) ("k" <>T.pack (show a))
@@ -183,7 +184,7 @@ expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen 
 expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta $ (\t -> do
   let
      rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
-     name =  tableAttr (meta,tb)
+     name =  tableAttr tb
      aliasKeys (Attr n    _ )  =  do
        a <- newAttr n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("k" <>T.pack (show a))
@@ -193,7 +194,7 @@ expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta $ (\t -> do
   cols <- mapM (aliasKeys )  (sortPosition name)
   return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) "ix" )Nothing)
 
-sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattri))
+sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
 
 asNewTable meta action = do
   tidx <- newTable meta
@@ -211,7 +212,7 @@ expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
      aliasKeys (at@(IT n _ )) = do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
-     name =  tableAttr (meta,tb)
+     name =  tableAttr tb
   cols <- mapM (aliasKeys  )  (sortPosition name)
   return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing
   )
@@ -247,7 +248,7 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
           (predquery,predvalue) <- customPredicate
           (orderquery,ordervalue) <- ordquery
           let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
-          let orderQ = " ORDER BY " <> T.intercalate "," order
+          let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
           return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
         customPredicate = atTable m $ printPred inf m t wpred
         orderBy = atTable m $ mapM (\(i,j) -> do
@@ -274,7 +275,7 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 
 
-expandQuery' inf meta left m = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattri )) $  F.toList (_kvvalues  m))
+expandQuery' inf meta left m = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
 
 
 
@@ -323,12 +324,12 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 explodeRecord :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
-explodeRecord inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (explodeDelayed inf m t )  $ P.sortBy (P.comparing (RelSort. keyattri ))$ F.toList  tb)
+explodeRecord inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (explodeDelayed inf m t )  $ P.sortBy (P.comparing (RelSort. keyattr ))$ F.toList  tb)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
-explodeDelayed inf m tb (Fun k (ex,a)  _ )
-  = replaceexpr ex <$> traverse (\i-> explodeDelayed inf m tb $ indexLabel i tb) a
+-- explodeDelayed inf m tb (Fun k (ex,a)  _ )
+  -- = replaceexpr ex <$> traverse (\i-> explodeDelayed inf m tb $ indexLabel i tb) a
 explodeDelayed inf m _ t@(Attr k  _ )
   = foldr (=<<) prim (eval<$>kty)
   where
@@ -351,10 +352,10 @@ explodeDelayed inf m _ t@(IT  k tb  )
    prim = do
      l <- lkTB t
      let nmeta = tableMeta $ lookSTable inf r
-     selectRow l <$> explodeRecord inf nmeta  (tableNonRef2 $ allRec' (tableMap inf) (lookSTable inf r))
+     selectRow l <$> explodeRecord inf nmeta  (tableNonRef $ allRec' (tableMap inf) (lookSTable inf r))
 
 
-printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Access Key ,AccessOp Showable ) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
+printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Rel Key ,[(Key,AccessOp Showable )]) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred inf m t (PrimColl (a,e)) = do
   idx <- indexFieldL inf m e [] a t
   return (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
@@ -373,17 +374,17 @@ instance IsString (Maybe T.Text) where
 indexFieldL
     :: InformationSchema
     -> KVMetadata Key
-    -> AccessOp Showable
+    -> [(Key,AccessOp Showable)]
     -> [Text]
-    -> Access Key
+    -> Rel Key
     -> TBData Key ()
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
-indexFieldL inf m e c p@(IProd b l) v =
+indexFieldL inf m e c p@(Inline l) v =
     case findAttr l v of
-      Just i -> pure . utlabel  e c <$> tlabel'  i
+      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
       Nothing -> error "not attr"
-indexFieldL inf m e c n@(Nested l nt) v =
-  case findFK (iprodRef <$> l) v of
+indexFieldL inf m e c n@(RelAccess l nt) v =
+  case kvLookup (S.fromList l) v of
     Just a -> case a of
         t@(IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  do
           l <- lkTB t
@@ -391,13 +392,17 @@ indexFieldL inf m e c n@(Nested l nt) v =
         t@(IT k (ArrayTB1 (fk :| _))) ->  do
           l <- lkTB t
           return [(Just ("i" <> l <> " is not null"), Nothing)]
-        (IT k fk) -> indexFieldLU inf m e c nt  $ head (F.toList fk )
+        (IT k fk) -> indexFieldL inf m e c nt  $ head (F.toList fk )
         a -> do
           l <- lkTB a
           return [(Just (l <> " is not null"), Nothing)]
 
-    Nothing -> concat <$> traverse (\i -> indexFieldL inf m (Right (Not IsNull)) c i v) l
+    Nothing -> concat <$> traverse (\i -> indexFieldL inf m e c i v) l
 
+indexFieldL inf m e c p@(Rel l _ _) v =
+    case findAttr l v of
+      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
+      Nothing -> error "not attr"
 indexFieldL inf m e c i v = error (show (i, v))
 
 indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
@@ -459,7 +464,7 @@ justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
 justLabel namemap meta t k = fst $ evalRWS getLabels  [Root meta] namemap
   where
     getLabels :: Codegen Text
-    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ tableNonRef2 t)
+    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ tableNonRef t)
 
 loadDelayedQuery
   :: InformationSchema

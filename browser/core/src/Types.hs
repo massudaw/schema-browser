@@ -4,7 +4,6 @@ module Types
   , module Step.Common
   ) where
 import Types.Common
-import Types.Compose
 import Types.Primitive
 import Step.Common
 

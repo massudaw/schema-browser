@@ -16,6 +16,7 @@ packages:
 - deps/GiST-0.0.1/
 - deps/wreq-0.4.0.0/
 - deps/ordered-0.1
+- deps/master-plan
 extra-deps: 
 - GenericPretty-1.2.1
 - HTTP-4000.3.3

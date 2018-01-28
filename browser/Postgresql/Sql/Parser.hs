@@ -35,6 +35,7 @@ parseColumnRef  = rename  <|> fmap SQLAValue value
         new <- name
         return (SQLARename (SQLAValue old) new )
 
+parseValue = parseOnly value
 testParseColumn = parseOnly select "SELECT col1, table1.col1 , table1.col1 as col2 , col1 as col2 FROM sch1.table1 WHERE ( true AND (NOT true) ) OR false"
 parseColList = sepBy parseColumnRef (many space >> char ','>> many space)
 

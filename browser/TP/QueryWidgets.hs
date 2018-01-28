@@ -1,5 +1,6 @@
 {-# LANGUAGE
     OverloadedStrings
+   ,ScopedTypeVariables
    ,FlexibleContexts
    ,GADTs
    ,RecursiveDo
@@ -7,13 +8,15 @@
 
 module TP.QueryWidgets (
     crudUITable,
-    refTables,
-    refTables',
-    idex,
-    metaAllTableIndexA ,
-    viewer,
+    batchUITable,
+    PrimEditor(..),
+    metaTable,
     ) where
 
+import Debug.Trace
+import Safe
+import qualified Data.Functor.Contravariant as C
+import qualified Data.Aeson as A
 import Control.Applicative.Lift
 import Control.Concurrent.STM.TChan
 import Control.Lens ((%~), (&), (^?), _1, _2, over)
@@ -57,7 +60,6 @@ import qualified Data.Traversable as Tra
 import Data.Tuple
 import Default
 import Expression
-import GHC.Stack
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (apply)
 import Graphics.UI.Threepenny.Internal (ui)
@@ -81,7 +83,7 @@ import qualified Types.Index as G
 import Types.Patch
 import Utils
 
-type ColumnTidings = Map (S.Set (Rel CoreKey ))(Tidings (Maybe (Column CoreKey Showable)))
+type ColumnTidings = Map (S.Set (Rel CoreKey )) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
 
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
 genAttr inf k =
@@ -99,23 +101,27 @@ genAttr inf k =
     kgen KOptional = LeftTB1 . pure
     kgen KArray = ArrayTB1 . pure
 
-execute :: InformationSchema -> Text -> Plugins -> Maybe (TBData Key Showable) -> IO (Maybe (TBIdx Key Showable))
+execute
+  :: InformationSchema
+  -> Text
+  -> Plugins
+  -> Maybe (TBData Key Showable)
+  -> IO (Maybe (TBIdx Key Showable))
 execute inf t (idp,p) = fmap join . traverse (\ v -> fmap (join . eitherToMaybe) . catchPluginException inf (tableUnique table ) idp ( getPKM (tableMeta table)   v)   . exec (_plugAction p ) $ v )
   where
     table = lookTable inf t
-    actiona f v =  fmap (join .  fmap (diff v . liftTable' inf t)) . f  $  mapKey' keyValue v
-    actiond f v = fmap (join . fmap (diff v .apply v .liftPatch inf t)) . f $ mapKey' keyValue v
+    actiona f v = fmap (join . fmap (diff v . liftTable' inf t)) . f  $  mapKey' keyValue v
+    actiond f v = fmap (join . fmap (\a -> diff v  =<< (applyIfChange v .liftPatch inf t $a))) . f $ mapKey' keyValue v
     exec p@(PurePlugin _) = actiona (pluginAction' p)
     exec p@(DiffPurePlugin _) = actiond (pluginActionDiff' p)
     exec p@(DiffIOPlugin _) = actiond (pluginActionDiff' p)
     exec p@(IOPlugin _) = actiona (pluginAction' p)
 
-
 pluginUI
-    :: InformationSchema
-    -> Tidings (Maybe (TBData CoreKey Showable) )
-    -> Plugins
-    -> UI (Element ,(Union (Access Key),Tidings (Maybe (Index (TBData CoreKey Showable)))))
+  :: InformationSchema
+  -> Tidings (Maybe (TBData CoreKey Showable) )
+  -> Plugins
+  -> UI (Element ,(Union (Access Key),Tidings (Maybe (Index (TBData CoreKey Showable)))))
 pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
     fresh :: [([VarDef],[VarDef])]
@@ -131,21 +137,20 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
           attrB a = do
             let pre = const Nothing <$> unoldItems
             wn <-  tbCaseDiff  inf  (lookTable oinf tname) mempty a mempty  mempty pre
-            v <- labelCaseDiff inf a  wn
+            v <- labelCaseDiff inf a  (triding wn)
             out <- UI.div # set children [getElement v,getElement wn]#  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
             return  $ TrivialWidget (apply <$> facts pre <#> triding v) out
       elemsIn <- mapM  inputs inpfresh
       let
         inp :: Tidings (Maybe (TBData CoreKey Showable))
-        inp = fmap tblist <$> foldr (liftA2 (liftA2 (:))) (pure (Just [])) (fmap triding elemsIn)
+        inp = fmap kvlist <$> foldr (liftA2 (liftA2 (:))) (pure (Just [])) (fmap triding elemsIn)
 
       (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  unoldItems <*>  inp) (idp,FPlugins n tname aci)
 
-      let outputs fresh =  attrB (fmap (\v ->  justError ("no key " <> show fresh <> " in " <>  show v ) .fmap snd . findKV ((== [fresh]) . fmap _relOrigin. keyattr ) $ create v)  <$> liftedE  )  (genAttr oinf fresh)
+      let outputs fresh =  attrB (fmap (\v ->  justError ("no key " <> show fresh <> " in " <>  show v ) .fmap snd . findKV ((== (S.singleton $ Inline fresh)) . index) $ create v)  <$> liftedE  )  (genAttr oinf fresh)
           attrB pre a = do
-            wn <-  tbCaseDiff inf (lookTable oinf tname) []  a [] [] pre
-            TrivialWidget v e <- labelCaseDiff inf a  wn
-
+            wn <-  tbCaseDiff inf (lookTable oinf tname) []  a M.empty [] pre
+            TrivialWidget v e <- labelCaseDiff inf a  (triding wn)
             out <- UI.div # set children [getElement e,getElement wn] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
             return $ TrivialWidget (apply <$> pre <*> v ) out
 
@@ -155,7 +160,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j <- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp]) # sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
-      return  ( l <> [j , k] , (\i j ->  liftA2 apply i j  <|> i <|> fmap create j) <$> facts unoldItems <#>  liftedE  ))
+      return  ( l <> [j , k] , mergePatches  <$> facts unoldItems <#>  liftedE  ))
            ) ) (return ([],trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (b: fst freshUI)
   let evdiff = fmap join $ liftA2 diff <$>  facts trinp <#> snd freshUI
@@ -191,6 +196,7 @@ pluginUI inf oldItems pl@(idp,FPlugins n t p) =
       pgOut <- ui $mapTEventDyn (liftIO . execute inf t pl) tdInput
       return (headerP, (out,   pgOut ))
 
+
 checkAccessFull
   :: Functor f =>
      InformationSchema
@@ -203,13 +209,14 @@ checkAccessFull
 checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
     where
       (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ arrow
-      pred =  WherePredicate <$> genPredicateFullU True inp
+      pred =  WherePredicate . fmap fixrel<$> genPredicateFullU True inp
       tdInput = join . fmap (checkPredFull pred) <$> oldItems
-      predOut =  WherePredicate <$> genPredicateFullU True out
+      predOut =  WherePredicate . fmap fixrel <$> genPredicateFullU True out
       tdOutput = join . fmap (checkPredFull predOut)  <$> oldItems
       checkPredFull pred i
           =  if maybe False (G.checkPred i) pred then  Just i else Nothing
 
+prodRef = IProd Nothing
 
 indexPluginAttrDiff
   :: Column Key ()
@@ -219,12 +226,12 @@ indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
   where
     match (IProd _ l) ( IProd _ f) = l == f
     match i f = False
-    thisPlugs = filter (hasProd (`match` head (keyRef . _relOrigin <$> keyattri a)) . fst)  plugItens
-    evs  = fmap (fmap (join . fmap (F.find ((== keyattrs a)  . pattrKey )  ))) <$>  thisPlugs
+    thisPlugs = filter (hasProd (`match` head (prodRef . _relOrigin <$> keyattr a)) . fst)  plugItens
+    evs  = fmap (fmap (join . fmap (F.find ((== index a)  . index )  ))) <$>  thisPlugs
 indexPluginAttrDiff  i  plugItens = pfks
   where
-    thisPlugs = filter (hasProd (isNested (fmap (keyRef. _relOrigin) (keyattri i) )) .  fst) plugItens
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( keyRef . _relOrigin ) (keyattri i) ))) . second (fmap (join . fmap (F.find ((==  keyattrs i)  . pattrKey ) ))) <$>  thisPlugs
+    thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (keyattr i) )) .  fst) plugItens
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (keyattr i) ))) . second (fmap (join . fmap (F.find ((==  index i)  . index ) ))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
@@ -263,31 +270,26 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
       KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
 getRelOrigin :: [Column k () ] -> [k ]
-getRelOrigin =  fmap _relOrigin . concatMap keyattri
+getRelOrigin =  fmap _relOrigin . concatMap keyattr
 
 attributeLabel :: Column CoreKey () -> String
-attributeLabel (Fun k rel _ ) = show k ++  " = " ++ renderFun rel
-attributeLabel (IT k v ) = show k
-attributeLabel (Attr k v ) = show k
-attributeLabel (FKT ifk rel v ) =  if L.null constr then   stotal else L.intercalate "," (show <$>  constr ) ++ " => " ++ stotal
-  where total = concat $ fmap _relOrigin . keyattr <$> _kvvalues ifk
-        stotal = if L.null total then "()" else L.intercalate "," (show <$> total)
-        constr = (_relOrigin <$> rel) L.\\ total
+attributeLabel = L.intercalate "," . fmap renderRel .  F.toList . index
 
 labelCaseDiff
   ::  InformationSchema
   -> Column CoreKey ()
-  -> TrivialWidget (Editor (Index (Column CoreKey Showable)))
+  -> Tidings (Editor (Index (Column CoreKey Showable)))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 labelCaseDiff inf a wid = do
-    let dynShow = do
-          patch <- UI.div
-              # sink text  (facts $ show <$> triding wid)
-          tip <- UI.div
-              # set text (show $ keyattri  a)
-          UI.div # set children [tip,patch]
-    hl <- detailsLabel (set UI.text (attributeLabel a) . (>>= flip paintEditDiff (triding wid ))) dynShow
-    return $ TrivialWidget (triding wid) hl
+  let
+    dynShow = do
+      patch <- UI.div
+        # sinkDiff text  (show <$> wid)
+      tip <- UI.div
+        # set text (show $ keyattr  a)
+      UI.div # set children [tip,patch]
+  hl <- detailsLabel (set UI.text (attributeLabel a) . (>>= flip paintEditDiff (wid ))) dynShow
+  return $ TrivialWidget wid hl
 
 paintEditDiff e  i  = element e # sinkDiff UI.style ((pure . ("background-color",) . cond  ) <$> i )
   where cond Delete = "purple"
@@ -295,91 +297,53 @@ paintEditDiff e  i  = element e # sinkDiff UI.style ((pure . ("background-color"
         cond (Diff i) = "yellow"
 
 
+filterConstr rel  = filter ((`S.isSubsetOf` (S.fromList  rel)) . S.map _relOrigin. S.unions . fst)
 tbCaseDiff
   :: InformationSchema
   -> Table
   -> SelPKConstraint
   -> Column CoreKey ()
-  -> [(S.Set (Rel Key) ,(Tidings (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable ))))]
+  -> ColumnTidings
   -> PluginRef (Column CoreKey Showable)
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
     let
-      nonInj =  S.fromList (_relOrigin   <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
-      nonInjRefs = filter ((\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin .fst) wl
+      nonInj =  S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
+      nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin $ k) wl
       relTable = M.fromList $ fmap (_relTarget &&& _relOrigin) rel
-      restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relOrigin rel)) . S.fromList . getRelOrigin  .fst) constr
-      reflectFK f rel box = (\ref -> pure $ FKT (kvlist ref ) rel (TB1 box) )<$> backFKRef relTable (getRelOrigin f) box
-      convertConstr (f,j) = (f, fmap (\constr -> maybe False constr  .  reflectFK f rel ) j)
-      patchRefs = M.fromList $ fmap (\(a,b) -> flip apply <$> a <*> b ) <$> nonInjRefs
-    fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  patchRefs oldItems  i
+      restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
+
+      reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
+        where frel = filter (\i -> isJust $ M.lookup (S.singleton (Inline (_relOrigin i))) (_kvvalues ifk)) rel
+      convertConstr (f,j) = (f, fmap (\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel ) j)
+    fkUITableGen inf table  (convertConstr <$>  restrictConstraint) plugItens  nonInjRefs oldItems  i
 
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
-    let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.fromList . getRelOrigin  .fst) constr
+    let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.map _relOrigin. S.unions  .fst) constr
     iUITableDiff inf restrictConstraint plugItems oldItems i
 tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
-    let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
-    let tdiv = fmap _tbattr <$> oldItems
-    attrUI <- buildUIDiff (buildPrimitive (keyModifier i)) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
-    let insertT = fmap (PAttr i ) <$> triding attrUI
-    return $ TrivialWidget insertT  (getElement attrUI)
+  let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic v)) Just ) preoldItems  ) ( keyStatic i)
+  let tdiv = fmap _tbattr <$> oldItems
+  attrUI <- buildUIDiff (buildPrimitive (keyModifier i)) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
+  let insertT = fmap (PAttr i ) <$> triding attrUI
+  return $ TrivialWidget insertT  (getElement attrUI)
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    recoverT (i,j) = liftA2 (flip apply) i j
-    search (IProd _ t) = fmap (fmap _tbattr ). recoverT .snd <$> L.find ((S.singleton t ==) .  S.map _relOrigin . fst) wl
-    search (Nested t (Many [One m])) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) .  S.map _relOrigin . fst) wl
+    search (Inline t) = fmap (fmap _tbattr ). recoverT <$> M.lookup (S.singleton  (Inline t)) wl
+    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable )). recoverT <$> M.lookup (S.fromList t )  wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
 
   funinp <- traverseUI ( traverse (liftIO. evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)). allMaybes ) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
-  return $ TrivialWidget (editor <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
+  return $ TrivialWidget (diff' <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
 
-emptyRecTable (FKT rel l tb )
-    = case tb of
-          (LeftTB1 _ ) ->  Just . fromMaybe (FKT (mapKV (mapFAttr (const (LeftTB1 Nothing))) rel) l (LeftTB1 Nothing))
-          i -> id
-emptyRecTable (IT l tb)
-    = case tb of
-          (LeftTB1 _) -> Just . fromMaybe (IT l (LeftTB1 Nothing))
-          i -> id
+recoverT (i,j) = fmap join $ liftA2 applyIfChange j i
 
-
-tbRecCaseDiff ::  InformationSchema ->  Table -> SelPKConstraint  -> Column CoreKey ()
-        -> [(S.Set (Rel CoreKey ) ,(Tidings (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable ))))]
-        -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
-tbRecCaseDiff inf table constr a wl plugItens preoldItems' = do
-      let preoldItems = emptyRecTable  a <$> preoldItems'
-      let check = F.foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) preoldItems (snd <$> plugItens )
-      TrivialWidget btr open<- checkedWidget  (isJust <$> check)
-      element open
-      (ev,h) <- ui newEvent
-      inipre <- currentValue  (facts preoldItems)
-      let fun True = do
-              initpre <- currentValue (facts preoldItems)
-              initpreOldB <- ui $ stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- tbCaseDiff inf table constr a wl plugItens (tidings initpreOldB (rumors preoldItems) )
-              ui $ onEventIO (rumors btre) h
-              UI.div # set children [bel] # set UI.style [("border","1px solid gray")]
-          fun False =
-            UI.div # set UI.style [("border","1px solid gray")]
-      els <- traverseUI  fun btr
-      sub <- UI.div # sink children (pure <$> facts els)
-      out <- UI.div # set children [open,sub]
-      binipre <- ui $ stepper  Keep ev
-      return (TrivialWidget  (tidings binipre ev) out)
 
 unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (TB k a )
 unTBMap = _kvvalues
-
-instance Applicative Editor where
-  pure =Diff
-  Diff f <*> Diff v = Diff $ f  v
-  Keep <*> j = Keep
-  j <*> Keep  = Keep
-  Delete   <*> j = Delete
-  i <*> Delete = Delete
 
 select table  = do
   (_,(_,evMap )) <- selectFromTable table Nothing Nothing [] []
@@ -398,40 +362,184 @@ traRepl  = foldMap repl
     repl (Rec  ix v ) = replaceU ix v v
     repl v = One v
 
-buildFKS :: InformationSchema
-     -> SelPKConstraint
-     -> Table
-     -> ColumnTidings
-     -> PluginRef (TBData CoreKey Showable)
-     -> TBData CoreKey ()
-     -> Tidings (Maybe (TBData CoreKey Showable))
-     -> [(Set (Rel Key),TB Key ())]
-     -> UI [(Set (Rel Key), (TrivialWidget  (Editor (PathAttr CoreKey Showable)),
+anyColumns
+  :: InformationSchema
+   -> Bool
+   -> UI Element
+   -> SelPKConstraint
+   -> Table
+   -> ColumnTidings
+   -> PluginRef (TBData CoreKey Showable)
+   -> TBData Key ()
+   -> Tidings (Maybe (TBData CoreKey Showable))
+   -> [(Set (Rel Key),TB Key ())]
+   ->  UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
+anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
+      let
+        fks2 = M.fromList $ run <$> cols
+        initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unOptionalAttr  <$> F.toList (_kvvalues j))  <$>oldItems
+        sumButtom itb =  do
+          el <- UI.div
+          element =<< labelCaseDiff inf (fromJust $ M.lookup itb (unKV k)) ( (\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
+        marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
+
+      chk <- buttonDivSetO (M.keys (unKV k))  (fmap index <$> initialAttr)  marker sumButtom
+      fks <- switchManyUI (const Keep <$> oldItems) (triding chk) fks2
+      element chk # set UI.style [("display","inline-flex")]
+      let
+        resei :: Tidings (Editor (TBIdx CoreKey Showable))
+        resei = fmap pure <$> triding fks
+      listBody <- UI.div #  set children (getElement chk : [getElement fks])
+      return (listBody, resei)
+  where
+    meta = tableMeta table
+    run (l,m) = (l,do
+      let hasEl = L.any (mAny (maybe False (l==) . safeHead ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
+          plugattr = indexPluginAttrDiff m plugmods
+          oldref = join . fmap ((^?  Le.ix l ) . unTBMap ) <$> oldItems
+      wn <- tbCaseDiff inf table constr m  M.empty plugattr oldref
+      TrivialWidget (triding wn) <$> el # set children [getElement wn])
+
+
+
+buildFKS
+  :: InformationSchema
+   -> Bool
+   -> UI Element
+   -> SelPKConstraint
+   -> Table
+   -> ColumnTidings
+   -> PluginRef (TBData CoreKey Showable)
+   -> Tidings (Maybe (TBData CoreKey Showable))
+   -> [(Set (Rel Key),TB Key ())]
+   -> UI [(Set (Rel Key), (TrivialWidget  (Editor (PathAttr CoreKey Showable)),
                              Tidings (Maybe (Column CoreKey Showable))))]
-buildFKS inf constr table refs plugmods  ftb@k oldItems =  F.foldl'  run (return [])
+buildFKS inf hasLabel el constr table refs plugmods   oldItems =  F.foldl'  run (return [])
   where
         meta = tableMeta table
         run jm (l,m) = do
             w <- jm
-            let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
+            let hasEl = L.any (mAny (maybe False (l==) . safeHead ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
                 plugattr = indexPluginAttrDiff m plugmods
                 oldref = join . fmap ((^?  Le.ix l ) . unTBMap ) <$> oldItems
-                aref = fromMaybe oldref  (M.lookup (keyattrs m) refs)
-            wn <- (if el
-                    then tbRecCaseDiff
-                    else tbCaseDiff ) inf table constr m  (fmap (first triding) <$> w) plugattr aref
-            let nref = maybe wn (\a -> TrivialWidget (liftA3  match (triding wn) a oldref) (getElement wn) ) (M.lookup (keyattrs m) refs)
-                match Keep i j = maybe Keep Diff  (join ( liftA2 diff i j <|> fmap (Just .patch) i) )
-                match j _ _  = j
+                aref = M.lookup l refs
+                replaceNonInj = maybe [] (\j -> pure (Many ((One .IProd Nothing. _relOrigin <$> F.toList l)), onDiff  Just  (const Nothing)<$> fst j))  aref
+            wn <-  tbCaseDiff inf table constr m  (M.fromList $ fmap (first triding) <$> w) (replaceNonInj <> plugattr) oldref
             lab <- if
-              rawIsSum table
-              then return nref
+              hasLabel
+              then do
+                TrivialWidget (triding wn) <$> el # set children [getElement wn]
               else do
-                v <- labelCaseDiff inf m nref
-                out <- UI.div # set children [getElement v,getElement  nref] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize m))
-                return $ TrivialWidget (triding v) out
-            return (w <> [( keyattrs m,(lab,aref))] )
+                v <- labelCaseDiff inf m (triding wn)
+                out <- el # set children [getElement v,getElement  wn]
+                return $ TrivialWidget (triding wn) out
+            return (w <> [( index m,(lab,oldref))] )
 
+batchUITable
+   :: InformationSchema
+   -> Table
+   -> RefTables
+   -> ColumnTidings
+   -> PluginRef (TBData CoreKey Showable)
+   -> TBData CoreKey ()
+   -> Tidings [TBData CoreKey Showable]
+   -> UI (TrivialWidget [TBData CoreKey Showable])
+batchUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb  preoldItems = do
+  let
+    m = tableMeta table
+    getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
+    getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $ "error getting Item" ++ show (e :: SomeException)) >> return Nothing)
+
+  ui $ mapTEventDyn (traverse (\i ->  do
+    p <- transactionNoLog inf . getItem $ i
+    traverse (putPatch tref . pure . FetchData table .(G.getIndex m i,). PatchRow ) p)) preoldItems
+  let
+    primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> ( deleteCurrentUn un  <$> preoldItems <*> gist))
+      where un = _kvpk m
+    deleteCurrentUn un l e =  foldl' (\l e -> G.delete ( G.getUnique m un e) G.indexParam l) e l
+    secondaryConstraints un = (M.keys $ _kvvalues $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn un <$> preoldItems <*> (fromJust . M.lookup un <$>  sgist)))
+    constraints :: SelPKConstraint
+    constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
+
+  let arraySize = 30
+      index ix v = flip atMay ix v
+  let unIndexEl ix =  index ix <$> preoldItems
+      dyn = dynHandlerPatch  (\ix valix plix ->do
+        (listBody,tablebdiff) <- rowTableDiff inf table constraints refs pmods ftb ix valix
+        return $ TrivialWidget tablebdiff listBody ) unIndexEl (\ix -> [])
+
+  widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+
+  -- (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
+  headers <- rowTableHeaders ftb
+  out <- UI.table # set UI.class_ "table"
+      # set children (headers : (getElement <$> widgets))
+  divTable <- UI.div
+      # set children [out]
+      # set UI.class_ "col-xs-12"
+      # set UI.style [("overflow-x","auto")]
+  TrivialWidget preoldItems <$> UI.div # set children [divTable]
+
+
+rowTableHeaders
+  :: TBData CoreKey () -> UI Element
+rowTableHeaders  ftb = do
+  ixE <- UI.th # set text "#"
+  operation <- UI.th # set text "Action"
+  let
+    label (k,x) = do
+      l <- detailsLabel (set UI.text (attributeLabel x )) (UI.div # set text (show $ index x))
+      UI.th # set children [l]
+    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ (unTBMap ftb)
+  els <- mapM label srefs
+  UI.tr # set children (ixE : operation : els)
+
+
+rowTableDiff
+  :: InformationSchema
+  -> Table
+  -> SelPKConstraint
+  -> ColumnTidings
+  -> PluginRef (TBData CoreKey Showable)
+  -> TBData CoreKey ()
+  -> Int
+  -> Tidings (Maybe (TBData CoreKey Showable))
+  -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
+rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
+  ixE <- UI.td# set text (show ix)
+  operation <- UI.td
+  oldItems <- ui $ cacheTidings preOldItems
+  plugins <- ui $ loadPlugins inf
+  let
+    meta = tableMeta table
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) plugins )
+
+  let
+      resdiff =   snd <$> res
+      srefs :: [(Set (Rel Key),TB Key ())]
+      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+      plugmods = first traRepl <$> (resdiff <> plmods)
+  let
+      sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
+      sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+
+  let isSum = rawIsSum table
+  (listBody,output) <- if isSum
+    then
+      anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
+    else  do
+      fks <- buildFKS inf True UI.td constr table refs plugmods oldItems srefs
+      listBody <- UI.tr # set children (ixE :operation:( getElement .fst . snd  <$> fks))
+      return (listBody,sequenceTable fks)
+  element listBody
+    # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
+  out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
+
+  reftb <- ui $ refTables inf   table
+  -- (outI ,_)<- processPanelTable listBody inf reftb  out table preOldItems
+
+  -- element operation #  set children [outI]
+  return (listBody , out)
 
 eiTableDiff
   :: InformationSchema
@@ -450,41 +558,20 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) plugins )
 
   let
-      resdiff =   snd <$> res
-      srefs :: [(Set (Rel Key),TB Key ())]
-      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
-      plugmods = first traRepl <$> (resdiff <> plmods)
-  let
-      sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
-      sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+    resdiff =   snd <$> res
+    srefs :: [(Set (Rel Key),TB Key ())]
+    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    plugmods = first traRepl <$> (resdiff <> plmods)
 
-  (listBody,output) <- if rawIsSum table
-    then do
-      fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
-      let
-        initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unOptionalAttr  <$> F.toList (_kvvalues j))  <$>oldItems
-        sumButtom itb =  do
-           let i = itb
-           case  M.lookup i (M.fromList fks) of
-             Just (body ,_) ->  element =<< labelCaseDiff inf (fromJust $ M.lookup i (unKV k)) body
-             Nothing -> UI.div
-        marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
-
-      chk  <- buttonDivSetO (M.keys (unKV k))  (fmap keyattrs <$> initialAttr )  marker sumButtom
-      element chk # set UI.style [("display","inline-flex")]
-      let
-          deleteP (PAttr i _) = PAttr i (POpt Nothing)
-          deleteP (PInline i _) = PInline i (POpt Nothing)
-          deleteP (PFK i j _ ) = PFK i (fmap deleteP  j ) (POpt Nothing)
-          del j i = if pattrKey i == j then i else deleteP i
-          iniValue = fmap (patch.attrOptional) <$> initialAttr
-          resei :: Tidings (Editor (TBIdx CoreKey Showable))
-          resei = (\ini j -> fmap (\l -> L.map (del j) (maybe l (:l) ini))) <$> iniValue <*> triding chk <*> sequenceTable fks
-      listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
-      sequence_ $ (\(kix,(el,_)) -> element  el # set UI.style [("border","1.5px gray solid")] # sink0 UI.style (noneShow <$> ((==kix) <$> facts (triding chk) ))) <$> fks
-      return (listBody, resei)
+  let isSum = rawIsSum table
+  (listBody,output) <- if isSum
+    then
+        anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
     else  do
-      fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
+      fks <- buildFKS inf isSum UI.div constr table refs plugmods oldItems srefs
+      mapM (\(s,(i,_)) -> element (getElement  i) #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (fromJust $ M.lookup s(M.fromList srefs))))) fks
+      let sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
+          sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
       return (listBody,sequenceTable fks)
   element listBody
@@ -495,10 +582,9 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
-  tableName <- detailsLabel (set UI.text (T.unpack $ tableName table)) (UI.div  # set text (show table))
-  tableDiv <- UI.div # set children [tableName,body]
-  out <- ui . calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (apply j i))  <$> output <*> oldItems
-  return (tableDiv , out)
+  out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
+  return (body, out)
+
 
 
 crudUITable
@@ -509,8 +595,8 @@ crudUITable
    -> PluginRef (TBData CoreKey Showable)
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI (Element,Tidings (Maybe (TBData CoreKey Showable)))
-crudUITable inf table reftb@(_, _ ,gist ,_,tref) refs pmods ftb@_  preoldItems = do
+   -> UI (TrivialWidget (Maybe (TBData CoreKey Showable)))
+crudUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb@_  preoldItems = do
       let
         m = tableMeta table
         getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
@@ -518,25 +604,33 @@ crudUITable inf table reftb@(_, _ ,gist ,_,tref) refs pmods ftb@_  preoldItems =
 
       ui $ mapTEventDyn (fmap join <$> traverse (\i ->  do
         p <- transactionNoLog inf . getItem $ i
-        traverse (putPatch tref . pure . PatchRow .(G.getIndex m i,)) p)) preoldItems
+        traverse (putPatch tref . pure . FetchData table .(G.getIndex m i,). PatchRow ) p)) preoldItems
       let
-        deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
-        tpkConstraint = (F.toList $ _kvvalues $ tbPK m ftb , (_kvpk m,  gist))
-      unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (F.toList $ _kvvalues $ tbUn (S.fromList un ) (TB1 ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
-      unDeleted <- traverse (traverse (traverse (ui . cacheTidings))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
+        primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> (deleteCurrentUn un <$> preoldItems <*> gist))
+          where un = _kvpk m
+        deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique m un <$> e
+        secondaryConstraints un = (M.keys $ _kvvalues $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn un <$> preoldItems <*> (fromJust . M.lookup un <$>  sgist)))
+        constraints :: SelPKConstraint
+        constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
+
+      (listBody,tablebdiff) <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
+      (panelItems ,e)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
+
+      errors <- printErrors e
+      debug <- debugConsole   preoldItems tablebdiff
       let
-        dunConstraints (un,o) = flip (checkGist un .tblist' ) <$> o
-        unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
-        unFinal = fmap (fmap dunConstraints) unDeleted
-      (listBody,tablebdiff) <- eiTableDiff inf  table unFinal  refs pmods ftb preoldItems
+        tableb = applyIfChange <$> preoldItems <*> tablebdiff
+      out <- UI.div # set children [listBody,panelItems,errors,debug]
+      return $ TrivialWidget (join <$> tableb) out
 
-      (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
-      let
-        tableb = apply <$> preoldItems <*> tablebdiff
-      out <- UI.div # set children [listBody,panelItems]
-      return (out ,tableb)
-
-
+openClose open = do
+  let translate True = "expand"
+      translate False = "collapse-up"
+  nav  <- buttonDivSet [True,False] (fmap Just open)
+      (\i -> UI.button
+          # set UI.style [("font-size","smaller"),("font-weight","bolder")]
+          # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon glyphicon-" <> translate i))
+  return nav
 
 dynCrudUITable
    :: InformationSchema
@@ -545,41 +639,126 @@ dynCrudUITable
    -> PluginRef (TBData CoreKey Showable)
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI ([Element],Tidings (Maybe (TBData CoreKey Showable)))
-dynCrudUITable inf open  refs pmods table preoldItems = do
-  (e2,h2) <- ui newEvent
+   -> UI (TrivialWidget (Maybe (TBData CoreKey Showable)))
+dynCrudUITable inf nav refs pmods table preoldItems = do
+   switchManyUI  preoldItems  nav
+      (M.fromList [(True,do
+        reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
+        crudUITable inf table reftb refs pmods (allRec' (tableMap inf) table) preoldItems)
+      ,(False,do
+        TrivialWidget (join .  fmap (either (const Nothing) Just .tableCheck (tableMeta table)) <$> F.foldl' (liftA2 mergePatches) preoldItems (fmap snd pmods)) <$> UI.div
+       )])
 
-  let translate True = "plus"
-      translate False = "minus"
-  nav  <- buttonDivSet [True,False] (fmap Just open)
-      (\i -> UI.button
-          # set UI.style [("font-size","smaller"),("font-weight","bolder")]
-          # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon-" <> translate i))
-  element nav # set UI.class_ "pull-left"
-  sub <- UI.div
-  let
-    fun True =  do
-      reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
-      (out ,tableb)<- crudUITable inf table reftb refs pmods (allRec' (tableMap inf ) table) preoldItems
-      let check = filterE (maybe False (isRight.tableCheck (tableMeta table))) (rumors tableb)
-      ini <- currentValue (facts tableb)
-      liftIO. h2.join $  eitherToMaybe . tableCheck (tableMeta table) <$> ini
-      ui $ onEventIO check h2
-      return out
-    fun False = UI.div
-
-  end <- traverseUI fun (triding nav)
-  element sub # sink children (pure <$> facts end)
-  cv <- currentValue (facts preoldItems)
-  let evs2 = unionWith const e2  (rumors preoldItems)
-  bh2 <- ui $ stepper  cv evs2
-
-  return ([getElement nav,sub], F.foldl' (liftA2 mergePatches) (tidings bh2 evs2) (fmap snd pmods))
-
-mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChange <$>j)
+mergePatches i j = join $ (liftA2 applyIfChange i j)<|> (createIfChange <$> j) <|> Just i
 
 onDiff f g (Diff i ) = f i
 onDiff f g v = g v
+
+filterKey enabled k = void (filterApply (const <$> enabled) k)
+containsOneGist table ref = (==1).  L.length . conflictGist  table ref
+containsGist table ref = not . L.null .   conflictGist  table ref
+conflictGist table ref map = case  G.tbpredM (tableMeta table) ref of
+              Just i -> G.search i map
+              Nothing -> []
+
+catchEd  m  = (Right <$> sequence m) `catchAll` (\ e -> return (Left (show e)))
+
+insertCommand lbox inf table inscrudp inscrud  authorize gist = do
+    altI <- onAltI lbox
+    let insertEnabled = liftA2 (&&) (onDiff (isRight . patchCheckInf inf m) (const False) <$>  inscrudp) (liftA2 (\j -> maybe True (not. (flip (containsGist table) j))) gist inscrud)
+        m = tableMeta table
+    insertI <- UI.span # set UI.class_ "glyphicon glyphicon-plus"
+    insertB <- UI.button
+        # set UI.class_ "btn btn-sm btn-default"
+        # set children [insertI]
+        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
+    cliIns <- UI.click insertB
+    let  crudIns j   =  (( fixPatchRow inf (tableName table)))  <$> transaction inf (fullDiffInsert m j)
+    diffIns <- ui $ mapEventDyn catchEd $ fmap crudIns <$> facts inscrud <@ unionWith const cliIns (filterKey  (facts insertEnabled) altI )
+    return $ (diffIns ,insertB)
+
+editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
+    altU <- onAltU lbox
+    let
+      m = tableMeta table
+      editEnabled = (\i j k  l m -> i && j && k && l && m )<$> (maybe False (isRight . tableCheck  m)<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
+      crudEdi i j =  fmap (((G.getIndex m j,).PatchRow . fixPatch inf (tableName table )) . diff' i )$ transaction inf $ fullDiffEditInsert  m i j
+
+    editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
+    editB <- UI.button
+        # set UI.class_ "btn btn-sm btn-default"
+        # set children [editI]
+        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> editEnabled)
+    -- Edit when any persistent field has changed
+    cliEdit <- UI.click editB
+    diffEdi <- ui $ mapEventDyn catchEd $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
+    return (diffEdi,editB)
+
+deleteCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
+    let
+      m = tableMeta table
+      deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef <$> oldItemsi) (liftA2 (\i j -> maybe False (flip (containsGist table) j) i  ) oldItemsi gist)
+      crudDel :: TBData Key Showable  ->  Dynamic (RowPatch Key Showable)
+      crudDel j  = (( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom m  j )
+    deleteI <- UI.span # set UI.class_ "glyphicon glyphicon-trash"
+    deleteB <- UI.button
+        # set UI.class_ "btn btn-sm btn-default"
+        # set children [deleteI]
+        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "DELETE" `elem`) i && j)) <$>authorize <*> deleteEnabled)
+
+    altD <- onAltO lbox
+    cliDel <- UI.click deleteB
+    diffDel <- ui $ mapEventDyn catchEd $ fmap crudDel <$> facts oldItemsi <@ unionWith const cliDel (filterKey (facts deleteEnabled) altD)
+    return (diffDel,deleteB)
+
+mergeCommand lbox inf table inscrudp inscrud  authorize gist = do
+    let
+      m = tableMeta table
+      mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef <$> inscrud) (liftA2 (\i j -> (>1) . L.length $ maybe [] (\e -> filter ((/= tableNonRef e) .tableNonRef) $  conflictGist table e j) i  ) inscrud gist)
+      crudMerge :: TBData Key Showable  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic ((RowPatch Key Showable))
+      crudMerge i g =
+          fixPatchRow inf (tableName table)  <$> transaction inf ( do
+            let confl = conflictGist table i g
+            mapM_ (deleteFrom m) confl
+            fullDiffInsert  m i)
+    mergeI <- UI.span # set UI.class_ "glyphicon glyphicon-share"
+    mergeB <- UI.button
+        # set UI.class_ "btn btn-sm btn-default"
+        # set UI.children [mergeI]
+        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> mergeEnabled)
+    cliMerge <- UI.click mergeB
+    diffMerge <- ui $ mapEventDyn catchEd $ liftA2 crudMerge <$> facts inscrud <*> fmap Just (facts gist) <@ cliMerge
+    return (diffMerge,mergeB)
+
+
+debugConsole oldItemsi inscrudp = do
+    let
+      inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
+    debugBox <- checkedWidget (onDiff (const True) (const False )<$> inscrudp)
+    debugT <- traverseUI (\i ->
+            if i
+            then do
+              let
+                gen (h,s) = do
+                  v <- ui $ currentValue s
+                  header <- UI.h6
+                            # set UI.class_ "header"
+                            # set UI.text h
+                            # set UI.style [("text-align","center")]
+                  out <- UI.mkElement "textarea"
+                            # set UI.value v
+                            # set UI.style [("max-height","300px"),("width","100%")]
+                  element out # method  "textAreaAdjust(%1)"
+                  UI.div # set children [header,out]
+                         # set UI.class_ "col-xs-6"
+              mapM gen
+                  [-- ("Last", maybe "" (ident . renderTable) <$> facts oldItemsi),
+                  -- ("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud),
+                  ("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
+                  ,("Undo", maybe "" (onDiff (ident . renderRowPatch) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
+            else  return [] ) (triding debugBox)
+    debug <- UI.div # sink children (facts debugT)
+    UI.div #  set children [getElement debugBox,debug]
 
 processPanelTable
    :: Element
@@ -588,165 +767,84 @@ processPanelTable
    -> Tidings (Editor (TBIdx CoreKey Showable))
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI (Element, Event (RowPatch CoreKey Showable) )
+   -> UI (Element,Event [String])
 processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
-      inscrud = apply <$> oldItemsi <*> inscrudp
-      m = tableMeta table
-      containsGistNotEqual old ref map = check (conflictGist ref map)
-        where
-          check i = L.null i  || [G.getIndex m old] == L.nub (fmap (G.getIndex m)(F.toList i))
-      containsGist ref = not . L.null . conflictGist   ref
-      conflictGist ref map = case  G.tbpredM (tableMeta table) ref of
-              Just i -> G.search i map
-              Nothing -> []
-  let
-    pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-    authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
+    inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
+    m = tableMeta table
+    authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   auth <- fst <$> ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
-  let authorize =  ((fmap unArray . unSOptional' . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
-  -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (onDiff (isRight . patchCheckInf inf m) (const False) <$>  inscrudp) (liftA2 (\j -> maybe True (not. (`containsGist` j))) gist inscrud)
-  insertB <- UI.button
-      # set UI.class_ "btn btn-sm"
-      # set text "INSERT"
-      # set UI.class_ "buttonSet"
-      # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
+  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
 
-  let editEnabled = (\i j k l m -> i && j && k && l && m )<$> (maybe False (isRight . tableCheck  m)<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (`containsGist` j) i ) oldItemsi gist <*> liftA3 (\i k j -> maybe False (\(a,b) -> containsGistNotEqual b a j) (liftA2 (,) k i) ) inscrud oldItemsi gist <*> (isDiff <$> inscrudp)
-  editB <- UI.button
-      # set UI.class_ "btn btn-sm"
-      # set text "EDIT"
-      # set UI.class_ "buttonSet"
-      # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> editEnabled)
-  -- Edit when any persistent field has changed
+  (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist
+  (diffEdit,editB) <-     editCommand lbox inf table oldItemsi inscrudp inscrud authorize gist
+  (diffMerge,mergeB) <-   mergeCommand lbox inf table inscrudp inscrud authorize gist
+  (diffDelete,deleteB) <- deleteCommand lbox inf table oldItemsi inscrudp inscrud authorize gist
 
-  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) inscrud gist)
-  mergeB <- UI.button# set UI.class_ "btn btn-sm"
-      # set text "MERGE"
-      # set UI.class_ "buttonSet"
-      # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> mergeEnabled)
+  transaction <- UI.div
+    # set children [insertB,editB,mergeB,deleteB]
 
-  let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> oldItemsi) (liftA2 (\i j -> maybe False (`containsGist` j) i  ) oldItemsi gist)
-  deleteB <- UI.button# set UI.class_ "btn btn-sm"
-      #   set text "DELETE"
-      #   set UI.class_ "buttonSet"
-      # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "DELETE" `elem`) i && j)) <$>authorize <*> deleteEnabled)
-  let
-       filterKey enabled k = void (filterApply (const <$> enabled) k)
-       crudMerge :: Maybe (TBData Key Showable)  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic (Maybe (RowPatch Key Showable))
-       crudMerge (Just i) g =
-         fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
-            let confl = conflictGist i g
-            mapM_ (deleteFrom m) confl
-            fullDiffInsert  m i)
-       crudEdi i j =  fmap (fmap (PatchRow .(G.getIndex m j,). fixPatch inf (tableName table )))$ transaction inf $ fullDiffEditInsert  m i j
-       crudIns j   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))  <$> transaction inf (fullDiffInsert m j)
-       crudDel :: TBData Key Showable  ->  Dynamic (Maybe (RowPatch Key Showable))
-       crudDel j  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom m  j )
+  let diffEvs = [diffEdit,diffInsert,diffMerge,diffDelete]
+  return (transaction,unions $ fmap (fmap (\(Left i) -> i) . filterE isLeft) diffEvs)
 
-  altD <- onAltO lbox
-  altU <- onAltU lbox
-  altI <- onAltI lbox
-  cliIns <- UI.click insertB
-  cliMerge <- UI.click mergeB
-  cliDel <- UI.click deleteB
-  cliEdit <- UI.click editB
-  diffEdi <- mapEventFin (fmap join . sequence) $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
-  diffDel <- mapEventFin (fmap join . sequence) $ fmap crudDel <$> facts oldItemsi <@ unionWith const cliDel (filterKey (facts deleteEnabled) altD)
-  diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ cliMerge
-  diffIns <- mapEventFin (fmap join . sequence) $ fmap crudIns <$> facts inscrud <@ unionWith const cliIns (filterKey  (facts insertEnabled) altI )
-
-  conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText inf m) . flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
-  debugBox <- checkedWidget (pure False )--onDiff (const True) False <$> inscrudp)
-  transaction <- UI.span
-    # set children [insertB,editB,mergeB,deleteB,getElement debugBox]
-  debug <- UI.div
-  let renderTyped (Pure _ ) i  = ident. renderTable  $ i
-      renderTyped (Other (Constant i) ) _ = unlines ("Type check error":  i)
-  traverseUI (\i -> if  i
-                    then do
-                      let gen (h,s) = do
-                            v <- ui $ currentValue s
-                            header <- flabel
-                                      # set UI.text h
-                                      # set UI.class_ "col-xs-4"
-                            out <- UI.mkElement "textarea"
-                                      # set (UI.strAttr "onkeyup") "textAreaAdjust(this)"
-                                      # set UI.value v
-                                      # set UI.style [("max-height","300px")]
-                                      # set UI.class_ "col-xs-4"
-                            onChanges s (\v ->
-                              element out # set UI.value v # method  "textAreaAdjust(%1)")
-                            return (header,out)
-                      out <- mapM gen
-                          [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi)
-                          ,("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
-                          ,("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud)]
-
-                      element debug # set children (fmap fst out ++ fmap snd out)
-                      mapM_ (\i -> element i# method "textAreaAdjust(%1)")  (snd <$> out)
-                      return debug
-                    else  element debug # set children [] ) (triding debugBox)
-  out <- UI.div # set children [transaction,conflict,debug]
-  return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
-
+printErrors diffEvs = do
+  errors <- UI.div
+  onEvent diffEvs
+      (\i -> element errors # set text (show i))
+  return errors
 
 
 dynHandlerPatch
-  :: Eq a1 => (t -> Tidings (Maybe a1) -> UI (TrivialWidget (Editor a)))
-     -> (t -> Tidings (Maybe a1))
-     -> t
-     -> ([TrivialWidget (Editor a)], Tidings Bool)
-     -> UI ([TrivialWidget (Editor a)], Tidings Bool)
-dynHandlerPatch hand val ix (l,old)= do
+  :: (Compact (Index a1),Patch a1,Eq (Index a1),Show (Index a1),Show a1,Eq a1)
+  => (Int -> Tidings (Maybe a1) -> PluginRef a1 -> UI (TrivialWidget (Editor (Index a1))))
+  -> (Int -> Tidings (Maybe a1))
+  -> (Int -> PluginRef a1)
+  -> Int
+  -> ([TrivialWidget (Editor (Index a1))], Tidings Bool)
+  -> UI ([TrivialWidget (Editor (Index a1))], Tidings Bool)
+dynHandlerPatch hand val valp ix (l,old)= do
     (ev,h) <- ui newEvent
-    let
-        valix = val ix
-        idyn True  =  do
-          tds <- hand ix valix
-          ini <- currentValue (facts $ triding tds)
-          liftIO $ h ini
+    valix <- ui $ calmT (val ix)
+    plix <- ui $ traverse (traverse calmT ) $ valp ix
+    oldC <- ui (calmT old)
+    let next = hand ix valix
+        idyn True =  do
+          tds <- hand ix valix plix
           ui $ onEventIO (rumors $ triding tds) h
-          return [getElement tds]
-        idyn False =
-          return []
-    els <- traverseUI idyn old
-    el <- UI.div # sink children (facts els)
-    bend <- ui $ stepper Keep  ev
-    let
-      infer Delete  _ = False
-      infer (Diff _) _ = True
-      infer Keep (Just _) = True
-      infer Keep Nothing  = False
-      evnew = (&&) <$> facts old <@> unionWith (&&) (isJust <$> rumors valix) ( flip infer <$> facts valix <@> ev)
-
-    inivalix <- ui $ currentValue (facts valix)
-    vout <- ui$ stepper (isJust inivalix) evnew
-    let evdiff= diffEvent vout evnew
-    bdifout <- ui $ stepper (isJust inivalix)  evdiff
-    out  <- ui . calmT $ tidings bdifout evdiff
-    return (l <> [TrivialWidget (tidings bend ev) el], out )
+          return (getElement tds)
+        idyn False = do
+          UI.div
+    els <- traverseUI idyn oldC
+    el <- UI.div # sink root (facts els)
+    plugAll <- ui . cacheTidings $  fromMaybe Keep .safeHead . compact <$> (foldl (liftA2 (flip (:)))  (pure .const Keep <$> valix)  (fmap (maybe Keep Diff) .snd<$> plix))
+    inipl <- currentValue (facts plugAll)
+    out <- ui $ calmT =<< stepperT inipl (unionWith (\i j -> head $ compact  [i,j]) (rumors plugAll) ev)
+    return (l <> [TrivialWidget out el], (\i j ->  isJust i && j ) <$> ((\ i j -> join $ applyIfChange i j <|> createIfChange j <|> Just i )<$> valix <*> out) <*> oldC )
 
 
 reduceDiffList
-  :: Int
+  :: Show a => Int -> Int
      -> [(Int, Editor (PathFTB a))]
      -> [Maybe (PathFTB a)]
      -> Editor (PathFTB a)
-reduceDiffList o i plug
+reduceDiffList arraySize o i plugM
+   | F.length i  == 0 = Keep
    | F.all isKeep (snd <$> i) = Keep
-   | otherwise = patchEditor $ removeOverlap ++ notOverlap ++  reverse (rights diffs)
+   | otherwise = patchEditor $  removeOverlap plugl ++ notOverlap ++  removeOverlap plugu ++ reverse (rights diffs)
    where diffs = catMaybes $ (\(ix,v) -> treatA (o+ix)v) <$> i
          treatA a (Diff v) = Just $ Left $ PIdx a  (Just v)
          treatA a Delete =  Just $ Right $ PIdx a Nothing
          treatA _ Keep = Nothing
-         plugl = F.concat $ unPatchSet <$> catMaybes plug
+         plug = catMaybes plugM
+         (plugl ,plugu)= (F.concat $ unPatchSet <$> catMaybes (filterPatchSet (<o) <$> plug), F.concat $ unPatchSet <$>catMaybes (filterPatchSet (o + arraySize <=)<$> plug))
            where
              unPatchSet (PatchSet l ) = F.toList l
              unPatchSet i = [i]
-         removeOverlap = catMaybes $ fmap (\(PIdx ix a ) -> if ( ix - o) `notElem` (fst <$> i) then  Just (PIdx ix a)  else unDiff ix $ snd $  i !! (ix -  o) ) plugl
-         notOverlap = filter (\(PIdx i o ) ->  notElem i ((\(PIdx i a ) -> i) <$> plugl )) (lefts diffs)
+         removeOverlap plugl = catMaybes $ fmap  proj plugl
+         proj (PIdx ix a ) = if ( ix - o) `notElem` (fst <$> i) then  Just (PIdx ix a)  else unDiff ix  . snd =<<  atMay  i (ix -  o)
+         proj (PAtom i) = Nothing
+         proj v = error (show v)
+         notOverlap =  lefts diffs
          unDiff o (Diff v) = Just $  PIdx o (Just v)
          unDiff o i = Nothing
 
@@ -760,15 +858,17 @@ maybeEdit :: t1 -> t -> Editor t1 -> t1
 maybeEdit v id (Diff i) =  i
 maybeEdit v id _  = v
 
-unPOpt :: PathFTB t -> Maybe (PathFTB t)
+unPOpt :: Show t => PathFTB t -> Maybe (PathFTB t)
 unPOpt (POpt i ) = i
+unPOpt i@(PAtom _ ) = Just i   -- TODO: Debug  what is triggering this and remove this case
+unPOpt i = error (show i)
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (TrivialWidget (Editor (Index b)))
 
-buildUIDiff:: (Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
+buildUIDiff:: (Compact (Index b),Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
 buildUIDiff f (Primitive l prim) = go l
   where
-    go [] plug tdi = fmap (fmap PAtom) <$> f (fmap (fmap (fmap unAtom )) <$>plug) (fmap unTB1 <$> tdi) prim
+    go [] plug tdi = fmap (fmap PAtom) <$> f (fmap (fmap (fmap unAtom)) <$>plug) (fmap unTB1 <$> tdi) prim
     go (i:ti) plug tdi = case i of
          KArray -> mdo
             ctdi' <- ui $  cacheTidings tdi
@@ -784,15 +884,14 @@ buildUIDiff f (Primitive l prim) = go l
                 tdi2  = fmap unArray <$> ctdi
                 index o ix v = flip Non.atMay (o + ix) <$> v
             let unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
-                unplugix ix = fmap (\p -> fmap join $ (\o ->  fmap (indexPatchSet (o + ix) )) <$> offsetT <*>p) <$> cplug
-                dyn = dynHandlerPatch  (\ix valix ->do
-                  let pl = unplugix ix
-                  wid <- go ti  pl valix
+                unplugix ix = fmap ((\o -> ((indexPatchSet (o + ix) )=<<)) <$> offsetT <*>) <$> cplug
+                dyn = dynHandlerPatch  (\ix valix plix ->do
+                  wid <- go ti  plix valix
                   lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
-                  paintEditDiff lb (triding wid )
-                  element wid # set UI.class_ "col-xs-12"
-                  row <- UI.div # set children [lb,getElement wid]
-                  return $ TrivialWidget (triding wid) row ) unIndexEl
+                  paintEditDiff lb (triding wid)
+                  element wid # set UI.class_ "col-xs-11"
+                  row <- UI.div # set children [lb,getElement wid] # set UI.class_"col-xs-12"
+                  return $ TrivialWidget (triding wid) row ) unIndexEl unplugix
 
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
             widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
@@ -801,27 +900,27 @@ buildUIDiff f (Primitive l prim) = go l
               -- [Note] Array diff must be applied in the right order
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
-              bres = reduceDiffList  <$> offsetT <*>  widgets2 <*> foldr (liftA2 (:)) (pure [])  (snd <$>cplug)
+              bres = reduceDiffList  arraySize <$> offsetT <*>  widgets2 <*> foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)
             pini <- currentValue (facts bres)
             bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres))
             element offsetDiv # set children (fmap getElement widgets)
-            size <- ui $ calmT (maybe 0 (Non.length .unArray)  <$> (apply <$> ctdi' <*> bres))
+            size <- ui $ calmT (maybe 0 ((+ negate 1).Non.length .unArray)  . join <$> (applyIfChange <$> ctdi' <*> bres))
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ TrivialWidget  bres' composed
          KOptional -> do
-           let pretdi = join . fmap unSOptional' <$> tdi
+           let pretdi = join . fmap unSOptional <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt ))<$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
            return  (reduceOptional <$> tdnew)
          KSerial -> do
-           let pretdi = join . fmap unSOptional' <$> tdi
+           let pretdi = join . fmap unSOptional <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
-           return (reduceOptional <$> tdnew )
+           return $ TrivialWidget (reduceOptional <$> triding tdnew) (getElement tdnew)
          KDelayed -> do
-           let pretdi =  join . fmap unSOptional' <$> tdi
+           let pretdi =  join . fmap unSOptional <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <-  go ti plugtdi pretdi
            let
@@ -831,7 +930,7 @@ buildUIDiff f (Primitive l prim) = go l
            return (test <$> tdnew)
          KInterval -> do
             let unInterval f (IntervalTB1 i ) = f i
-                unInterval _ i = errorWithStackTrace (show i)
+                unInterval _ i = error (show i)
                 unfinp (Interval.Finite i) = Just i
                 unfinp i = Nothing
                 plugtdi i (PInter j l)
@@ -851,9 +950,8 @@ buildUIDiff f (Primitive l prim) = go l
               replaceU  Delete   h = Diff $ PInter False (Interval.PosInf,h)
               replaceU  i  h =  fmap (PInter False . (,h).Interval.Finite) i
               output = (\i j -> reduceDiff [i,j])<$> (replaceL <$>  triding inf <*> triding lbd ) <*> (replaceU <$> triding sup <*> triding ubd)
-            return $ TrivialWidget  ((\old new -> fromMaybe Keep $ diff old (apply old new) ) <$> tdi <*> output)  subcomposed
-         i -> errorWithStackTrace (show i)
-
+            return $ TrivialWidget  output  subcomposed
+         i -> error (show i)
 
 reduceDiff :: [Editor (PathFTB a) ] -> Editor (PathFTB a)
 reduceDiff i
@@ -889,11 +987,16 @@ instance PrimEditor Bool where
 instance PrimEditor Double where
   primEditor i = fmap (fmap (\(SDouble i) -> i)) <$> buildPrim  [] (fmap SDouble <$> i)  PDouble
 
+instance PrimEditor Integer where
+  primEditor i = fmap (fmap (\(SNumeric i) -> fromIntegral i)) <$> buildPrim  [] (fmap (SNumeric .fromIntegral) <$> i)  (PInt 4)
+instance PrimEditor Int where
+  primEditor i = fmap (fmap (\(SNumeric i) -> i)) <$> buildPrim  [] (fmap SNumeric <$> i)  (PInt 4)
+
 buildPrimitive :: [FieldModifier] -> PluginRef Showable ->  Tidings (Maybe Showable) ->  Prim KPrim (Text, Text)-> UI (TrivialWidget (Editor Showable))
 buildPrimitive fm plug tdi2 (AtomicPrim i) = do
   let tdi = F.foldl' (liftA2 mergePatches) tdi2  (fmap snd plug)
   pinp <- buildPrim fm  tdi i
-  return $ TrivialWidget ( editor  <$> tdi2 <*> triding pinp) (getElement pinp)
+  return $ TrivialWidget ( diff' <$> tdi2 <*> triding pinp) (getElement pinp)
 
 
 buildPrim
@@ -940,22 +1043,23 @@ buildPrim fm tdi i = case i of
            let
             timeUI maptime = do
               cliZone <- jsTimeZone
-              itime <- liftIO getCurrentTime
               let
-                fromLocal = maptime (localTimeToUTC cliZone. utcToLocalTime utc)
-              v <- currentValue (facts tdi)
+                tdil =  fmap toLocal <$> tdi
+                fromLocal = maptime id
+                toLocal = maptime id
+              v <- currentValue (facts tdil)
               inputUI <- UI.input
                 # set UI.style [("width","100%")]
                 # set UI.class_ "date"
-                # set (UI.strAttr "data-date-format") "yyyy-mm-dd hh:ii:ss"
-                # set (UI.strAttr "data-provide" ) "datetimepicker"
-                # sinkDiff UI.value (maybe "" (takeWhile (/= '.') . renderPrim )<$> tdi)
+                # set (UI.strAttr "data-date-format") "yyyy-mm-dd hh:ii:ssZ"
+                # set (UI.strAttr "data-provide") "datetimepicker"
+                # sinkDiff UI.value (maybe "" (takeWhile (/= '.') . renderPrim )<$> tdil)
 
               onCE <- UI.onChangeE inputUI
-              let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
-              pk <- ui $ stepper v  pke
+              let pke = unionWith const (readPrim i <$> onCE ) (rumors tdil)
+              pk <- ui $ stepperT v  pke
               sp <- UI.div # set children [inputUI]
-              return $ TrivialWidget (fmap fromLocal <$> tidings pk pke) sp
+              return $ TrivialWidget (fmap fromLocal <$> pk) sp
            case ti of
              PTimestamp dbzone -> do
                 let maptime f (STime (STimestamp i)) = STime $ STimestamp (f i)
@@ -964,7 +1068,6 @@ buildPrim fm tdi i = case i of
                 timeUI (const id)
              PDayTime -> do
                 cliZone <- jsTimeZone
-                itime <- liftIO getCurrentTime
                 oneInput i tdi
              PInterval -> oneInput i tdi
          PAddress -> do
@@ -973,9 +1076,8 @@ buildPrim fm tdi i = case i of
            vci <- UI.valueChange i
            let tdie = unionWith const (Just .SText . T.pack <$> vci ) (rumors tdi)
            vi <- currentValue (facts tdi)
-           tdib <- ui $ stepper   vi tdie
-           let tdi2 = tidings tdib tdie
-           let fty = ("iframe",UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+           tdi2 <- ui $ stepperT vi tdie
+           let fty = ("iframe",UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("max-height","300px")])
 
            f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [i]
@@ -983,22 +1085,30 @@ buildPrim fm tdi i = case i of
            return (TrivialWidget tdi2 res)
          PMime mime ->
            case mime of
+            "text/json" -> do
+               let fty = ("textarea",UI.value ,maybe "" (\(SJSON i) -> BSL.unpack $ A.encode i) ,[("width","100%"),("max-height","300px")])
+               ini <- currentValue (facts tdi)
+               f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
+               vcf <- UI.valueChange f
+               let ev = if FWrite `elem` fm then unionWith const (rumors tdi) (fmap SJSON . A.decode . BSL.pack <$> vcf) else rumors tdi
+               step <- ui $ stepperT  ini ev
+               return (TrivialWidget step f)
             "text/plain" -> do
-               let fty = ("textarea",UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               let fty = ("textarea",UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
                ini <- currentValue (facts tdi)
                f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
                vcf <- UI.valueChange f
                let ev = if FWrite `elem` fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf) else rumors tdi
-               step <- ui $ stepper  ini ev
-               return (TrivialWidget (tidings step ev) f)
+               step <- ui $ stepperT  ini ev
+               return (TrivialWidget step f)
             "application/dwg" -> do
-               let fty = ("div",UI.value,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               let fty = ("div",UI.value,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
                ini <- currentValue (facts tdi)
                f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
                vcf <- UI.valueChange f
                let ev = if FWrite `elem` fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf ) else rumors tdi
-               step <- ui $ stepper  ini ev
-               return (TrivialWidget (tidings step ev) f)
+               step <- ui $ stepperT  ini ev
+               return (TrivialWidget step f)
             "video/mp4" -> do
                let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
                clearB <- UI.button # set UI.text "clear"
@@ -1013,7 +1123,7 @@ buildPrim fm tdi i = case i of
                     mkElement "video" # set children (pure f) # set (UI.strAttr "width" ) "320" # set (UI.strAttr "height" ) "240" # set (UI.strAttr "controls") ""# set (UI.strAttr "autoplay") ""
                        ) <$> facts tdi2
                    pdfFrame (elem,sr , call,st) pdf = mkElement elem  # set sr (call  pdf)
-               v <- UI.div # sink items(pure <$> f)
+               v <- UI.div # sink items(fmap pure <$> f)
                o <- UI.div # set children [file,clearB,v]
                return (TrivialWidget tdi2 o)
             otherwise -> do
@@ -1024,19 +1134,18 @@ buildPrim fm tdi i = case i of
                clearE <- UI.click clearB
                cur2 <- ui $currentValue (facts tdi)
                let evi2 = foldl1 (unionWith const) [ rumors tdi,const Nothing <$> clearE,  join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange]
-               bdi2 <- ui $ stepper cur2  evi2
+               tdi2 <- ui $ stepperT cur2  evi2
                let
-                 tdi2 = tidings bdi2 evi2
                  fty = case mime of
-                   "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
-                   "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                   "text/xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                   "application/gpx+xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                   "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("max-height","300px")])
+                   "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
+                   "text/xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
+                   "application/gpx+xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
                    "image/jpg" -> \i -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive"
                    "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                    "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-                   "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-               f <- fty bdi2  # sinkDiff UI.style (noneShow. isJust <$> tdi2)
+                   "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
+               f <- fty (facts tdi2 ) # sinkDiff UI.style (noneShow. isJust <$> tdi2)
                fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
                res <- UI.div # set children [fd,f]
                valChange <- UI.valueChange f
@@ -1048,8 +1157,7 @@ buildPrim fm tdi i = case i of
             inputUI <- UI.input # set UI.class_ "jscolor" # sink0 UI.value (maybe "FFFFFF" renderPrim <$> f)# set UI.style [("width","100%")]
             onCE <- UI.onChangeE inputUI
             let pke = unionWith const (readPrim i <$> onCE) (rumors tdi)
-            pk <- ui $ stepper v  pke
-            let pkt = tidings pk (diffEvent pk pke)
+            pkt <- ui $ stepperT v  pke
             sp <- UI.div # set UI.children [inputUI ]
             runFunctionDelayed inputUI  $ ffi "new jscolor(%1)" inputUI
             onChanges f (runFunctionDelayed inputUI . ffi "updateColor(%1,%2)" inputUI . maybe "FFFFFF" renderPrim)
@@ -1060,33 +1168,31 @@ buildPrim fm tdi i = case i of
 oneInput :: KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
 oneInput i tdi = do
     v <- currentValue (facts tdi)
-    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","100%")]
+    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","120px")]
     onCE <- UI.onChangeE inputUI
     let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
-    pk <- ui $ stepper v  pke
-    return $ TrivialWidget (tidings pk pke) inputUI
+    -- liftUILater $ runFunctionDelayed inputUI ( ffi"var fun = function(){this.style.width = (this.value.length + 1) + 'ch'};fun.call(%1);" inputUI)
+    pkt <- ui $ stepperT v  pke
+    -- onChanges (facts pkt)  $ (\_ -> liftUILater $ runFunctionDelayed inputUI ( ffi"var fun = function(){this.style.width = (this.value.length + 1) + 'ch'};fun.call(%1);" inputUI))
+    return $ TrivialWidget pkt inputUI
 
 
-renderInlineTable
-  ::
-     InformationSchemaKV Key Showable
-     -> [([TB CoreKey ()],
-            Tidings ([FTB (TBData CoreKey Showable)] -> Bool))]
-     -> [(Union (Access Key),
-          Tidings (Maybe (TBIdx (FKey (KType CorePrim)) Showable)))]
-     -> Tidings (Maybe (TBData CoreKey Showable))
-     -> Prim KPrim (Text, Text)
-     -> UI (TrivialWidget (Editor (TBIdx CoreKey Showable)))
-renderInlineTable inf constr pmods oldItems (RecordPrim na) = do
+inlineTableUI
+  :: InformationSchemaKV Key Showable
+  -> SelTBConstraint
+  -> PluginRef (TBData CoreKey Showable)
+  -> Tidings (Maybe (TBData CoreKey Showable))
+  -> Prim KPrim (Text, Text)
+  -> UI (TrivialWidget (Editor (TBIdx CoreKey Showable)))
+inlineTableUI inf constr pmods oldItems (RecordPrim na) = do
     let
-      convertConstr ([pre],j) =  (\i -> ([i],(\ j v -> j [TB1 (tblist (fmap addDefault (L.delete i attrs) ++ v))]) <$> j )) <$> attrs
-        where attrs = F.toList $ unKV $ unTB1 $ _fkttable pre
+      tablefields = allRec' (tableMap inf) table
+      convertConstr (_,j) =  (\i -> ([index i], C.contramap (\v -> kvlist (fmap addDefault (L.delete i attrs) ++ v)) <$> j )) <$> attrs
+        where attrs = F.toList $ unKV tablefields
       table = lookTable rinf (snd na)
       rinf = fromMaybe inf (HM.lookup (fst na) (depschema inf))
     uncurry (flip TrivialWidget) <$>
-      eiTableDiff inf table (concat $ convertConstr <$> constr) M.empty pmods (allRec' (tableMap inf) table) oldItems
-
-
+      eiTableDiff rinf table (concat $ convertConstr <$> constr) M.empty pmods tablefields oldItems
 
 
 iUITableDiff
@@ -1100,44 +1206,9 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline na))<$> buildUIDiff (renderInlineTable inf (fmap unConstr <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
-  where
-    unConstr  =  fmap (\j -> j . fmap (IT na))
+  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 
-liftPFK :: (Show k,Show b,Ord k) => PathAttr k b-> PathFTB (Map k (FTB b) ,TBIdx k b)
-liftPFK (PFK rel l i ) =first (fmap TB1 ) <$> liftPRel l  rel i
-
-
-liftPRel :: (Show b,Show k ,Ord k) => [PathAttr k b] -> [Rel k] -> PathFTB c -> PathFTB (Map k b ,c)
-liftPRel  l rel f = liftA2 (,) (M.fromList  <$> F.foldl' (flip mergePFK) (PAtom []) rels) f
-  where rels = catMaybes $ findPRel l <$> rel
-
-recoverRel :: Eq k => PathFTB ([b] ,TBIdx k b) -> ([PathFTB b],PathFTB (TBIdx k b))
-recoverRel i = (getZipList $ sequenceA $ ZipList . fst <$>   i , snd <$> i)
-
-mergePFK :: Show a => PathFTB a -> PathFTB [a] -> PathFTB [a]
-mergePFK (POpt i ) (POpt j) = POpt $ mergePFK  <$> i <*> j
-mergePFK (PatchSet i) (PatchSet j) =PatchSet $ Non.zipWith mergePFK i j
-mergePFK (PIdx ixi i ) (PIdx ixj j)
-    | ixi == ixj = PIdx ixi $ mergePFK  <$> i <*> j
-    | otherwise = error ("wrong idx: " ++ show (ixi,ixj))
-mergePFK (POpt i ) j = POpt $ flip mergePFK  j <$> i
-mergePFK j (POpt i ) = POpt $ mergePFK  j  <$> i
-mergePFK (PatchSet j) i =  PatchSet $ flip mergePFK i <$> j
-mergePFK i (PatchSet j) =  PatchSet $ mergePFK i <$> j
-mergePFK (PIdx ix i ) (PAtom l) = PIdx ix (flip mergePFK (PAtom l)  <$>  i)
-mergePFK (PAtom i ) (PAtom l) = PAtom (i : l)
-mergePFK i  j = errorWithStackTrace (show (i,j))
-findPRel l (Rel k op j) =  do
-  PAttr k v <- L.find (\(PAttr i v) -> i == k ) l
-  return $ fmap (k,) v
-recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
-recoverPFK ori rel i =
-  PFK rel (catMaybes (defaultAttrs <$> ori) ++  fmap (\(i,j) -> PAttr i (join $ fmap patch j)) ( zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
-
-attrToTuple :: TB k v -> (k,FTB v)
-attrToTuple  (Attr k v ) = (k,v)
 
 
 fkUITablePrim ::
@@ -1147,177 +1218,192 @@ fkUITablePrim ::
   -> SelTBConstraint
   -- Same Table References
   -> ColumnTidings
-  -> PluginRef  (TBRef  Key Showable)
+  -> PluginRef  (TBRef Key Showable)
   -- Relation Event
   -> Tidings (Maybe (TBRef CoreKey Showable))
   -- Static Information about relation
-  -> [(Rel Key,CorePrim)]
-  -> UI (TrivialWidget(Editor (PTBRef Key Showable)))
-fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  prim = do
+  -> [CorePrim]
+  -> UI (TrivialWidget (Editor (PTBRef Key Showable)))
+fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim = do
       -- Top Level Widget
-      pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
       top <- UI.div
-      esc <- onEsc top
-      panC <- UI.click pan
-      let eh  = unionWith const (const False <$> esc) (const True <$> panC)
-      bh <- ui $ stepper False  eh
-
-      (elsel , helsel ) <- ui newEvent
-      (eledit , heledit) <- ui newEvent
-      (eleditu , heleditu) <- ui newEvent
+      dblClick <- UI.dblclick top
+      -- On dblclick edit
+      dblClickT <- ui $ accumT False (const not <$> dblClick)
+      -- On click select
+      (eSelector,hSelector) <- ui newEvent
+      selectT <- ui $ calmT =<< stepperT False  eSelector
 
       let
+        reflectRels = filter ((`L.elem` ifk). _relOrigin) rel
+        filterReflect m = filter (\k  -> _relOrigin (justError "no head notreflect" . safeHead $ F.toList (index k)) `L.elem` fmap _relOrigin reflectRels  ) m
+        filterNotReflect (KV m) = KV $ M.filterWithKey (\k  _-> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
+        filterReflectKV (KV m) = KV $ M.filterWithKey (\k  _-> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
+        nonEmptyTBRef v@(KV m,KV n ) = if L.null m && L.null n then Nothing else Just v
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-        relType = M.fromList $ fmap (\(Rel i _ j,t) -> (j,t)) prim
-        ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
+        ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
+
       inipl <- mapM (ui . currentValue . facts) (snd <$>  plmods)
       let
         inip = maybe Keep (Diff .head) $ nonEmpty $ catMaybes inipl
-
-      blsel <- ui $ stepper (fst <$> inip) (unionWith const elsel  (const Keep <$> rumors oldItems))
-      bledit <- ui $ stepper (snd <$> inip) eledit
-      bleditall <- ui  $ stepper  (snd <$> inip) eleditu
+      (elsel, helsel) <- ui newEvent
+      (eledit, heledit) <- ui newEvent
+      (eleditu, heleditu) <- ui newEvent
 
       let
+        evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
+      tsel <- ui $ stepperT (fst <$> inip) evsel
+      tseledit <- ui $ stepperT (snd <$> inip) eledit
+      tedit <- ui $ stepperT (snd <$> inip) eleditu
+
+      let
+        tdfk = merge <$> tsel <*> tedit
+        iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
+        iold2 =  fmap (M.mapKeys (justError "no head iold2" . safeHead . F.toList . S.map _relOrigin ). fmap _tbattr . _kvvalues . filterNotReflect . fst) <$> ftdi
+        predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   [(_relTarget rel,Left  (o,Flip $ _relOperator rel))] )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional v) <$> M.toList o
+        predicate = fmap predicatefk <$> iold2
+        sel = liftA2 diff' oldItems ftdi
         selector False = do
-          let sel = liftA2 editor oldItems ftdi
-          reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   targetTable
+          reftb@(_,_,gist,sgist,_) <- ui $ refTables inf targetTable
           ui $ onEventIO
-            ((,,,,) <$> facts gist <*> facts sgist <*> facts oldItems <*> blsel <@> rumors sel)
-            (\(g,s,old,oldsel,i) ->
-              when (oldsel /= fmap fst i) $ do
-                helsel $ fmap fst i
-                onDiff  (heledit .  editor (snd <$> old) .  searchGist relTable targetTable  g s. M.toList . fst ) (\i -> heledit $snd <$> i) i
+            ((,,,,,) <$> facts gist <*> facts sgist <*>  facts tsel <*> facts oldItems <*> facts tedit <@> rumors (fmap fst <$> sel))
+            (\(g,s,oldsel,initial,oldedit,vv) -> liftIO $ do
+              when (oldsel /= vv ) $ do
+                helsel vv
+                let search  i
+                      | M.size  (_kvvalues  i) /= L.length rel =  Nothing
+                      | otherwise = searchGist relTable targetTable  g s i
+                    searchDiff i = diff' (snd <$> initial) (search =<< i)
+                    newsel = apply (fst <$> initial) vv
+                    newEdit = searchDiff newsel
+                when (oldedit /=  newEdit) $ do
+                  heledit (newEdit)
+                return ()
               )
-          return []
+          pan <- UI.div
+            # set UI.class_ "col-xs-10 fixed-label"
+            # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
+            # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
+          panClick <- UI.click pan
+          ui $ onEventIO panClick (\ _ -> hSelector True)
+          (nav,inp,celem) <- edit
+          element nav
+            # set UI.class_ "col-xs-2"
+          hidden <- UI.div
+            # set children [inp,celem]
+            # set UI.class_ "col-xs-12"
+          return [nav,pan,hidden]
         selector True = do
-          reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   targetTable
-          let
-            iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
-            iold2 =  fmap (M.fromList . concat) . allMaybesEmpty <$> iold
-                where
-                  iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
-                  iold  = Tra.sequenceA $ fmap (join . fmap (traverse (traverse unSOptional') . aattr)  ) <$> F.toList nonInjRefs
-            ftdi2 :: Tidings (Maybe (Map Key (FTB Showable)))
-            ftdi2 =   fmap (M.fromList . zip (L.sort $ _relOrigin <$> rel). getZipList . ZipList . F.toList . fst )  <$> ftdi
-          let
-            vv :: Tidings (Maybe (Map CoreKey (FTB Showable)))
-            vv =   join .   fmap (\i -> if  M.size i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
-          tdi <- ui $ cacheTidings ((\g s v -> join $ searchGist relTable targetTable  g s  .M.toList <$> v) <$> gist  <*> sgist <*> vv)
+          pred <- ui $ currentValue (facts predicate)
+          reftb@(_,_,gist,sgist,_) <- ui $ refTables' inf targetTable Nothing (fromMaybe mempty pred)
+          let newSel = apply <$> (fmap fst <$> oldItems)<*>(fmap fst <$> sel)
+          tdi <- ui $ cacheTidings ((\g s v -> searchGist relTable targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           cv <- currentValue (facts tdi)
           metaMap <- mapWidgetMeta inf
-
           cliZone <- jsTimeZone
-          metaAgenda <- eventWidgetMeta inf  cliZone
+          metaAgenda <- eventWidgetMeta inf
           let
-              hasMap = L.find ((== targetTable).(Le.^._2)) metaMap
-              hasAgenda = L.find ((== targetTable).(Le.^._2)) metaAgenda
-              add i m =  if i then (m:) else id
-
-          navMeta  <- buttonDivSet (add (isJust hasAgenda) "Agenda" $ add (isJust hasMap) "Map" ["List"]) (pure $ Just "List"  ) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
-
+            hasMap = L.find ((== targetTable).(Le.^._2)) metaMap
+            hasAgenda = L.find ((== targetTable).(Le.^._2)) metaAgenda
+            add i m =  if i then (m:) else id
+            availableModes = add (isJust hasAgenda) "Agenda" $ add (isJust hasMap) "Map" ["List"]
+          navMeta  <- buttonDivSet  availableModes (pure $ Just "List") (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+          let navSize =  "col-xs-" ++ (show $ length availableModes - 1)
+              selSize =  "col-xs-" ++ (show $ 12 - (length availableModes - 1))
           itemList <- do
-              (elbox ,helbox) <- ui  newEvent
-              lboxeel <- traverseUI (\metamap ->
-                case metamap of
-                  "List" -> do
-                    let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
-                        predicate = fmap predicatefk <$> iold2
-                    itemListEl <- UI.select #  set UI.class_ "row fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("top","22px")]
-                    (lbox , l) <- selectListUI inf targetTable itemListEl predicate reftb constr tdi
-                    ui $ onEventIO (rumors lbox) helbox
-                    return l
-                  "Map" -> do
+              lboxeel <- switchManyUI tdi (triding navMeta) (M.fromList
+                  [("List" , do
+                    itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
+                    (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr tdi
+                    element l # set UI.class_ selSize
+                    return (TrivialWidget lbox l)),
+                  ("Map" ,do
                     let selection = fromJust hasMap
-                    let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
-                        predicate = fmap predicatefk <$> iold2
                     t <- liftIO getCurrentTime
-                    TrivialWidget i el <- mapSelector inf predicate selection (pure (t,"month")) tdi (never, pure Nothing)
-                    ui $ onEventIO (rumors i ) (helbox.Just)
-                    return [el]
-                  "Agenda" -> do
-                    let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
-                        predicate = fmap predicatefk <$> iold2
+                    TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, pure Nothing)
+                    element el # set UI.class_ selSize
+                    return (TrivialWidget i el)),
+                  ("Agenda" ,do
                     let selection = fromJust hasAgenda
-                    now <- liftIO getCurrentTime
                     (sel ,(j,i)) <- calendarSelector
-                    el <- traverseUI id $ (\delta time predicate -> do
-                      (e,l) <- calendarView inf predicate cliZone [selection] (pure (S.singleton targetTable )) Basic delta time
-                      ui $ onEventIO (rumors l) (helbox .Just .fmap snd )
-                      return e) <$> i <*> j <*> predicate
-                    el2 <- UI.div  # sink children (facts el)
-                    return [sel,el2]
-                ) (triding navMeta)
+                    el <- traverseUI (\(delta ,time) -> do
+                      (e,l) <- calendarView inf mempty cliZone [selection] (pure (S.singleton targetTable )) Basic delta time
+                      c <- UI.div # set children e
+                      return (TrivialWidget (fmap snd <$> l) c)) $ (,) <$> i <*> j
+                    el2 <- UI.div  # sink children (pure . getElement <$> facts el)
+                    tsel <- ui $ joinT (triding <$> el)
+                    TrivialWidget tsel <$> UI.div # set children [sel,el2] # set UI.class_ selSize)])
 
-              elembox <- UI.div # sink children (facts lboxeel)
+              element navMeta # set UI.class_ navSize
+              elout <- UI.div # set children [getElement navMeta ,getElement lboxeel]
+              esc <- onEsc elout
+              ui $ onEventIO (rumors (triding lboxeel)) (\ _ -> hSelector False)
+              ui $ onEventIO esc (\ _ ->hSelector False)
+              return (TrivialWidget  (triding lboxeel) elout)
 
-              let evbox =  elbox
-              blbox <- ui $ stepper (fmap Just cv) evbox
-              let
-                lbox = TrivialWidget (tidings blbox  evbox) elembox
-                selCh = rumors (triding lbox)
-
-              elout <- UI.div # set children [getElement navMeta ,elembox]
-              return (TrivialWidget  (triding lbox) elout)
-
-          let evsel =  unionWith const (rumors tdi)  (rumors $ join <$> triding itemList)
-          prop <- ui $ stepper cv evsel
-          let tds = tidings prop evsel
+          let nevsel = unionWith const (rumors tdi) (rumors $ triding itemList)
+          tds <- ui $ stepperT cv nevsel
           let
-            fksel =  join . fmap (\box ->  (\ref -> (M.fromList $ attrToTuple <$> ref ,box) ) <$> backFKRefType relTable relType ifk box ) <$>   tds
-            diffFK (Just i ) (Just j) = if fst i == fst j then Keep else Diff(patch j)
-            diffFK (Just i ) Nothing = Delete
-            diffFK Nothing Nothing = Keep
-            diffFK Nothing (Just i) = Diff $ patch i
-            output = diffFK <$> oldItems <*> fksel
-          inioutput <- ui $ currentValue (facts output)
+            fksel =  (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$>   tds
+            output = diff' <$> oldItems <*> fksel
           ui $ onEventIO (rumors output) (\i -> do
-            helsel $ fmap fst i
-            heledit $ fmap snd i)
+            when (not (L.null reflectRels)) $ do
+              helsel $ (fmap (filterReflect.fst) i)
+              heleditu $ fmap snd i)
           return [getElement itemList]
 
         edit =  do
           let
-            tdi =  flip apply <$>   tidings bledit eledit <*> (fmap snd<$>oldItems)
+            tdi =  fmap join $ applyIfChange <$>  (fmap snd<$>oldItems) <*> tseledit
             replaceKey :: TB CoreKey a -> TB CoreKey a
-            replaceKey =  firstTB swapKey
+            replaceKey = firstTB swapKey
+            replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
+            replaceKeyP = firstPatchAttr swapKey
             swapKey k = maybe k _relTarget (L.find ((==k)._relOrigin) rel)
+
             staticold :: ColumnTidings
-            staticold  =  fmap (fmap (fmap replaceKey )) . M.mapKeys (S.map (fmap swapKey)) $ M.filterWithKey (\k _ -> all (\i ->  not (isInlineRel i ) &&  (_relOperator i == Equals))k) nonInjRefs
+            staticold = fmap (\(i,j) -> (patch <$>  liftA2 apply  (projectValue j) (projectEdit i),pure Nothing  )) . M.mapKeys (S.map (fmap swapKey)) $ M.filterWithKey (\k _ -> all (\i ->  not (isInlineRel i ) &&  (_relOperator i == Equals))k) nonInjRefs
+            projectEdit = fmap (fmap replaceKeyP . join . fmap (maybe Keep Diff . unLeftItensP ))
+            projectValue = fmap (fmap replaceKey .join . fmap unLeftItens)
 
-          itemDClick <- UI.dblclick top
-          let itemDClickE = fmap (const not) itemDClick
-          bop <- ui $ accumT False itemDClickE
-          (celem,pretdi) <- dynCrudUITable inf  bop  staticold (fmap (fmap (fmap snd)) <$> plmods) targetTable  tdi
+          prev <- mapM (\r -> do
+            let a = Attr (alterKeyType (\(Primitive i j) -> Primitive [] j  ) $ _relOrigin r) (TB1 ())
+            el <- tbCaseDiff inf targetTable mempty a mempty mempty (join . fmap (M.lookup (S.singleton $ Inline $ _relOrigin r ) ._kvvalues.tableNonRef .fst)  <$> ftdi)
+            v <- labelCaseDiff inf a (triding el)
+            UI.div # set children [getElement v,getElement el] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))) rel
+          nav <- openClose dblClickT
+          inp <- UI.div
+             # set children prev
+             # set UI.class_ "row"
+             # sink  UI.style (noneShow  <$> facts (triding nav))
+             # set style [("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
+          TrivialWidget pretdi celem <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods )) targetTable  tdi
           let
-            fksel = fmap (\box -> maybe (M.empty,box)(\ref -> ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType ifk box) <$>   pretdi
-            diffFK (Just i ) (Just j) =   maybe Keep Diff  (diff i  j)
-            diffFK (Just i ) Nothing = Delete
-            diffFK Nothing Nothing = Keep
-            diffFK Nothing (Just i) = Diff $ patch i
-            output = diffFK <$> oldItems <*> fksel
-          inioutput <- ui $ currentValue (facts output)
-          ui $ onEventIO ((,,) <$> blsel <*> bleditall <@> rumors output) (\(old,olde,i) -> do
-            when (old /= fmap fst i) $
-              helsel $ fmap fst i
-            when (olde /= fmap snd i)$
-              heleditu $ fmap snd i
-            return ()
+            serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
+            fksel = (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ) <$> pretdi
+            output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
+          ui $ onEventIO (rumors $ (,,) <$> facts tsel <*> facts tedit <#> output) (\(old,olde,i) -> do
+            when (fmap filterReflect old /= fmap filterReflect (fmap fst i) && not (L.null reflectRels)) $ do
+              helsel $ fmap (filterReflect.fst) i
+            when (olde /= fmap snd i) $ do
+              heleditu $ (fmap snd i)
             )
-          return celem
+          return (getElement nav,inp,celem)
+        -- merge i j | traceShow (i,j) False = undefined
+        merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (filterReflect i,j)
+        merge _ Keep = Keep
+        merge _ Delete = Delete
+        merge Keep  (Diff _) = Keep
+        merge Delete (Diff _) = Delete
 
-      let
-        tdfk = liftA2 (,) <$> tidings blsel elsel <*> tidings bleditall eleditu
-      element pan
-          # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
-          # sink  text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  <$>  facts (apply <$> oldItems <*> tdfk ))
-      selEls <- traverseUI selector  (tidings bh  eh)
-      subnet <- UI.div  # sink children (facts selEls)
-      subnet2 <- edit
-      hidden <- UI.div  # set children [subnet,last subnet2] # set UI.class_ "col-xs-12"
-      element top # set children [head subnet2,pan,hidden]
-      return $ TrivialWidget   tdfk top
+      selEls <- traverseUI selector selectT
+      element top
+        # sink children (facts selEls)
+      let oldReflect = join . fmap nonEmptyTBRef . (fmap (first filterReflectKV)) <$> oldItems
+      out <- ui $ calmT (diff' <$> oldReflect <*> ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk ))
+      return $ TrivialWidget  out top
 
+traceShowIdPrefix s i = traceShow (s,show i) i
 
 fkUITableGen ::
   InformationSchema
@@ -1332,9 +1418,16 @@ fkUITableGen ::
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
-fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
-  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) ( fmap (fmap (fmap liftPFK )) <$> plmods) (fmap liftFK <$>oldItems)
+fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
+  = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj) ) (fmap liftFK <$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
+    replaceNonInj = (\(i,j) -> (\v -> (One ( IProd Nothing (_relOrigin v)),) $ onDiff  ( fmap (\m -> PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v) ) . S.map _relOrigin . index) .  nonRefPatch) (const Nothing)<$> fst j )<$> F.toList i ) <$> M.toList nonInjRefs
+      where patchChange (PAttr i k ) = fmap (const []) k
+    mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
+    mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
+    emptyFKT = FKT  (kvlist []) rel (const (kvlist []) <$> fkref)
+    mergeRef (FKT r rel v) i = FKT (foldl addAttr r (nonRefTB i)) rel v
+    addAttr  (KV i) v = KV $ if isNothing (unSOptional (_tbattr v)) then i else (M.insert (index v) v i)
     (targetSchema,target) = findRefTableKey table rel
     inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
     setattr = keyAttr <$> unkvlist ifk
@@ -1347,45 +1440,38 @@ reduceTable l
 
 pdfFrame (elem,sr , call,st) pdf = mkElement elem UI.# sink0 sr (call <$> pdf)  UI.# UI.set style st
 
-metaAllTableIndexA
+metaTable
   :: InformationSchemaKV Key Showable
-     -> Text
-     -> [(Access Text,
-          Either (FTB Showable, BinaryOperator) UnaryOperator)]
-     -> UI Element
-metaAllTableIndexA inf metaname env =   do
+  -> Text
+  -> [(Rel Text, AccessOp Showable)]
+  -> UI Element
+metaTable inf metaname env =   do
   let modtable = lookTable (meta inf) metaname
-  viewer (meta inf) modtable (Le.over _1 (liftAccess (meta inf) metaname)  <$> env)
+  displayTable (meta inf) modtable (fixrel .Le.over _1 (liftRel (meta inf) metaname) <$> env)
 
 
-selSort
-  :: (Functor f, Foldable t, Eq a1) =>
-     f a1 -> t (a1, b) -> f (a1, Maybe b, Maybe a)
-selSort l sel = (\i j -> fmap (\e -> (e,,Nothing)  $ snd <$> L.find ((==e).fst) j) i ) l sel
-
-viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element
-viewer inf table envK = do
+displayTable :: InformationSchema -> Table -> [(Rel Key ,[(Key,AccessOp Showable)] )] -> UI Element
+displayTable inf table envK = do
   let
-    filterStatic =filter (not . flip L.elem (concatMap (F.toList . Le.view Le._1) envK))
-    key = filterStatic $ F.toList $ rawPK table
-    sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . TB1 . allRec' (tableMap inf ) $ table
-    iniSort = selSort sortSet ((,True) <$>  key)
-    flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (keyRef i,Left (v,readBinaryOp $ T.pack op))) <$> j) iniSort
-    pred = WherePredicate $ AndColl $ fmap PrimColl $envK <> flist
+    pred = WherePredicate $ AndColl $ PrimColl <$> envK
   reftb@(_,_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
-  itemList <- selector inf table reftb (pure Nothing) (pure Nothing)
-  tds <-  mdo
-    let
-      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts tds <@> rumors vpt
-      selection = const <$> rumors (triding itemList)
-    tds <- ui $ accumT  Nothing  (unionWith (.) selection  updatedValue)
-    ui $ cacheTidings tds
-  (cru,pretdi) <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds
-  UI.div # set UI.children [getElement itemList,cru]
+  tb <- UI.div
+  (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (pure Nothing)
+  TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) res
+  element tb # set UI.children [offset,cru]
 
+filterPatchSet :: Show a => (Int -> Bool) -> PathFTB a -> Maybe (PathFTB a)
+filterPatchSet f (PatchSet p) = patchSet $ catMaybes $ fmap (filterPatchSet f ) (F.toList p)
+filterPatchSet f (PIdx ix2 p)
+  | f ix2 = Just $ PIdx ix2 p
+  | otherwise = Nothing
+filterPatchSet f i@(PAtom _) = Just i
+filterPatchSet f v = error (show v)
 
-indexPatchSet :: Int -> PathFTB a -> Maybe (PathFTB a)
+indexPatchSet :: Show a => Int -> PathFTB a -> Maybe (PathFTB a)
 indexPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (indexPatchSet ix ) (F.toList p)
 indexPatchSet ix (PIdx ix2 p)
-              | ix == ix2 = p
-              | otherwise = Nothing
+  | ix == ix2 = p
+  | otherwise = Nothing
+indexPatchSet ix i@(PAtom _)  = Just i -- TODO :  Debug  what is triggering this and remove this case
+indexPatchSet ix v = error (show (ix,v))
