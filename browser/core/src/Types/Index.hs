@@ -24,6 +24,7 @@ module Types.Index
   , getIndex
   , getBounds
   , getUnique
+  , getUniqueM
   , notOptional
   , notOptionalM
   , tbpred
@@ -42,6 +43,7 @@ module Types.Index
   , checkPredId
   , projectIndex
   , filterIndex
+  , filterRows
   , cinterval
   , PathTID(..)
   , splitIndexPKB
@@ -75,6 +77,7 @@ import Data.Time
 import qualified NonEmpty as Non
 import Prelude hiding (filter, lookup)
 import Safe
+import Debug.Trace
 import Step.Host
 import Types
 import Utils
@@ -91,6 +94,9 @@ uinterval i j = i Interval.<=..<= j
 
 getUnique :: (Show k ,Ord k) => KVMetadata k -> [k] -> TBData k a -> TBIndex  a
 getUnique m ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn m (Set.fromList ks) $ v
+
+getUniqueM :: (Show k, Ord k) => KVMetadata k -> [k] -> TBData k a -> Maybe (TBIndex a)
+getUniqueM m un = notOptionalM . getUnique m un
 
 getIndex :: (Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
 getIndex m  = getUnique m (_kvpk m)
@@ -282,7 +288,7 @@ instance (Show v,Affine v ,Range v,ConstantGen (FTB v) , Positive (Tangent v), S
   origin = TBIndexNode Interval.empty
   bound (Idex i) =  TBIndexNode  $ (maybe ER.NegInf ER.Finite $ traverse ( unFin . fst . lowerBound') v ) `uinterval` (maybe ER.PosInf ER.Finite $ traverse (unFin . fst .upperBound') v)
     where v = fmap unTB1 . pureR <$> i
-  match (WherePredicate a)  (Right (Idex v)) =  if L.null v then False else go a
+  match (WherePredicate a)  (Right (Idex v)) =  if L.null v then  False else go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
@@ -361,7 +367,7 @@ checkPred
      KV k a -> TBPredicate k a -> Bool
 checkPred v (WherePredicate l) = checkPred' v l
   where
-    checkPred' v (AndColl i ) = F.all  (checkPred' v)i
+    checkPred' v (AndColl i ) = F.all (checkPred' v) i
     checkPred' v (OrColl i ) = F.any (checkPred' v) i
     checkPred' v (PrimColl i) = indexPred i v
 
@@ -411,7 +417,7 @@ indexPredIx (n@(RelAccess nk nt ) ,eq) r
     Nothing -> Nothing
     Just i ->  fmap (PathForeign nk . fmap One ) $ recPred $ allRefs <$> i
   where
-    allRefs (_,v) = indexPredIx (nt, eq ) v
+    allRefs (TBRef (_,v))= indexPredIx (nt, eq ) v
     recPred (TB1 i ) = TipPath <$> i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
@@ -430,7 +436,7 @@ indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
--- indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
+-- indexPred i j | traceShow (i,j) False = undefined
 indexPred (n@(RelAccess k nt ) ,eq) r
   = case  refLookup (Set.fromList k)  r of
     Nothing ->False
@@ -441,7 +447,7 @@ indexPred (n@(RelAccess k nt ) ,eq) r
     recPred (ArrayTB1 i) = any recPred i
     recPred i = error (show ("RecPred",i))
 indexPred (a@(Inline key),eqs) r =
-  case attrLookup (Set.singleton $ a) r of
+  case attrLookup (Set.singleton $ a)(tableNonRef  r) of
     Nothing -> False
     Just rv ->
       match eq (Right rv)
@@ -457,9 +463,9 @@ getOp  key eqs = maybe (error " no op") snd $  L.find ((==key).fst) eqs
 queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck (WherePredicate b ,pk)
   = case (notPK,isPK) of
-      (Just i ,Just l ) ->fromList' . filterIndex pk i . projectIndex pk l
+      (Just i ,Just l ) ->fromList' . filterIndex i . projectIndex pk l
       (Nothing,Just l ) ->fromList' . projectIndex pk l
-      (Just i ,Nothing) ->fromList' . filterIndex pk i . G.getEntries
+      (Just i ,Nothing) ->fromList' . filterIndex i . G.getEntries
       (Nothing,Nothing) ->id
  where
    notPK = fmap WherePredicate $ splitIndexPKB b pk
@@ -468,7 +474,8 @@ queryCheck (WherePredicate b ,pk)
 projectIndex :: (Show k,Ord k) => [k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
 projectIndex pk l = G.queryL (mapPredicate (pkIndex pk) l)
 
-filterIndex pk l =  L.filter (flip checkPred l . leafValue)
+filterIndex l =  L.filter (flip checkPred l . leafValue)
+filterRows l =  L.filter (flip checkPred l )
 
 pkIndex :: (Show a, Eq a) => [a] -> a -> Int
 pkIndex pk i = justError ("no predicate " ++ show (i,pk)) $  L.elemIndex i pk

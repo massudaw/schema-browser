@@ -107,7 +107,7 @@ setup smvar bstate plugList w = void $ do
     let checkNav i =  maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav
     element menu # set UI.class_ "col-xs-1"
     element reset # set UI.class_ "col-xs-1"
-    nav  <- buttonDivSet  (filter checkNav ["Browser","Table","Map","Account","Plan", "Agenda","Chart","Metadata"] ) (pure  Nothing) (\i ->
+    nav  <- buttonDivSet  (filter checkNav ["Browser","Map","Account","Plan", "Agenda","Chart","Metadata"] ) (pure  Nothing) (\i ->
         UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" )
     element nav # set UI.class_ "col-xs-5 pull-right"
     chooserDiv <- UI.div
@@ -196,13 +196,8 @@ setup smvar bstate plugList w = void $ do
                       ) ((,) <$> triding metanav <*> triding bset)
                 st <- once (buttonStyle,const True)
                 return  $ TrivialWidget st metaDiv),
-          ("Table" ,do
-            subels <- chooserTable  False six  inf  bset (fmap (!!six) <$> cliTid) (wId w)
-            el <- UI.div # set children  (pure subels)
-            st <- once (buttonStyle,const True)
-            return  $ TrivialWidget st  el ),
           ("Browser" ,do
-            subels <- chooserTable  True six  inf  bset (fmap (!!six) <$> cliTid) (wId w)
+            subels <- chooserTable  six  inf  bset (fmap (!!six) <$> cliTid) (wId w)
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
@@ -239,7 +234,7 @@ setup smvar bstate plugList w = void $ do
 
 listDBS ::  InformationSchema -> Text -> Dynamic (Tidings (M.Map Text (Int,Text)))
 listDBS metainf db = do
-  (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
+  dbvar <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
   let
     schemas schemasTB =  M.fromList $  liftA2 (,) sname  (liftA2 (,) sid stype) <$> F.toList  schemasTB
       where
@@ -281,14 +276,14 @@ loadSchema smvar schemaN user authMap  plugList =
 
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = fmap (T.pack . BS.unpack . cookieValue) $ L.find ((=="auth_cookie"). cookieName ) cookies
-  (cookiesMap,_) <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
+  cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
   let loginCookie =  (\m -> maybe Nothing (\ck -> G.lookup (G.Idex [TB1 $ SText ck]) m) rCookie )  <$> collectionTid cookiesMap
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
   loadE <- UI.click load
   login <- UI.div # set children widE # set UI.class_ "row"
   authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2" # sink UI.style (noneShow . isJust <$> facts loginCookie)
-  orddb  <- ui $ transactionNoLog metainf (fst <$> (selectFromTable "schema_ordering"  Nothing Nothing []  mempty ))
+  orddb  <- ui $ transactionNoLog metainf ((selectFromTable "schema_ordering"  Nothing Nothing []  mempty ))
   let
     ordRow map orderMap inf =  field
       where
@@ -361,27 +356,7 @@ testSync  = do
   -- runDynamic $ transaction inf $ historyLoad
   return ()
 
-testTablePersist s t w = do
-  args <- getArgs
-  let db = argsToState args
-  smvar <- createVar
-  let
-    amap = authMap smvar db ("postgres", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  runDynamic $ do
-    (e,(_,i)) <- transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
-    liftIO$ putStrLn "Select"
-    liftIO$ mapM print (F.toList i)
-    let table = lookTable inf t
 
-    liftIO$ callCommand ("rm dump/" ++ T.unpack s ++ "/"++ T.unpack t) `catch` (\e -> print (e :: SomeException))
-    liftIO$ writeSchema (s ,inf)
-    liftIO$ atomically $ modifyTVar (mvarMap inf) (const M.empty)
-    (_,o) <- readTable inf "dump"  table []
-    liftIO$ putStrLn "Read"
-    liftIO$ mapM print (F.toList o)
-
-  return ()
 
 withTable s m w =
   withInf [] s (\inf -> runDynamic $ do
@@ -389,7 +364,8 @@ withTable s m w =
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         -- pred = WherePredicate $ lookAccess inf m <$>(AndColl [OrColl [PrimColl (IProd Nothing "scheduled_date",Left (IntervalTB1 (I.interval (I.Finite (TB1 (STime (SDate (utctDay now) ))),True) (I.Finite (TB1 (STime (SDate (utctDay (addUTCTime (3600*24*35) now))))),True)),Flip Contains))]])
         table = lookTable inf m
-    ((_,(_,i2))) <- transactionNoLog  inf $ selectFrom m Nothing Nothing []mempty
+    db <- transactionNoLog  inf $ selectFrom m Nothing Nothing []mempty
+    i2 <- currentValue (facts $ collectionTid db)
     let
         debug i = show <$> G.toList i
     liftIO $ putStrLn (unlines $ debug i2))

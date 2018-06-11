@@ -112,13 +112,38 @@ instance Applicative PathFTB where
   PatchSet i <*> j = PatchSet $ fmap (<*> j) i
   i <*> PatchSet j = PatchSet $ fmap (i <*>) j
 
+
+
+
+data AtomicChange a
+ = Change a
+ | Skip
+  deriving (Eq, Ord, Functor, Show)
+
 data Editor a
   = Diff a
   | Delete
   | Keep
   deriving (Eq, Ord, Functor, Show)
 
+data EitherDiff a b
+  = LeftDelta a
+  | RightDelta b
+  deriving (Eq, Ord, Functor, Show)
+
 filterDiff = fmap (\(Diff i) -> i) . filter isDiff
+
+instance (Patch a , Patch b) => Patch (a,b) where
+  type Index (a,b) = (Index a , Index b)
+  createIfChange (i,j) = liftA2 (,) (createIfChange i ) (createIfChange j)
+
+
+instance (Patch a ,Patch b) => Patch (Either a b) where
+  type Index (Either a b) = EitherDiff (Index a) (Index b)
+  createIfChange (RightDelta i) = Right <$> createIfChange i
+  createIfChange (LeftDelta i) = Left <$> createIfChange i
+  patch (Right i)  = RightDelta (patch i)
+  patch (Left i)  = LeftDelta (patch i)
 
 instance Patch b => Patch (Maybe b) where
   type Index (Maybe b) = Editor (Index b)
@@ -170,11 +195,14 @@ firstPatchRow ::
   => (k -> j)
   -> RowPatch k a
   -> RowPatch j a
-firstPatchRow f (ix, CreateRow i) = (ix, CreateRow $ mapKey' f i)
-firstPatchRow f (ix, DropRow) = (ix, DropRow)
-firstPatchRow f (ix, PatchRow i) = (ix, PatchRow $ firstPatch f i)
+firstPatchRow f (RowPatch (ix, i))  = RowPatch (ix,firstRowOperation f i)
 
-type RowPatch k a = (G.TBIndex a, RowOperation k a)
+firstRowOperation f (CreateRow i) = CreateRow $ mapKey' f i
+firstRowOperation f DropRow = DropRow
+firstRowOperation f (PatchRow i) = PatchRow $ firstPatch f i
+
+newtype RowPatch k a = RowPatch { unRowPatch :: (G.TBIndex a, RowOperation k a)}
+  deriving (Show, Eq, Functor, Generic)
 
 data RowOperation k a
   = CreateRow (TBData k a)
@@ -182,16 +210,30 @@ data RowOperation k a
   | DropRow
   deriving (Show, Eq, Functor, Generic)
 
-instance (NFData k, NFData a) => NFData (RowOperation k a)
+instance (NFData k, NFData a) => NFData (RowPatch k a)
+instance (Binary k, Binary a) => Binary (RowPatch k a)
 
+instance (NFData k, NFData a) => NFData (RowOperation k a)
 instance (Binary k, Binary a) => Binary (RowOperation k a)
 
-instance Ord v => Compact (RowPatch k v) where
-  compact i = concat . L.transpose $ compact . snd <$> groupSplit2 index id i
+instance (Ord k ,Compact v, Show v,Show k,Patch v,Ord v , v ~ Index v)=> Compact (RowOperation k v) where
+  compact  l =  if L.null l then l else [F.foldl' ops DropRow l]
+     where
+      ops (CreateRow i ) (PatchRow j) = CreateRow $ apply i j
+      ops (PatchRow i ) (PatchRow j) = PatchRow $ (compact $ i ++ j)
+      ops i (CreateRow j) = CreateRow j
+      ops i DropRow = DropRow
+      ops DropRow j  = j
+
+instance (Ord k ,Patch v,Compact v, Show v,Show k,v ~ Index v,Ord v) => Compact (RowPatch k v) where
+  compact i = fmap (uncurry rebuild) $ fmap (head. compact) <$> groupSplit2 index content i
 
 instance Address (RowPatch k v) where
   type Idx (RowPatch k v) = TBIndex v
-  index = fst
+  type Content (RowPatch k v) = RowOperation k v
+  index = fst . unRowPatch
+  content =  snd . unRowPatch
+  rebuild i j = RowPatch (i,j)
 
 -- type TBIdx k a = Map (Set k) [PValue k a]
 type TBIdx k a = [PathAttr k a]
@@ -223,12 +265,12 @@ checkPatch fixed@(WherePredicate b, pk) d =
 
 indexFilterR ::
      (Show k, Ord k) => [k] -> WherePredicateK k -> RowPatch k Showable -> Bool
-indexFilterR table j (ix, CreateRow i) = G.checkPred i j
-indexFilterR table j (i, DropRow) = G.checkPred (makePK table i) j
+indexFilterR table j (RowPatch (ix, i)) = case  i of
+  DropRow -> G.checkPred (makePK table ix) j
+  CreateRow i -> G.checkPred i j
+  PatchRow i -> indexFilterP j i
   where
     makePK table (Idex l) = kvlist $ zipWith Attr table l
-indexFilterR table j (ix, PatchRow i) = indexFilterP j i
-
 indexFilterP (WherePredicate p) v = go p
   where
     go (AndColl l) = F.all go l
@@ -357,7 +399,10 @@ lowerPatch = PInter True
 
 class Address f where
   type Idx f
+  type Content f
   index :: f -> Idx f
+  content :: f -> Content f
+  rebuild :: Idx f -> Content f -> f
 
 class Compact f where
   compact :: [f] -> [f]
@@ -368,9 +413,9 @@ class Patch f where
   diff' :: f -> f -> (Index f)
   diff' i j = justError "cant diff" $ diff i j
   apply :: f -> Index f -> f
-  apply i j = either (error $ "no apply: ") fst . applyUndo i $ j
+  apply i = either (\i -> error $ "no apply: " ++ i) fst . applyUndo i
   applyIfChange :: f -> Index f -> Maybe f
-  applyIfChange i = fmap fst . either (const Nothing) Just . applyUndo i
+  applyIfChange i = either (const Nothing) (Just . fst) . applyUndo i
   applyUndo :: f -> Index f -> Either String (f, Index f)
   applyUndo i j =
     maybe (Left "cant diff") Right $ liftA2 (,) o (flip diff i =<< o)
@@ -478,21 +523,21 @@ instance Patch Showable where
   create = id
   patch = id
 
-instance Compact (PTBRef Key Showable) where
+instance (Compact a , Compact b) => Compact (a,b) where
   compact i = zipWith (,) (compact (fst <$> i)) (compact (snd <$> i))
 
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = PTBRef Key Showable
-  diff (i, j) (k, l) =
+  diff (TBRef (i, j)) (TBRef (k, l) )=
     ((,) <$> dref <*> dtb) <|> ((,) <$> dref <*> pure []) <|>
     ((,) <$> pure [] <*> dtb)
     where
       dref = diff i k
       dtb = diff j l
-  patch (i, j) = (patch i, patch j)
-  applyUndo (i, j) (k, l) =
-    (\(a, b) (i, j) -> ((a, i), (b, j))) <$> applyUndo i k <*> applyUndo j l
-  createIfChange (i, j) =
+  patch (TBRef (i, j)) = (patch i, patch j)
+  applyUndo (TBRef (i, j)) ((k, l)) =
+    (\(a, b) (i, j) -> (TBRef (a, i), (b, j))) <$> applyUndo i k <*> applyUndo j l
+  createIfChange (i, j) = fmap TBRef $
     ((,) <$> createIfChange i <*> createIfChange j) <|>
     ((kvlist [], ) <$> createIfChange j) <|>
     ((, kvlist []) <$> createIfChange i)
@@ -861,7 +906,7 @@ applyUndoFTBM (ArrayTB1 i) (PIdx ix o) =
           let c = i Non.!! ix
           (v, p) <- applyUndoFTBM c p
           el <-
-            maybe (Left $ "empty list ") Right $
+            maybe (Left $ "empty arraytb1 list ") Right $
             Non.nonEmpty $ Non.take ix i <> pure v <> Non.drop (ix + 1) i
           return (ArrayTB1 el, PIdx ix (Just p))
         else if ix == Non.length i

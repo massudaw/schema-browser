@@ -190,7 +190,7 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
                 unPred (WherePredicate e)  =e
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-            let v =  reftb ^. _3
+            let v =  reftb ^. _2
             traverseUI (\i -> do
               createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) v
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc

@@ -346,7 +346,8 @@ unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (TB k a )
 unTBMap = _kvvalues
 
 select table  = do
-  (_,(_,evMap )) <- selectFromTable table Nothing Nothing [] []
+  inf <-askInf
+  (_,(_,(_,_,evMap ))) <- tableLoader' (lookTable inf table) Nothing Nothing [] mempty
   return (decodeT . mapKey' keyValue <$> evMap)
 
 loadPlugins :: InformationSchema -> Dynamic [Plugins]
@@ -444,7 +445,7 @@ batchUITable
    -> TBData CoreKey ()
    -> Tidings [TBData CoreKey Showable]
    -> UI (TrivialWidget [TBData CoreKey Showable])
-batchUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb  preoldItems = do
+batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems = do
   let
     m = tableMeta table
     getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
@@ -452,7 +453,7 @@ batchUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb  preoldItem
 
   ui $ mapTEventDyn (traverse (\i ->  do
     p <- transactionNoLog inf . getItem $ i
-    traverse (putPatch tref . pure . FetchData table .(G.getIndex m i,). PatchRow ) p)) preoldItems
+    traverse (putPatch tref . pure . FetchData table .RowPatch . (G.getIndex m i,). PatchRow ) p)) preoldItems
   let
     primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> ( deleteCurrentUn un  <$> preoldItems <*> gist))
       where un = _kvpk m
@@ -596,7 +597,7 @@ crudUITable
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (TrivialWidget (Maybe (TBData CoreKey Showable)))
-crudUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb@_  preoldItems = do
+crudUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb@_  preoldItems = do
       let
         m = tableMeta table
         getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
@@ -604,7 +605,7 @@ crudUITable inf table reftb@(_, _ ,gist ,sgist,tref) refs pmods ftb@_  preoldIte
 
       ui $ mapTEventDyn (fmap join <$> traverse (\i ->  do
         p <- transactionNoLog inf . getItem $ i
-        traverse (putPatch tref . pure . FetchData table .(G.getIndex m i,). PatchRow ) p)) preoldItems
+        traverse (putPatch tref . pure . FetchData table .RowPatch .(G.getIndex m i,).  PatchRow ) p)) preoldItems
       let
         primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> (deleteCurrentUn un <$> preoldItems <*> gist))
           where un = _kvpk m
@@ -643,7 +644,7 @@ dynCrudUITable
 dynCrudUITable inf nav refs pmods table preoldItems = do
    switchManyUI  preoldItems  nav
       (M.fromList [(True,do
-        reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
+        reftb@(_,gist,sgist,_) <- ui $ refTables inf   table
         crudUITable inf table reftb refs pmods (allRec' (tableMap inf) table) preoldItems)
       ,(False,do
         TrivialWidget (join .  fmap (either (const Nothing) Just .tableCheck (tableMeta table)) <$> F.foldl' (liftA2 mergePatches) preoldItems (fmap snd pmods)) <$> UI.div
@@ -682,7 +683,7 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
     let
       m = tableMeta table
       editEnabled = (\i j k  l m -> i && j && k && l && m )<$> (maybe False (isRight . tableCheck  m)<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
-      crudEdi i j =  fmap (((G.getIndex m j,).PatchRow . fixPatch inf (tableName table )) . diff' i )$ transaction inf $ fullDiffEditInsert  m i j
+      crudEdi i j =  fmap ((RowPatch . (G.getIndex m j,).PatchRow . fixPatch inf (tableName table )) . diff' i )$ transaction inf $ fullDiffEditInsert  m i j
 
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -768,12 +769,12 @@ processPanelTable
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element,Event [String])
-processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
+processPanelTable lbox inf reftb@(res,gist,_,_) inscrudp table oldItemsi = do
   let
     inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
     m = tableMeta table
     authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-  auth <- fst <$> ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
+  auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
   let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
 
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist
@@ -1239,7 +1240,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         filterReflect m = filter (\k  -> _relOrigin (justError "no head notreflect" . safeHead $ F.toList (index k)) `L.elem` fmap _relOrigin reflectRels  ) m
         filterNotReflect (KV m) = KV $ M.filterWithKey (\k  _-> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
         filterReflectKV (KV m) = KV $ M.filterWithKey (\k  _-> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
-        nonEmptyTBRef v@(KV m,KV n ) = if L.null m && L.null n then Nothing else Just v
+        nonEmptyTBRef v@(TBRef (KV m,KV n )) = if L.null m && L.null n then Nothing else Just v
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
@@ -1259,12 +1260,12 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       let
         tdfk = merge <$> tsel <*> tedit
         iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
-        iold2 =  fmap (M.mapKeys (justError "no head iold2" . safeHead . F.toList . S.map _relOrigin ). fmap _tbattr . _kvvalues . filterNotReflect . fst) <$> ftdi
+        iold2 =  fmap (M.mapKeys (justError "no head iold2" . safeHead . F.toList . S.map _relOrigin ). fmap _tbattr . _kvvalues . filterNotReflect . fst.unTBRef) <$> ftdi
         predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   [(_relTarget rel,Left  (o,Flip $ _relOperator rel))] )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional v) <$> M.toList o
         predicate = fmap predicatefk <$> iold2
         sel = liftA2 diff' oldItems ftdi
         selector False = do
-          reftb@(_,_,gist,sgist,_) <- ui $ refTables inf targetTable
+          reftb@(_,gist,sgist,_) <- ui $ refTables inf targetTable
           ui $ onEventIO
             ((,,,,,) <$> facts gist <*> facts sgist <*>  facts tsel <*> facts oldItems <*> facts tedit <@> rumors (fmap fst <$> sel))
             (\(g,s,oldsel,initial,oldedit,vv) -> liftIO $ do
@@ -1273,8 +1274,8 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
                 let search  i
                       | M.size  (_kvvalues  i) /= L.length rel =  Nothing
                       | otherwise = searchGist relTable targetTable  g s i
-                    searchDiff i = diff' (snd <$> initial) (search =<< i)
-                    newsel = apply (fst <$> initial) vv
+                    searchDiff i = diff' (snd .unTBRef<$> initial) (search =<< i)
+                    newsel = apply (fst .unTBRef<$> initial) vv
                     newEdit = searchDiff newsel
                 when (oldedit /=  newEdit) $ do
                   heledit (newEdit)
@@ -1283,7 +1284,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           pan <- UI.div
             # set UI.class_ "col-xs-10 fixed-label"
             # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
-            # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
+            # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
           panClick <- UI.click pan
           ui $ onEventIO panClick (\ _ -> hSelector True)
           (nav,inp,celem) <- edit
@@ -1295,8 +1296,8 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           return [nav,pan,hidden]
         selector True = do
           pred <- ui $ currentValue (facts predicate)
-          reftb@(_,_,gist,sgist,_) <- ui $ refTables' inf targetTable Nothing (fromMaybe mempty pred)
-          let newSel = apply <$> (fmap fst <$> oldItems)<*>(fmap fst <$> sel)
+          reftb@(_,gist,sgist,_) <- ui $ refTables' inf targetTable Nothing (fromMaybe mempty pred)
+          let newSel = apply <$> (fmap (fst .unTBRef) <$> oldItems)<*>(fmap fst <$> sel)
           tdi <- ui $ cacheTidings ((\g s v -> searchGist relTable targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           cv <- currentValue (facts tdi)
           metaMap <- mapWidgetMeta inf
@@ -1337,14 +1338,13 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
               element navMeta # set UI.class_ navSize
               elout <- UI.div # set children [getElement navMeta ,getElement lboxeel]
               esc <- onEsc elout
-              ui $ onEventIO (rumors (triding lboxeel)) (\ _ -> hSelector False)
               ui $ onEventIO esc (\ _ ->hSelector False)
               return (TrivialWidget  (triding lboxeel) elout)
 
           let nevsel = unionWith const (rumors tdi) (rumors $ triding itemList)
           tds <- ui $ stepperT cv nevsel
           let
-            fksel =  (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$>   tds
+            fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$>   tds
             output = diff' <$> oldItems <*> fksel
           ui $ onEventIO (rumors output) (\i -> do
             when (not (L.null reflectRels)) $ do
@@ -1354,7 +1354,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
 
         edit =  do
           let
-            tdi =  fmap join $ applyIfChange <$>  (fmap snd<$>oldItems) <*> tseledit
+            tdi =  fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> tseledit
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
@@ -1368,7 +1368,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
 
           prev <- mapM (\r -> do
             let a = Attr (alterKeyType (\(Primitive i j) -> Primitive [] j  ) $ _relOrigin r) (TB1 ())
-            el <- tbCaseDiff inf targetTable mempty a mempty mempty (join . fmap (M.lookup (S.singleton $ Inline $ _relOrigin r ) ._kvvalues.tableNonRef .fst)  <$> ftdi)
+            el <- tbCaseDiff inf targetTable mempty a mempty mempty (join . fmap (M.lookup (S.singleton $ Inline $ _relOrigin r ) ._kvvalues.tableNonRef .fst.unTBRef)  <$> ftdi)
             v <- labelCaseDiff inf a (triding el)
             UI.div # set children [getElement v,getElement el] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))) rel
           nav <- openClose dblClickT
@@ -1380,7 +1380,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           TrivialWidget pretdi celem <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods )) targetTable  tdi
           let
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
-            fksel = (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ) <$> pretdi
+            fksel = fmap TBRef . (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ) <$> pretdi
             output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
           ui $ onEventIO (rumors $ (,,) <$> facts tsel <*> facts tedit <#> output) (\(old,olde,i) -> do
             when (fmap filterReflect old /= fmap filterReflect (fmap fst i) && not (L.null reflectRels)) $ do
@@ -1399,7 +1399,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       selEls <- traverseUI selector selectT
       element top
         # sink children (facts selEls)
-      let oldReflect = join . fmap nonEmptyTBRef . (fmap (first filterReflectKV)) <$> oldItems
+      let oldReflect = join . fmap nonEmptyTBRef . (fmap (\(TBRef (i,j)) -> TBRef (filterReflectKV i,j ))) <$> oldItems
       out <- ui $ calmT (diff' <$> oldReflect <*> ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk ))
       return $ TrivialWidget  out top
 
@@ -1454,14 +1454,15 @@ displayTable :: InformationSchema -> Table -> [(Rel Key ,[(Key,AccessOp Showable
 displayTable inf table envK = do
   let
     pred = WherePredicate $ AndColl $ PrimColl <$> envK
-  reftb@(_,_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
+  reftb@(_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
   tb <- UI.div
   (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (pure Nothing)
   TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) res
   element tb # set UI.children [offset,cru]
 
 filterPatchSet :: Show a => (Int -> Bool) -> PathFTB a -> Maybe (PathFTB a)
-filterPatchSet f (PatchSet p) = patchSet $ catMaybes $ fmap (filterPatchSet f ) (F.toList p)
+filterPatchSet f (PatchSet p) =
+  patchSet $ catMaybes $ fmap (filterPatchSet f) (F.toList p)
 filterPatchSet f (PIdx ix2 p)
   | f ix2 = Just $ PIdx ix2 p
   | otherwise = Nothing
@@ -1469,9 +1470,10 @@ filterPatchSet f i@(PAtom _) = Just i
 filterPatchSet f v = error (show v)
 
 indexPatchSet :: Show a => Int -> PathFTB a -> Maybe (PathFTB a)
-indexPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (indexPatchSet ix ) (F.toList p)
+indexPatchSet ix (PatchSet p) =
+  patchSet $ catMaybes $ fmap (indexPatchSet ix) (F.toList p)
 indexPatchSet ix (PIdx ix2 p)
   | ix == ix2 = p
   | otherwise = Nothing
-indexPatchSet ix i@(PAtom _)  = Just i -- TODO :  Debug  what is triggering this and remove this case
-indexPatchSet ix v = error (show (ix,v))
+indexPatchSet ix i@(PAtom _) = Just i -- TODO :  Debug  what is triggering this and remove this case
+indexPatchSet ix v = error (show (ix, v))

@@ -1,4 +1,7 @@
+.vscode
+codex.tags
 *.sh
+load
 *.pdf
 *.txt
 *.css

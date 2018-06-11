@@ -309,7 +309,7 @@ instance DecodeTable (TableModificationK (Text, Text) (RowPatch Text Showable ))
       (iassoc id
           (identity <$$> prim "schema_name")
           (identity <$$> prim "table_name"))
-      (iassoc id
+      (IsoArrow RowPatch unRowPatch <$$> iassoc id
           (identity <$$> prim "data_index")
           (identity<$$> prim "modification_data"))
 

@@ -61,7 +61,7 @@ instance (Show u ,Patch a) => Patch (M.Map u a ) where
 data RowModifier
   = RowCreate
   | RowDrop
-  | RowPatch
+  | RowUpdate
   deriving(Show)
 
 
@@ -321,17 +321,17 @@ translate  r
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowDrop s )]))]))],_) -> let
           lift j i = do
              inf <- askInf
-             (((,DropRow) . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
+             ((dropRow' (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
           in ((i,m),[(patternMatch s ,DropRule (lift (runEnv r)))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowCreate s )]))]))],_) -> let
            lift j i = do
              inf <- askInf
              ((createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
         in((i,m),[(patternMatch s ,CreateRule (lift (runEnv r)))])
-       (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch s )]))]))],_)  -> let
+       (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowUpdate s )]))]))],_)  -> let
            lift j i p = do
              inf <- askInf
-             ((\a-> fmap PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head . compact $ (p:a)) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i, [firstPatch keyValue p])
+             ((\a-> RowPatch . fmap PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head . compact $ (p:a)) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i, [firstPatch keyValue p])
         in((i,m),[(patternMatch s ,UpdateRule (lift (runEnv r)))])
 
 checkPlugin inf p

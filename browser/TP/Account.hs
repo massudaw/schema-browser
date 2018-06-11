@@ -139,7 +139,7 @@ accountWidget (incrementT,resolutionT) sel inf = do
               mapM (\(_,table,fields,efields,proj) -> do
                 let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
                     fieldKey (TB1 (SText v))=   v
-                (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
+                v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing Nothing [] pred
                 els <- traverseUI
                   (\i -> do
                     let caption =  UI.caption # set text (T.unpack $ tableName table)

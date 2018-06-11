@@ -99,13 +99,13 @@ list' (ISum inp) = join $  fmap (join  .Non.fromList) . nonEmpty . catMaybes . f
 list' (One i) = Just $ pure i
 
 list :: Union a -> NonEmpty a
-list = justError "empty list " . list'
+list = justError "empty union list " . list'
 
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
-  (_,(_,plug))<- transactionNoLog (meta metaschema) $ selectFrom "plugins" Nothing Nothing [] mempty
-  (dbstats,_)<- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
+  (_,(_,(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoader' (lookTable (meta metaschema) "plugins") Nothing Nothing [] mempty
+  dbstats <- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
   (event,handle) <- R.newEvent
   let mk = tableMeta $ lookTable (meta metaschema) "plugins"
       m = fmap keyValue mk
@@ -131,7 +131,7 @@ addPlugins iniPlugList smvar = do
     modifyed (Closed i j True ) = do
       putStrLn ("### Modified Plugin: "  ++ show (i,j))
       plugList <- plugListM
-      let patchR m i = (G.getIndex m i,PatchRow $ patch i)
+      let patchR m i = RowPatch (G.getIndex m i,PatchRow $ patch i)
       mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()

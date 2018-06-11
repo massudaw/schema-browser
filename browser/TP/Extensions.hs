@@ -52,7 +52,7 @@ configExtension inf model view = do
         tables <-  traverseUI (\(table ,pred)-> do
           tname <-UI.h4 # set text (T.unpack $ tableName table )
           tpred <-UI.h5 # set text (show pred)
-          reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' minf table Nothing pred
+          reftb@(vptmeta,vpt,_,var) <- ui $ refTables' minf table Nothing pred
           config <- selector minf table reftb  (pure (Just pred)) (pure Nothing)
           let tds = triding config
           TrivialWidget pretdi cru <- crudUITable minf table reftb mempty [] (allRec' (tableMap minf) table) (triding config)

@@ -46,7 +46,8 @@ plugs :: TVar DatabaseSchema -> t1 -> t -> [PrePlugins] -> IO [Plugins]
 plugs schm authmap db plugs = do
   inf <- metaInf schm
   regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
-      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] mempty
+      db <- selectFrom "plugins"  Nothing Nothing [] mempty
+      t <- currentState db
       let
         regplugs = catMaybes $ findplug <$> plugs
         findplug :: PrePlugins -> Maybe Plugins
@@ -80,7 +81,10 @@ poller schmRef authmap db plugs is_test = do
   metas <- metaInf schmRef
 
   let conn = rootconn metas
-  ((dbpol,(_,polling)),_)<- runDynamic $ transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] mempty
+  (dbpol,polling) <- closeDynamic $ do
+    v <- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] mempty
+    i <- currentState v
+    return (v,i)
   let
     project tb =  (schema,intervalms,p,pid)
       where
@@ -114,18 +118,18 @@ poller schmRef authmap db plugs is_test = do
                           pred =  WherePredicate $ fixrel . first(liftRel inf a) <$> AndColl ( catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
                           predFullIn =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (fst f)
                           predFullOut =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (snd f)
-                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
+                      l <- currentIndex =<< (transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred)
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  (unIndexMetadata l)
                           lengthPage s pageSize  =   res
                             where
                               res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
+                          listResAll <- currentState =<< (transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred)
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
-                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $
+                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transaction inf $
                               case elemp of
                                 Right action  -> do
                                   getP <- getFrom (lookTable inf a) inp
@@ -145,15 +149,7 @@ poller schmRef authmap db plugs is_test = do
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- liftIO getCurrentTime
                       liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
-                      let polling_log = lookTable metas "polling_log"
-                      dbplog <-  refTable metas polling_log
-                      let table = (\i -> kvlist
-                              [ attrT ("plugin",pid )
-                              , attrT ("schema",TB1 (SNumeric schema))
-                              , IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
-                                        nonEmpty  . concat . catMaybes $
-                                            fmap (fmap (TB1 . kvlist  )) .  either (\r ->Just $ pure [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId r))   ),attrT ("except",LeftTB1 Nothing)])) <$> i))
-                              , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i
+                      let
                           time  = TB1 . STime . STimestamp
                           table2 = kvlist
                               [ attrT ("plugin",pid)

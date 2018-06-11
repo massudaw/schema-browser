@@ -260,8 +260,6 @@ instance Binary STime
 
 instance NFData STime
 
-instance (NFData i, NFData l) => NFData (TableModificationK i l)
-
 instance (NFData l) => NFData (TableK l)
 
 instance NFData (TableType)
@@ -530,23 +528,6 @@ rawAttrs i = _rawAttrsR i
 tableName = rawName
 
 translatedName tb = maybe (rawName tb) id (rawTranslation tb)
-
-type TableModification p = TableModificationK Table p
-
-data TableModificationK k p
-  = RevertModification { referenceId :: Int
-                       , tableTime :: UTCTime
-                       , tableUser :: Text
-                       , tableObj :: k
-                       , tableDiff :: p }
-  | TableModification { tableId :: Maybe Int
-                      , tableTime :: UTCTime
-                      , tableUser :: Text
-                      , tableObj :: k
-                      , tableDiff :: p }
-  | FetchData { tableObj :: k
-              , tableDiff :: p }
-  deriving (Eq, Show, Functor, Generic)
 
 -- Literals Instances
 instance IsString Showable where
@@ -1113,14 +1094,14 @@ generateConstant CurrentTime =
     return (TB1 $ STime $ STimestamp i)
 
 replaceRel rel (Attr k v) =
-  (justError "no rel" $ L.find ((== k) . _relOrigin) rel, v)
+  (justError "no replaceRel" $ L.find ((== k) . _relOrigin) rel, v)
 
 atTBValue ::
      (Applicative f, Ord k)
   => [Rel k]
   -> (FTB b -> f (FTB b))
   -> (FTB (KV k b) -> f (FTB (KV k b)))
-  -> (FTB (KV k b, KV k b) -> f (FTB (KV k b, KV k b)))
+  -> (FTB (TBRef k b) -> f (FTB (TBRef k b)))
   -> (KV k b)
   -> f (KV k b)
 atTBValue l f g h v = traTable (Le.at (Set.fromList l) (traverse modify)) v

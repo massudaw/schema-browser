@@ -112,9 +112,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
     authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
   (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
-      (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
-           <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
-           <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
+      (,,) <$> ((selectFromTable "ordering"  Nothing Nothing []  pred2))
+           <*> ((selectFromTable "authorization" Nothing Nothing [] authPred))
+           <*> ((selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
   filterInp <- UI.input # set UI.placeholder "Search.." # set UI.style [("width","100%")]
   filterInpE <- UI.valueChange filterInp
   filterInpBh <- ui $ stepper "" (T.pack <$> filterInpE)
@@ -163,7 +163,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       ((\i j  -> fmap incClick . ordRow i <$> F.toList (snd  j)) <$> facts (collectionTid orddb) <@> rumors old)
       (runDynamic . traverse (traverse (\(m,pk,p) -> do
         _ <- transactionNoLog (meta inf ) $ patchFrom m (pk ,PatchRow p)
-        putPatch (patchVar $  iniRef orddb) [FetchData (lookTable (meta inf) (_kvname m)) $ (pk,PatchRow p)] )))
+        putPatch (patchVar $  iniRef orddb) [FetchData (lookTable (meta inf) (_kvname m)) $ RowPatch $ (pk,PatchRow p)] )))
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
@@ -183,7 +183,7 @@ instance Ord a => Ord (AscDesc a) where
 sorting :: Ord k=> [(k ,Bool)] -> [TBData k Showable]-> [TBData k Showable]
 sorting ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues )  )
 
-paginateList inf table itemListEl predicate (vpt,_,gist,_,_) constr tdi =  do
+paginateList inf table itemListEl predicate (vpt,gist,_,_) constr tdi =  do
       filterInp <- UI.input # set UI.placeholder "Search.."
       filterInpE <- UI.valueChange filterInp
       filterInpBh <- ui $ stepper "" filterInpE
@@ -195,7 +195,7 @@ paginateList inf table itemListEl predicate (vpt,_,gist,_,_) constr tdi =  do
         lengthPage (IndexMetadata fixmap)  predicate = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
           where s = maybe 0 fst $  M.lookup (fromMaybe mempty predicate) fixmap
 
-        preindex = maybe id (filterfixed table) <$> predicate <*> gist
+        preindex =  gist
         sortList :: ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
         sortList =  sorting (fmap (,True) $ rawPK table)
 
@@ -216,7 +216,7 @@ paginateList inf table itemListEl predicate (vpt,_,gist,_,_) constr tdi =  do
         idxRequest = (,,) <$> facts vpt <#> predicate<*> triding offset
         loadPage (m,pred,i) = do
           let page = i `div` (opsPageSize (schemaOps inf) `div` pageSize)
-          transactionNoLog inf $ selectFrom' table (Just page ) Nothing  [] (fromMaybe mempty pred)
+          transactionNoLog inf $ selectFrom (tableName table) (Just page ) Nothing  [] (fromMaybe mempty pred)
       ui $ onEventDyn (rumors idxRequest) loadPage
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> res3)
       element filterInp # set UI.class_ "col-xs-10"
@@ -262,7 +262,7 @@ multiSelector
      -> Tidings (Maybe WherePredicate)
      -> Tidings [TBData Key Showable]
      -> UI (TrivialWidget [TBData Key Showable])
-multiSelector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
+multiSelector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
   runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   (tds ,el) <- multiSelectListUI inf table itemListEl predicate reftb [] tdi
@@ -277,7 +277,7 @@ selector
      -> Tidings (Maybe WherePredicate)
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
+selector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
   runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   (tds ,el) <- selectListUI inf table itemListEl predicate reftb [] tdi

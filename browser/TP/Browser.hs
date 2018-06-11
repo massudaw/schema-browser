@@ -25,7 +25,6 @@ import Data.Time
 import Text
 import qualified Types.Index as G
 import Data.Bifunctor (first)
-import Debug.Trace
 import TP.Selector
 import TP.Widgets
 import TP.QueryWidgets
@@ -77,8 +76,8 @@ layoutSel' keyword list = do
   body <- UI.div
   alt <- keyword 76 body
   next <- mdo
-    let initial = Vertical
     let
+      initial = Vertical
       next c = styles !! ((current c + 1) `mod` length styles)
         where current = fromJust . flip L.elemIndex styles
       ev = const next <$> alt
@@ -92,12 +91,10 @@ layoutSel' keyword list = do
         # set text (show i)
         # set UI.style [("font-size","smaller"),("font-weight","bolder")])
 
-  traverseUI (\(sel,list) ->
-      mapM (\i -> element i # set UI.class_ (layFactsDiv sel (L.length list))) list)
-      ((,) <$> triding sel <*> (F.toList <$> list))
   w <- askWindow
   ui $ accumDiffMapCounter (\ix (k,v) -> runUI w $ do
     element body # set UI.addChild v
+    element v # sink UI.class_ (facts $ (\sel list -> layFactsDiv sel (M.size list) )<$> triding sel <*> list)
       ) list
   return (getElement sel,body)
 
@@ -106,23 +103,18 @@ layoutSel k l = do
   UI.div # set children [i,j]
 
 
-
-viewerMode True =  viewerKey
-viewerMode False = viewerKeyBatch
-
-chooserTable mode six inf bset cliTid cli = do
+chooserTable six inf bset cliTid cli = do
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   translationDb <- ui $ transactionNoLog  (meta inf)
-        (fst <$> selectFromTable "table_name_translation" Nothing Nothing []  pred2 )
+        (selectFromTable "table_name_translation" Nothing Nothing []  pred2 )
   w <- askWindow
   iniTable <- currentValue (facts cliTid)
-  liftIO $ print (maybe 0 (length .table_selection) iniTable,iniTable)
   el <- ui $ accumDiffCounterIni  (maybe 0 (length .table_selection)  iniTable) (\ix -> runUI w . (\table-> do
     header <- UI.h4
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
-    let viewer t = viewerMode mode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
+    let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
     ui $ trackTable (meta inf) (wId w) table six ix
     body <-
       if L.null (rawUnion table)
@@ -138,32 +130,38 @@ chooserTable mode six inf bset cliTid cli = do
            els <- traverseUI ((\t -> do
              b <- viewer t
              element b # set UI.class_ "col-xs-12"
-             return b))(triding  unions)
+             return b))(triding unions)
            body <- UI.div # sink root (facts els)
-           UI.div # set children [getElement unions ,body]
+           UI.div # set children [getElement unions, body]
     UI.div
       # set children [header,body]
       # set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]))
         (triding bset)
   layoutSel onAlt  el
 
-viewerKeyBatch
+viewerMode
   ::
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
-viewerKeyBatch six inf table tix cli cliTid = do
+viewerMode six inf table tix cli cliTid = do
   let
-  reftb@(_,_,vpt,_,_) <- ui $ refTables' inf table Nothing mempty
+  reftb@(_,vpt,_,_) <- ui $ refTables' inf table Nothing mempty
   let
     tdip = listRows inf table <$> cliTid
-    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex (justError "no key" $ traverse unSOptional $ v)) i) . fmap (F.toList . fmap pk_value . data_index) . filter (isNothing . unFin . fst . Interval.upperBound' .  row_up_time) ) <$> vpt <*> tdip
+    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> vpt <*> fmap activeRows tdip
   itemList <- multiSelector inf table reftb (pure Nothing) tdi
   v <- ui $ currentValue (facts tdi)
   tds <- do
-    let
-      updatedValue = (\i j -> const . catMaybes  $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts (triding itemList) <@> rumors vpt
-      selection = const <$> rumors (triding itemList)
-    ui $ accumT  v (unionWith (.) selection  updatedValue)
-  TrivialWidget _ cru <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds
+      let
+        updatedValue = (\i j -> const . catMaybes  $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> facts (triding itemList) <@> rumors vpt
+        selection = const <$> rumors (triding itemList)
+      ui $ accumT  v (unionWith (.) selection  updatedValue)
+
+  nav  <- buttonDivSet  (["Edit","Table"]) (pure  Nothing) (\i ->
+        UI.button # set UI.text i # set UI.class_ "buttonSet btn-sm btn-default pull-right" )
+  cru <- switchManyUI tds (triding nav)
+    $ M.fromList [("Edit",fmap maybeToList <$> crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) (safeHead <$> tds)),
+    ("Table",batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds)]
+
   w  <- askWindow
   ui $ accumDiffCounterIni (L.length v)
     (logRowAccess w (six,inf) (tix,table))
@@ -171,55 +169,9 @@ viewerKeyBatch six inf table tix cli cliTid = do
 
   title <- UI.h5
     # sink text (facts $ L.intercalate "," . fmap (attrLine inf  (tableMeta table)) <$> tds)
-    # set UI.class_ "header col-xs-12"
-  insertDivBody <- UI.div # set children [title,cru]
-  element cru
-    # set UI.class_ "col-xs-12"
+    # set UI.class_ "header col-xs-10"
+  element nav # set UI.class_ "col-xs-2"
+  insertDivBody <- UI.div # set children [title,getElement nav,getElement cru] # set UI.class_ "col-xs-12"
+  element cru # set UI.class_ "col-xs-12"
   UI.div # set children [getElement itemList,insertDivBody]
 
-
-viewerKey
-  ::
-      Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
-viewerKey six inf table tix cli cliTid = do
-  let
-  reftb@(_,_,vpt,_,_) <- ui $ refTables' inf table Nothing mempty
-  let
-    tdip = listRows inf table <$> cliTid
-    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex (justError "no key" $ traverse unSOptional $ v)) i). fmap (F.toList . fmap pk_value . data_index). filter (isNothing . unFin . fst . Interval.upperBound' .  row_up_time)) <$> vpt <*> tdip
-  itemList <- selector inf table reftb (pure Nothing) (safeHead <$> tdi)
-  v <- ui $ currentValue (facts tdi)
-  tds <- do
-    let
-      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts (triding itemList) <@> rumors vpt
-      selection = const <$> rumors (triding itemList)
-    ui $ accumT  (safeHead v) (unionWith (.) selection  updatedValue)
-  TrivialWidget _ cru <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds
-  dbmeta  <- ui $ prerefTable (meta inf) (lookTable (meta inf ) "clients")
-  w  <- askWindow
-  ui $ accumDiffCounterIni (L.length v)
-    (logRowAccess w (six,inf) (tix,table))
-    (S.fromList .maybeToList <$> tds)
-  title <- UI.h5
-    # sink text (facts $ L.intercalate "," . fmap (attrLine inf  (tableMeta table)). maybeToList <$> tds)
-    # set UI.class_ "header col-xs-12"
-  element cru
-    # set UI.class_ "col-xs-12"
-  insertDivBody <- UI.div # set children [title,cru]
-  UI.div # set children [getElement itemList,insertDivBody]
-
-
-logRowAccess w (six,inf) (tix,table) ix row = do
-  let sel =  Non.fromList . M.toList $ getPKM (tableMeta table) row
-  let lift =  liftPatch minf "clients"
-      cli = lookTable minf "clients"
-      minf = meta inf
-  now <- liftIO getCurrentTime
-  let p = lift <$> addRow  (wId w) now  sel  six tix ix
-  transactionNoLog minf $ do
-    patchFrom (tableMeta cli) (PatchRow <$>p)
-  registerDynamic (void $ do
-    now <- liftIO getCurrentTime
-    let d = lift <$> removeRow (wId w) now  six  tix ix
-    runDynamic $ transactionNoLog minf $ do
-      patchFrom (tableMeta cli) (PatchRow<$>d))

@@ -154,7 +154,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
             reftb <- ui $ refTables' inf t Nothing pred
-            let v = reftb ^. _3
+            let v = reftb ^. _2
             let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk j else Nothing  ) <$> facts v <@>  evc
             tdib <- ui $ stepper Nothing evsel
             let tdi = tidings tdib evsel
@@ -191,7 +191,7 @@ addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
     let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
         fieldKey (TB1 (SText v))=   v
     reftb <- ui $ refTables' inf t Nothing pred
-    let v = reftb ^. _3
+    let v = reftb ^. _2
     traverseUI
       (\i -> calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList i)) v
 

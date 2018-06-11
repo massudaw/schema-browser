@@ -172,7 +172,7 @@ createSchema  = do
 alterSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowPatch $
+      arow RowUpdate $
         proc _ -> do
           (n,nnewm) <- ifield "name"
               (ivalue (changeV PText)) -< ()
@@ -390,7 +390,7 @@ deleteMod m t = do
           idx = G.getIndex m t
       deletePatch (conn inf) (recoverFields inf <$> m) idx  table
       l <- liftIO getCurrentTime
-      return $  (idx,DropRow )
+      return $  RowPatch (idx,DropRow )
 
 updateMod :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (((RowPatch Key Showable)))
 updateMod m old pk p = do
@@ -401,7 +401,7 @@ updateMod m old pk p = do
           kv = apply old  p
       updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) ini )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
-      let mod =   ((G.notOptional pk  ,PatchRow p))
+      let mod =   RowPatch (G.notOptional pk  ,PatchRow p)
       return $ mod
 
 patchMod :: KVMetadata Key -> TBIndex Showable -> TBIdx Key Showable-> TransactionM (((RowPatch Key Showable)))
@@ -411,7 +411,7 @@ patchMod m pk patch = do
     let table = lookTable inf (_kvname m)
     applyPatch (conn inf) (recoverFields inf <$>m )(pk,firstPatch (recoverFields inf ) patch)
     l <- liftIO getCurrentTime
-    let mod =   ((G.notOptional pk,PatchRow patch))
+    let mod =   RowPatch (G.notOptional pk,PatchRow patch)
     return (mod)
 
 loadDelayed :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))

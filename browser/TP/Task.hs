@@ -11,6 +11,7 @@ import GHC.Stack
 import Environment
 import TP.View
 import qualified Data.Set as S
+import Data.Void
 import Data.Ord
 import Utils
 import Step.Host
@@ -185,9 +186,12 @@ taskWidget (incrementT,resolutionT) sel inf = do
               mapM (\(_,table,fields,proj) -> do
                 let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
                     fieldKey (TB1 (SText v))=   v
-                (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
+                v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing Nothing [] mempty
+                width <- primEditor (pure (Just 1000))
+                height <- primEditor (pure (Just 500))
+                hideDone <- fmap fromJust <$> primEditor (pure (Just True))
                 els <- traverseUI
-                  (\i -> do
+                  (\(done,i) -> do
                     let caption =  UI.caption # set text (T.unpack  (tableName table) )
                         headers =  ["Id"
                                    ,"Description"
@@ -208,19 +212,18 @@ taskWidget (incrementT,resolutionT) sel inf = do
                         values (Atomic p (Cost c) (Trust t) (Progress pro) (Duration dur))
                           = mpProject p <> [  show  c, show  t, show  pro,show dur]
                         row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) (values v) )
-                        body = row <$> tail (either (const []) subprojectsDeep figure)
+                        body = row <$> (either (const []) (tail . subprojectsDeep) figure)
                         dat =  catMaybes $ fmap proj  $ G.toList i
-                        figure = groupTopLevel (T.unpack $ tableName table) dat
+                        figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\(_,Progress p,_,_) -> (if done then p < 1 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
 
                     t <- UI.table # set items (sequence $ caption:header:body)
-                    width <- primEditor (pure (Just 1000))
-                    height <- primEditor (pure (Just 500))
-                    svg <- UI.div # sink UI.html (facts $ fmap (fromMaybe "" )$ liftA2 (\w h -> either id  (MP.renderWithSVG (RenderOptions  False w  h allattrs)) figure) <$> triding width <*> triding height)
-                    mapM (set UI.class_"col-xs-2") (element <$> [width,height])
-                    inp  <- UI.div # set children (getElement <$> [width,height])
-                    UI.div # set children [t,inp,svg]) (collectionTid v)
+                    svg <- UI.div # sink UI.html (facts $ fmap (fromMaybe "" )$ liftA2 (\w h -> either id  (MP.renderWithSVG (RenderOptions  False w  h allattrs))  figure ) <$> triding width <*> triding height )
+                    UI.div # set children [t,svg]
+                    ) (liftA2 (,) (triding hideDone) (collectionTid v))
 
-                UI.div # sink UI.children (pure <$> facts els)
+                inp  <- UI.div # set children ([getElement hideDone,getElement width,getElement height])
+                svg <- UI.div # sink UI.children (pure <$> facts els)
+                UI.div # set children [inp,svg]
                     ) (filter (flip L.elem (F.toList selected) .  (^. _2)) dashes )
 
                 ) $ (,) <$> sel <*> calendarSelT
@@ -235,6 +238,15 @@ showDuration (Duration i) = show i
 allattrs = [PTitle , PCost , PTrust , PProgress,PDuration]
 projectId = fromJust . join . fmap project_id . properties
 
+filterProjectList :: ((Cost,Progress,Trust,Duration) -> Bool) -> NonEmpty (Project Void ) -> Maybe (NonEmpty (Project Void))
+filterProjectList f v = Non.fromList <$> nonEmpty (catMaybes $ F.toList $ filterProject f <$> v)
+
+filterProject :: ((Cost,Progress,Trust,Duration) -> Bool) ->  Project Void -> Maybe (Project Void)
+filterProject f v@(MP.Sequence d ps) = if (f (cost v,progress v , trust v , duration v) ) then (MP.Sequence d <$>filterProjectList f ps) else Nothing
+filterProject f v@(MP.Product d ps)  = if (f (cost v,progress v , trust v , duration v) ) then (MP.Product d <$>filterProjectList f ps) else Nothing
+filterProject f v@(MP.Sum d ps)      = if (f (cost v,progress v , trust v , duration v) ) then (MP.Sum d <$> filterProjectList f ps) else Nothing
+filterProject f v               = if f (cost v,progress v , trust v , duration v)  then Just v else Nothing
+
 subprojectsDeep :: Project a -> [Project a]
 subprojectsDeep v@(MP.Sequence _ ps) = v : concat (subprojectsDeep <$> Non.toList ps)
 subprojectsDeep v@(MP.Product _ ps)  = v : concat (subprojectsDeep <$> Non.toList ps)
@@ -242,5 +254,5 @@ subprojectsDeep v@(MP.Sum _ ps)      = v : concat (subprojectsDeep <$> Non.toLis
 subprojectsDeep i               = [i]
 
 
-groupTopLevel tname list =  resolveReferences False ((\(j,_) -> (projectId j ,j)) <$> list) ["root"] (MP.Product (ProjectProperties (Just tname) Nothing Nothing Nothing Nothing Nothing)  (fmap (\(i,_) -> i ) $ Non.fromList $ filter (\(j,_) -> not $  S.member  (projectId j) refs) list))
+groupTopLevel tname list =  maybe (Left "No task in period") (resolveReferences False ((\(j,_) -> (projectId j ,j)) <$> list) ["root"] .MP.Product (ProjectProperties (Just tname) Nothing Nothing Nothing Nothing Nothing)  ) (fmap (fmap (\(i,_) -> i ) . Non.fromList )$ nonEmpty $ filter (\(j,_) -> not $  S.member  (projectId j) refs) list)
   where refs = S.fromList $ concat $ fmap (\(_,i) -> i) list

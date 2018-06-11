@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
+{-# LANGUAGE BangPatterns,FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
 module TP.Widgets where
 
 
@@ -9,6 +9,7 @@ import Types.Patch
 import Control.Arrow(first)
 import Data.Tuple(swap)
 import qualified Control.Monad.Trans.Writer as Writer
+import GHC.IO.Unsafe
 import Control.Monad
 import Data.Ord
 import Reactive.Threepenny
@@ -206,15 +207,12 @@ checkDivSetTGen ks sort binit   el st = do
   bv <- ui $ accumT vini  evs
   -- Place sorted Itens
   dv <- UI.div
-  w <- askWindow
-  onChanges (facts st) (\sti -> do
-    legend <-  mapM fromJust . filter isJust . fmap (\(k,(v,_)) -> fmap (k,) <$> sti k v) $  buttons
-    let sortButtons sel el f = fmap snd .  L.sortBy (flip $ comparing (\i -> (L.elem (fst i) sel, f . fst $ i) )) $ el
-    onChanges  (sortButtons <$> facts bv <*> pure legend <*> facts sort)
-      (\i -> element dv # set children i))
-
+  onChanges (facts st) $ (\sti -> do
+    nbuttons <- mapM fromJust . filter isJust . fmap (\(k,(v,_)) -> fmap (k,) <$> sti k v) $  buttons
+    let sortButtons sti f sel =  fmap snd $ L.sortBy (flip $ comparing (\i -> (L.elem (fst i) sel,). f . fst $ i )) $nbuttons
+    element dv # sink children (facts $ sortButtons <$>  pure nbuttons <*> sort <*> bv))
   -- Sink check state to elems
-  mapM (\(k,e) -> element (fst e) # set UI.checked (S.member k $ vini) # sinkDiff UI.checked (S.member k <$> bv)) buttons
+  mapM (\(k,e) -> element (fst e) # sinkDiff UI.checked (S.member k <$> bv)) buttons
   return (TrivialWidget bv dv)
 
 
@@ -638,7 +636,7 @@ calmB b = do
   (e, trigger) <- newEvent
   current <- currentValue b
   -- liftIO $ trigger current
-  onChangeDyn b (liftIO . trigger)
+  onChangeDynIni [] b (liftIO . trigger)
   eCalm <- calmE e
   fmap (fromMaybe (error "calmB")) <$> stepper Nothing (Just <$> eCalm)
 
@@ -663,7 +661,7 @@ calmT t = do
   (e, trigger) <- newEvent
   current <- currentValue (facts t)
   -- liftIOLater $ trigger current
-  onChangeDyn (facts t) (liftIO . trigger)
+  onChangeDynIni [] (facts t) (liftIO . trigger)
   eCalm <- calmE (rumors t)
   bh <- stepper current eCalm
   return $ tidings bh eCalm
@@ -677,13 +675,13 @@ switchManyUI
 switchManyUI t bool map = do
   (evp,h) <- ui newEvent
   let
-      fun x = do
-        case M.lookup x map of
-          Just i -> do
-            TrivialWidget ts el <- i
-            ui $ onEventIO  (rumors ts) h
-            return el
-          Nothing -> error ("no ix " ++ (show x))
+    fun x = do
+      case M.lookup x map of
+        Just i -> do
+          TrivialWidget ts el <- i
+          onChanges (facts ts) (liftIO . h)
+          return el
+        Nothing -> error ("no ix " ++ (show x))
 
   els <- traverseUI fun bool
   out <- UI.div # sink root (facts els)
@@ -714,9 +712,7 @@ traverseUI m inp = do
 line n =   set  text n
 
 once i = do
-  (e,h) <- ui $ newEvent
-  liftIOLater . liftIO $ h i
-  return $ tidings (pure i) e
+  return $ pure i
 
 accumDiffCounter :: Ord k =>
     (Int -> k -> Dynamic b)
@@ -734,18 +730,18 @@ accumDiffCounterIni
           (Tidings (M.Map k b))
 accumDiffCounterIni  iniIx f t = mdo
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamic (f ix) v)$ zip [iniIx..] $S.toList ini
+  iniout <- liftIO $ mapM (\(ix,v)-> evalDynamic (f ix) v)$ zip [iniIx..] $S.toList ini
   let diffEvent = diffAddRemove t
       evadd = (\s (acc,m) -> (acc + length s,foldr (uncurry M.insert ) m s))
       evdel = (\s (acc,m) -> (acc,foldr M.delete  m s))
       execFinalizers fins = traverse sequence_ $ fmap snd fins
-  eva <- mapEventDynInterrupt (\((ix,fin),(add,del)) -> liftIO $ do
+  eva <- mapEventDynInterrupt (\((ix,!fin),(add,del)) -> liftIO $ do
     let fins =  catMaybes $ fmap (flip M.lookup fin) (S.toList del)
     execFinalizers fins
     out <- mapM (\(ix,v)-> evalDynamic (f ix) v) $zip [ix..] (S.toList add)
     return (evdel del . evadd out)
      )  $(,)<$>facts bs <@> diffEvent
-  bs <- accumT  (iniIx + S.size ini,M.fromList iniout)  eva
+  bs <- accumT  (iniIx + S.size ini, M.fromList iniout)  eva
   registerDynamic (void $ join $ execFinalizers . F.toList  .snd <$> currentValue (facts bs))
   return (fmap fst . snd <$> bs)
 
@@ -766,12 +762,12 @@ accumDiffMapCounterIni
           (Tidings (M.Map k c))
 accumDiffMapCounterIni iniIx f t = mdo
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamicMap (f ix) v)$ zip [iniIx..] $M.toList ini
+  iniout <- liftIO $ mapM (\(ix,v)-> evalDynamicMap (f ix) v)$ zip [iniIx..] $M.toList ini
   let diffEvent = diffAddRemoveMap t
       evadd = (\s (acc,m) -> (acc + length s,foldr (uncurry M.insert ) m s))
       evdel = (\s (acc,m) -> (acc,foldr M.delete  m s))
       execFinalizers fins = traverse sequence_ $ fmap snd fins
-  eva <- mapEventDynInterrupt (\((ix,fin),(add,del)) -> liftIO $ do
+  eva <- mapEventDynInterrupt (\((ix,!fin),(add,del)) -> liftIO $ do
     let fins =  catMaybes $ fmap (flip M.lookup fin) (M.keys del)
     execFinalizers fins
     out <- mapM (\(ix,v)-> evalDynamicMap (f ix) v) $zip [ix..] (M.toList add)

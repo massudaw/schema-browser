@@ -11,7 +11,7 @@
 
 module Types.Common
   ( TB(..)
-  , TBRef
+  , TBRef(..)
   , _fkttable
   , mapFValue
   , mapFAttr
@@ -100,7 +100,7 @@ import Prelude hiding (head)
 import Safe
 import Utils
 
-type TBRef k s = (KV k s, KV k s)
+newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Show,Eq,Ord,Functor)
 
 newtype KV k a
   -- = KV { _kvvalues :: Map (Set (Rel k)) (AValue k a) }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
@@ -437,8 +437,8 @@ alterFTB f (ArrayTB1 i) = ArrayTB1 <$> traverse (alterFTB f) i
 alterFTB f (LeftTB1 i) = LeftTB1 <$> traverse (alterFTB f) i
 alterFTB f (IntervalTB1 i) = IntervalTB1 <$> traverse (alterFTB f) i
 
-liftFK :: Ord k => Column k b -> FTB (KV k b, KV k b)
-liftFK (FKT l rel i) = liftRel (unkvlist l) rel i
+liftFK :: Ord k => Column k b -> FTB (TBRef k b)
+liftFK (FKT l rel i) = TBRef <$> liftRel (unkvlist l) rel i
 
 liftRel ::
      (Ord k) => [Column k b] -> [Rel k] -> FTB (KV k b) -> FTB (KV k b, KV k b)
@@ -452,7 +452,7 @@ liftRel l rel f =
   where
     rels = catMaybes $ findRel l <$> rel
 
-recoverFK :: Ord k => [k] -> [Rel k] -> FTB (KV k s, KV k s) -> Column k s
+recoverFK :: Ord k => [k] -> [Rel k] -> FTB (TBRef k s) -> Column k s
 recoverFK ori rel i
   -- FKT (kvlist . catMaybes $ (\k -> Attr k <$> (fmap join . traverse (fmap _aprim . Map.lookup (S.singleton $ Inline k). _kvvalues . fst ) $ i)) <$> ori )rel   (fmap snd i)
  =
@@ -462,11 +462,11 @@ recoverFK ori rel i
         Attr k <$>
         (fmap join .
          traverse
-           (fmap _tbattr . Map.lookup (S.singleton $ Inline k) . _kvvalues . fst) $
+           (fmap _tbattr . Map.lookup (S.singleton $ Inline k) . _kvvalues . fst.unTBRef) $
          i)) <$>
      ori)
     rel
-    (fmap snd i)
+    (fmap (snd .unTBRef ) i)
 
 merge :: (a -> b -> c) -> (b -> c) -> (a -> c) -> FTB a -> FTB b -> FTB c
 merge f g h (LeftTB1 i) (LeftTB1 j) =

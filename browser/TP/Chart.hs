@@ -140,7 +140,7 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                     let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
                         fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
-                    let v = reftb ^. _3
+                    let v = reftb ^. _2
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)

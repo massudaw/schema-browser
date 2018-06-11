@@ -70,7 +70,7 @@ main = do
   --  (ServerConfig <$> join (readMay <$> sp) <*> sh)
   print "Load GUI Server"
   let initGUI = do
-        (ix,CreateRow c) <- addClientLogin metas
+        RowPatch (ix,CreateRow c) <- addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
                (\(Idex i) -> F.toList i) ix
         liftIO $ putStrLn $ "Initialize Client: " ++ show i

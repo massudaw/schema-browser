@@ -5,6 +5,8 @@ import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Safe
 import qualified Data.ExtendedReal as ER
+import Graphics.UI.Threepenny hiding (meta)
+import Graphics.UI.Threepenny.Internal (wId)
 import qualified Data.Interval as Interval
 import Data.Interval (Interval)
 import Data.Text (Text)
@@ -14,12 +16,21 @@ import Reactive.Threepenny
 import RuntimeTypes
 import Schema
 import SchemaQuery
+import Data.Maybe
 import Serializer
 import Step.Common
 import Types
 import qualified Types.Index as G
 import Types.Patch
+import qualified Data.Map as M
+import qualified Data.Foldable as F
 
+addSchemaIO
+  :: Int
+     -> InformationSchema
+     -> InformationSchema
+     -> Int
+     -> Dynamic ()
 addSchemaIO clientId minf inf six = do
   let cli = lookTable minf "clients"
   dbmeta  <- prerefTable minf cli
@@ -36,12 +47,15 @@ addSchemaIO clientId minf inf six = do
 
 
 
+addClientLogin
+  :: InformationSchema -> Dynamic (RowPatch Key Showable)
 addClientLogin inf =  transactionNoLog inf $ do
     now <- liftIO getCurrentTime
     let
       row = ClientState Nothing (startTime now) []
       obj = liftTable' inf "clients" (encodeT row)
       m = lookMeta inf  "clients"
+    lift $ prerefTable inf (lookTable inf "clients")
     i <-  insertFrom  m obj
     lift . registerDynamic . closeDynamic $ do
       now <- liftIO getCurrentTime
@@ -182,7 +196,7 @@ getClient metainf clientId ccli = G.lookup (idex metainf "clients"  [("id",num c
 
 lookClient :: Int -> InformationSchema ->  Dynamic (Tidings (Maybe ClientState))
 lookClient clientId metainf = do
-  (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
+  (_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
   return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId <$> clientState)
 
 indexTable inf (tix,table) = join . fmap lookT
@@ -194,3 +208,29 @@ indexTable inf (tix,table) = join . fmap lookT
 listRows inf table =  maybe []  row_selection
 
 
+logRowAccess
+  :: Show a =>
+     Window
+     -> (Int, InformationSchemaKV Key Showable)
+     -> (Int, TableK (FKey a))
+     -> Int
+     -> KV (FKey a) Showable
+     -> Dynamic ()
+logRowAccess w (six,inf) (tix,table) ix row = do
+  let sel =  Non.fromList . M.toList $ getPKM (tableMeta table) row
+  let lift =  liftPatch minf "clients"
+      cli = lookTable minf "clients"
+      minf = meta inf
+  now <- liftIO getCurrentTime
+  let p = lift <$> addRow  (wId w) now  sel  six tix ix
+  transactionNoLog minf $ do
+    patchFrom (tableMeta cli) (PatchRow <$>p)
+  registerDynamic (void $ do
+    now <- liftIO getCurrentTime
+    let d = lift <$> removeRow (wId w) now  six  tix ix
+    runDynamic $ transactionNoLog minf $ do
+      patchFrom (tableMeta cli) (PatchRow<$>d))
+
+
+activeRows :: [ClientRowSelection] -> [[FTB Showable]]
+activeRows =  fmap (F.toList . fmap pk_value . data_index). filter (isNothing . unFin . fst . Interval.upperBound' .  row_up_time)

@@ -21,12 +21,8 @@ data PAction a b = PAction
 instance Compact String where
   compact = pure .concat
 
-instance Patch (String ,String) where
-  type Index (String ,String)= (String,String)
-  apply (i,j) (k,l) = (i ++ k , j ++ l)
 instance Patch String where
   type Index String = String
-
   apply =  (++)
 
 instance Patch (a -> b ) where

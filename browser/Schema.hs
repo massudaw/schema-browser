@@ -281,8 +281,8 @@ logTableModification
      -> TableModification (RowPatch Key Showable)  -> IO (TableModification (RowPatch Key Showable))
 logTableModification inf i@(FetchData _ ip) = do
   return i
-logTableModification inf (RevertModification id ts u table ip) = do
-  let i = fmap patchNoRef $ case ip of
+logTableModification inf (RevertModification id ip) = do
+  let i = fmap patchNoRef $ case unRowPatch ip of
             (ix,PatchRow i) -> (ix,i)
             (i,DropRow ) -> (i,[])
             (ix,CreateRow i) -> (ix,patch i)
@@ -292,11 +292,11 @@ logTableModification inf (RevertModification id ts u table ip) = do
   let ltime =  utcToLocalTime utc time
       (G.Idex pidx,pdata) = firstPatch keyValue  <$> i
 
-  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?,? :: row_index ,? :: row_operation,?)" ) (id,snd $ username inf ,ltime,tableName table,  Binary . B.encode $    pidx  , Binary  . B.encode . snd $firstPatchRow keyValue ip, schemaName inf)
+  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (id, Binary . B.encode $    pidx  , Binary  . B.encode . snd $unRowPatch $ firstPatchRow keyValue ip)
   let modt = lookTable (meta inf)  mod
-  return (RevertModification id ts u table ip )
+  return (RevertModification id ip )
 logTableModification inf (TableModification Nothing ts u table ip) = do
-  let i = fmap patchNoRef $ case ip of
+  let i = fmap patchNoRef $ case unRowPatch ip of
             (ix,PatchRow i) -> (ix,i)
             (i,DropRow ) -> (i,[])
             (ix,CreateRow i) -> (ix,patch i)
@@ -306,7 +306,7 @@ logTableModification inf (TableModification Nothing ts u table ip) = do
   let ltime =  utcToLocalTime utc time
       (G.Idex pidx,pdata) = firstPatch keyValue  <$> i
 
-  [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (snd $ username inf ,ltime,tableName table,  Binary . B.encode $    pidx  , Binary  . B.encode . snd $firstPatchRow keyValue ip, schemaName inf)
+  [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (snd $ username inf ,ltime,tableName table,  Binary . B.encode $    pidx  , Binary  . B.encode . snd . unRowPatch $firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
   (dbref ,_) <-R.runDynamic $ prerefTable (meta inf) modt
 
