@@ -38,9 +38,7 @@ import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
-import TP.QueryWidgets
 import Control.Monad.Reader
-import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
 import qualified Data.List as L
@@ -124,7 +122,7 @@ accountWidget (incrementT,resolutionT) sel inf = do
           =  do
             let item = M.lookup table  (M.fromList  $ fmap (\i@(_,b,_,_,_)-> (b,i)) dashes )
             traverse (\k@(c,tname,_,_,_) ->   mdo
-              header <-  UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-11"
+              header <-  UI.div # set text  (T.unpack lookDesc)  # set UI.class_ "col-xs-11"
               element b # set UI.class_ "col-xs-1"
               UI.label # set children [b,header]
                        # set UI.style [("background-color",renderShowable c)] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]

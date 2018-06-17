@@ -1,38 +1,30 @@
 flags:
-  HsOpenSSL:
-    fast-bignum: false
   snap-server:
     openssl: true
 
 packages:
-- '.'
+- plugins
 - browser
-- browser/core
-- location: deps/threepenny-gui/
-  extra-dep: True
-- location: deps/data-interval/
-  extra-dep: True
-- location: deps/extended-reals/
-  extra-dep: True
-- location: deps/GiST/
-  extra-dep: True
-- location: deps/ordered
-  extra-dep: True
-- location : deps/postgresql-simple
-  extra-dep: True
-- location : deps/master-plan
-  extra-dep: True
+- core
 
 extra-deps:
-  - arrows-0.4.4.2
-  - GenericPretty-1.2.1
-  - strptime-1.0.10
-  - Stream-0.4.7.2
-  - megaparsec-6.5.0
-  - lazysmallcheck-0.6
-  - parser-combinators-0.4.0
-  - HsOpenSSL-0.11.4.9
-  - Only-0.1
+  - diagrams-1.4
+  - diagrams-lib-1.4.2.3
+  - diagrams-svg-1.4.2
+  - diagrams-contrib-1.4.3
+  - diagrams-core-1.4.1
+  - diagrams-solve-0.1.1
+  - dual-tree-0.2.2
+  - cubicbezier-0.6.0.5
+  - mfsolve-0.3.2.0
+  - fast-math-1.0.2
+  - deps/master-plan
+  - deps/postgresql-simple
+  - deps/ordered
+  - deps/GiST
+  - deps/extended-reals
+  - deps/data-interval
+  - deps/threepenny-gui
 
 
-resolver: lts-9.21
+resolver: lts-11.14

@@ -8,6 +8,7 @@ module PandocRenderer where
 import Text.Pandoc.Options
 import Types
 import Text.Pandoc.PDF
+import Text.Pandoc.Class
 
 import Control.Monad
 import Text.Pandoc.Writers.LaTeX
@@ -67,7 +68,7 @@ renderProjectContract = myDoc
                         ]))) -< ()
           outdoc <- act (\i -> do
               template <- liftIO$ readFile' utf8 "contract.template"
-              liftIO$ makePDF "pdflatex" writeLaTeX  def {writerTemplate = Just template }   i ) -< pdoc
+              liftIO $ runIOorExplode $ makePDF "pdflatex" [] writeLaTeX  def {writerTemplate = Just template }   i ) -< pdoc
           odxR "contract" -< ()
           returnA -<  (\i -> kvlist .  pure . Attr "contract" . LeftTB1 . Just . LeftTB1 . Just . TB1 . SBinary .  BS.toStrict <$>  either (const Nothing) Just  i) outdoc
 
@@ -92,7 +93,7 @@ renderProjectReport = myDoc
                         ])) -< ()
           outdoc <- act (\i -> do
               template <- liftIO$ readFile' utf8 "raw.template"
-              liftIO$ makePDF "pdflatex" writeLaTeX  def {writerTemplate = Just template }   i ) -< pdoc
+              liftIO$ runIOorExplode $ makePDF "pdflatex" [] writeLaTeX  def {writerTemplate = Just template }   i ) -< pdoc
           odxR "report" -< ()
           returnA -<  (\i -> kvlist .  pure . Attr "report" . LeftTB1 . Just . LeftTB1. Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i ) outdoc
 
@@ -183,7 +184,7 @@ renderProjectPricingA = myDoc
                         ])) -< preenv
           outdoc <- act (\i -> liftIO $ do
               template <- readFile' utf8 "raw.template"
-              makePDF "pdflatex" writeLaTeX  def {writerTemplate = Just template }   i
+              runIOorExplode $ makePDF "pdflatex" [] writeLaTeX  def {writerTemplate = Just template }   i
                   ) -< pdoc
           odxR "orcamento" -< preenv
           returnA -<  (\i -> kvlist . pure . Attr "orcamento" . LeftTB1 . Just . LeftTB1 .Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i) outdoc
@@ -193,5 +194,5 @@ readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding e) 
 
 test = do
     template <-  readFile' utf8 "raw.template"
-    either print (BS.writeFile "raw.pdf") =<< makePDF "pdflatex"  writeLaTeX def  {writerTemplate = Just template } (setTitle "Title" (doc (para "para")))
+    either print (BS.writeFile "raw.pdf") =<< runIOorExplode (makePDF "pdflatex"  [] writeLaTeX def  {writerTemplate = Just template } (setTitle "Title" (doc (para "para"))))
 

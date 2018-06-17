@@ -8,51 +8,34 @@ module TP.Main where
 
 import TP.Selector
 import TP.Extensions
-import Data.Unique
 import ClientAccess
+import PrimEditor
 import TP.Task
-import qualified Data.Interval as I
 import TP.QueryWidgets
-import Query
 import Plugins.Schema (codeOps)
-import Control.Exception
-import qualified Data.Binary as B
 import System.Random
 import Postgresql.Backend (connRoot, postgresOps)
-import System.Process
 import Serializer
 import Control.Concurrent.STM
 import Data.Tuple
-import TP.View
-import Data.Aeson (decode,Value(String))
 import TP.Account
-import TP.Task
 import TP.Browser
-import Control.Monad.Writer (runWriterT)
 import TP.Agenda
 import TP.Chart
-import Control.Lens (_1,_2,(^.),over)
+import Control.Lens (_1,_2,(^.))
 import TP.Map
-import Safe
 import qualified NonEmpty as Non
-import Data.Char
 import Step.Common
-import Step.Host
 import Data.Time
 import qualified Types.Index as G
-import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
 import Prelude hiding (head)
-import TP.QueryWidgets
 import Control.Monad.Reader
-import Control.Concurrent
 import System.Environment
-import Data.Ord
 import Utils
 import Schema
-import Types.Patch
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
 import qualified Data.List as L
@@ -128,11 +111,11 @@ setup smvar bstate plugList w = void $ do
         schId = int $ schemaId inf
         initKey = pure (maybeToList $ (\s -> if schemaName inf == T.pack s then lookTable inf . T.pack<$> iniTable   else Nothing) =<< iniSchema )
         buttonStyle lookDesc k e = Just <$> do
-           label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k) # set UI.class_ "fixed-label col-xs-11"
-           element e # set UI.class_ "col-xs-1"
-           UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+          label <- UI.div # set UI.text (T.unpack $ lookDesc ) # set UI.class_ "fixed-label col-xs-11"
+          element e # set UI.class_ "col-xs-1"
+          UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
 
-      bset <- tableChooser inf  kitems (fst <$> triding tfilter ) (snd <$> triding tfilter)  (schemaName inf) (snd (username inf)) initKey
+      bset <- tableChooser inf  kitems (fst <$> triding tfilter ) (snd <$> triding tfilter) initKey
       posSel <- positionSel
       (sidebar,calendarT) <- calendarSelector
       tbChooser <- UI.div
@@ -140,6 +123,9 @@ setup smvar bstate plugList w = void $ do
           # set UI.style ([("height","80vh"),("overflow","hidden")] ++ borderSchema inf)
           # set children [sidebar,posSel ^._1,getElement bset]
           # sink0 UI.style (facts $ noneShow <$> triding menu)
+      let cliTables = (fmap (!!six) <$> cliTid)
+      iniCliTable <- currentValue (facts cliTables)
+      ui $ accumDiffCounterIni (maybe 0 (length .table_selection)  iniCliTable) (\ix table->  trackTable (meta inf) (wId w) table six ix) (triding bset)
       tfilter <-  switchManyUI (pure (buttonStyle,const True)) (triding nav) (M.fromList
           [("Map",do
             (m,widget) <-  configExtension inf agendaDef (mapWidget calendarT posSel (triding bset) inf)
@@ -179,9 +165,13 @@ setup smvar bstate plugList w = void $ do
                   "Change" ->
                       case schemaName inf of
                         i -> do
+                          label <- flabel # set UI.text "Revert"
+                          refId <- primEditor (pure Nothing )
+                          button <- primEditor (pure (Just ()))
+                          traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
                           let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
                           dash <- metaTable inf "modification_table" pred
-                          element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
+                          element metabody # set UI.children [label,getElement refId,getElement button ,dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
                   "Stats" -> do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
                       stats_load <- metaTable inf "stat_load_table" pred
@@ -197,7 +187,7 @@ setup smvar bstate plugList w = void $ do
                 st <- once (buttonStyle,const True)
                 return  $ TrivialWidget st metaDiv),
           ("Browser" ,do
-            subels <- chooserTable  six  inf  bset (fmap (!!six) <$> cliTid) (wId w)
+            subels <- chooserTable  six  inf  bset cliTables (wId w)
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
@@ -322,7 +312,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
           let cli = AuthCookies (T.pack user) gen now
           inf <- loadSchema smvar schemaN  user auth plugList
           runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" gen
-          transaction metainf $ insertFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
+          transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
           return inf
       "code" -> do
           let auth = authMap smvar sargs (user,pass)
@@ -364,11 +354,14 @@ withTable s m w =
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         -- pred = WherePredicate $ lookAccess inf m <$>(AndColl [OrColl [PrimColl (IProd Nothing "scheduled_date",Left (IntervalTB1 (I.interval (I.Finite (TB1 (STime (SDate (utctDay now) ))),True) (I.Finite (TB1 (STime (SDate (utctDay (addUTCTime (3600*24*35) now))))),True)),Flip Contains))]])
         table = lookTable inf m
-    db <- transactionNoLog  inf $ selectFrom m Nothing Nothing []mempty
+    db <- transactionNoLog  inf $ selectFrom m Nothing Nothing [] pred
     i2 <- currentValue (facts $ collectionTid db)
     let
-        debug i = show <$> G.toList i
-    liftIO $ putStrLn (unlines $ debug i2))
+      debug i = show <$> G.toList i
+      -- debug2 i = show <$> G.projectIndex w i
+    liftIO $ putStrLn (unlines $ debug i2)
+    -- liftIO $ putStrLn (unlines $ debug2 i2)
+               )
 
 testCreate = withInf [] "metadata"
  (\inf -> liftIO $ createFresh "tables" inf "geo" (Primitive [KOptional] (RecordPrim ("metadata","geo"))))

@@ -8,8 +8,6 @@ import Data.List.NonEmpty hiding (fromList)
 import Safe as S
 import Prelude as P
 import Control.Lens as Le
-import Utils
-import GHC.Stack
 
 atMay :: NonEmpty a -> Int -> Maybe a
 atMay (i:| _) 0 = Just i
@@ -22,7 +20,7 @@ imap f = Le.imap f
 
 
 fromList :: [a] -> NonEmpty a
-fromList [] = errorWithStackTrace "empty list"
+fromList [] = error "empty list"
 fromList l = Non.fromList l
 
 

@@ -35,7 +35,6 @@ inferOperatorType ::
 inferOperatorType op  (Primitive l o) = Primitive (inferOp op l ) o
 inferOp (Flip (Flip e))  i = inferOp e i
 inferOp e (KOptional : i) = inferOp e i
-inferOp e (KDelayed : i) = inferOp e i
 inferOp e (KSerial : i) = inferOp e i
 inferOp Contains  (KInterval : i) = i
 inferOp Contains  (KArray : i) = KArray : i

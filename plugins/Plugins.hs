@@ -5,19 +5,19 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
-module Plugins (importargpx ,plugList,lplugOrcamento, siapi3Plugin) where
+module Plugins (plugList) where
 
 import qualified NonEmpty as Non
+import Data.Time.Format
 import System.Process
 import Data.Time
 import Data.Semigroup
 import Control.Monad.Catch
 import Location
 import Step.Host (findFK)
-import Data.Interval(Extended(..),interval,lowerBound',upperBound)
+import Data.Interval(Extended(..),upperBound)
 import PrefeituraSNFSE
 import Text
-import qualified Data.Vector as V
 import Data.Tuple
 import Incendio
 import DWGPreview
@@ -25,11 +25,8 @@ import Siapi3
 import CnpjReceita
 import OFX
 import Crea
-import  GHC.Stack
-import PandocRenderer
 import Gpx
 import Types
-import Types.Index
 import Types.Patch
 import Step.Client
 import RuntimeTypes
@@ -37,8 +34,7 @@ import Utils
 import Network.Mail.Mime
 import Control.Monad.Reader
 import Data.Functor.Apply
-import Debug.Trace
-import Data.Time.Parse
+-- import Debug.Trace
 import Prelude hiding (elem)
 import Data.Maybe
 import Data.Functor.Identity
@@ -56,11 +52,11 @@ import Data.String
 import Control.Arrow
 import qualified Data.Foldable as F
 
-
+{-
 lplugOrcamento = FPlugins "Orçamento" "pricing" $ IOPlugin renderProjectPricingA
 lplugContract = FPlugins "Contrato" "pricing" $ IOPlugin renderProjectContract
 lplugReport = FPlugins "Relatório" "pricing" $ IOPlugin renderProjectReport
-
+-}
 siapi2Hack = FPlugins pname tname $ IOPlugin  url
   where
     pname ="Siapi2 Hack"
@@ -94,7 +90,7 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
       b <- act  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  ) -<  ( protocolo , ano )
       let ao (sv,bv)  = Just $ kvlist   $ svt  sv <> [iat bv]
           convertAndamento :: [String] -> KV Text Showable
-          convertAndamento [da,des] =  kvlist $ attrT Control.Applicative.<$> ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  kvlist $ attrT Control.Applicative.<$> ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. justError "wrong date parse" $  parseTimeM True defaultTimeLocale "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           svt bv = catMaybes $ fmap attrT . (traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) . swap) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
@@ -389,7 +385,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
                          ) -< ()
 
         b <- act (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k ) -<   ( BS.pack . renderShowable $ protocolo  ,BS.pack . renderShowable $ ano  ,cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ kvlist  $ attrT Control.Applicative.<$> ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ kvlist  $ attrT Control.Applicative.<$> ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc.  justError "wrong date parse" $  parseTimeM True defaultTimeLocale "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  kvlist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
             iat bv = IT "andamentos"
@@ -633,10 +629,10 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
           tbst :: Maybe (TBIdx Text Showable)
           tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 
-      returnA -< traceShowId tbst
+      returnA -< tbst
     ofx (TB1 (SText i),TB1 (SBinary r))
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r)
-    ofx i = errorWithStackTrace (show i)
+    ofx i = error (show i)
 
 
 notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ DiffIOPlugin url
@@ -759,10 +755,10 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       r <- atR "crea_register"
           ((,,) <$> varTB "crea_number" <*> varTB "crea_user" <*> varTB "crea_password") -< t
       v <- act (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) -< (,) i r
-      let artVeri dm = ("verified_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
-          artPayd dm = ("payment_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
+      let artVeri dm = ("verified_date" ,) . opt (timestamp .localTimeToUTC utc ) . join $ (\d -> parseTimeM True defaultTimeLocale "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
+          artPayd dm = ("payment_date" ,) . opt (timestamp .localTimeToUTC utc ) . join $ (\d -> parseTimeM True defaultTimeLocale "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ kvlist $ attrT Control.Applicative.<$> [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [ subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , {-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [ subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , {-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]

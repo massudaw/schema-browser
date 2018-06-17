@@ -3,7 +3,6 @@
 module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
-import Data.Map (Map)
 import Types hiding (Parser,double)
 import Postgresql.Types
 import Data.Dynamic
@@ -13,60 +12,42 @@ import Postgresql.Printer
 import RuntimeTypes
 import Control.Monad.Trans.Class
 import Control.Monad.RWS
+import Data.Time.Format
 import Data.Ord
 import qualified Data.Aeson as A
 import qualified Control.Lens as Le
 import qualified Data.Aeson.Types as A
-import qualified Data.Vector as V
 import qualified Data.Foldable as F
 import Data.Either
 import Utils
-import Control.Monad
 import qualified NonEmpty as Non
-import NonEmpty (NonEmpty (..))
 import Query
-import GHC.Stack
-import Debug.Trace
 import qualified Data.Binary as B
-import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
 import Data.Bits
-import qualified  Data.Map as M
 import Data.Tuple
 import Data.Time.Clock
 import Data.String
-import Data.Attoparsec.Combinator (lookAhead)
 import Control.Applicative
-import Control.Monad.IO.Class
 import qualified Data.Serialize as Sel
 import Data.Maybe
 import qualified Data.ExtendedReal as ER
 import qualified Data.ByteString.Base16 as B16
-import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import           Data.Attoparsec.ByteString.Char8 as C hiding (Result)
 import Data.Traversable (traverse)
-import qualified Data.Traversable  as Tra
 import Data.Time.LocalTime
 import qualified Data.List as L
 import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
-
-import Data.Monoid
 import Prelude hiding (takeWhile,head)
-
-
-import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Set as S
 import Database.PostgreSQL.Simple.Time
 import qualified Database.PostgreSQL.Simple.FromField as F
-import Database.PostgreSQL.Simple.FromRow (field)
-import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import qualified Database.PostgreSQL.Simple.ToRow as TR
@@ -101,7 +82,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
         where
           toFiel (KOptional : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
           toFiel (KSerial : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
-          toFiel (KDelayed : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
+          toFiel (KSerial : k ) i = toFiel  k i
           toFiel (KArray : k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (Primitive (KArray :k) n )))
           toFiel (KInterval : k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (Primitive  (KInterval: k) n ) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
           toFiel [] (TB1 i) = TF.Many [TF.toField (kp,i) ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
@@ -212,10 +193,10 @@ instance TF.ToField SGeo where
   toField (SBounding t) = TF.toField t
   toField t = TF.toField (UnQuoted t)
 
-instance TF.ToField (Prim KPrim (Text,Text), Showable) where
+
 instance TF.ToField (KPrim,Showable) where
   toField (PDynamic "ftb_showable", SDynamic (HDynamic t)) = TF.toField (Binary  $ B.encode (justError "wrong type " $ fromDynamic t :: FTB Showable))
-  toField (PDynamic "row_index", SDynamic (HDynamic t)) = TF.toField (Binary  $ B.encode (justError "wrong type " $ fromDynamic t :: TBIndex Showable))
+  toField (PDynamic "row_index", SDynamic (HDynamic t)) = TF.toField (Binary  $ B.encode (justError "wrong type " $ fromDynamic t :: [TBIndex Showable]))
   toField (PDynamic "row_operation", SDynamic (HDynamic t)) = TF.toField (Binary  $ B.encode (justError "wrong type " $ fromDynamic t :: RowOperation Text Showable))
   toField (_,i) = TF.toField i
 
@@ -263,7 +244,7 @@ parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   return $KV im
 
 decodeDynamic :: String -> BSL.ByteString  -> Showable
-decodeDynamic "row_index" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: TBIndex Showable)
+decodeDynamic "row_index" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: [TBIndex Showable])
 decodeDynamic "ftb_showable" i = SDynamic . HDynamic . toDyn $ (B.decode i :: FTB Showable)
 decodeDynamic "showable" i = SDynamic . HDynamic . toDyn $ (B.decode i :: Showable)
 decodeDynamic "row_operation" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: RowOperation Text Showable)
@@ -289,8 +270,8 @@ parsePrimJSON i  v =
       PTime t -> fmap STime <$> case t of
         PInterval ->  A.withText (show i) (either (error "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
         PTimestamp _ ->  A.withText (show i) (\s -> either fail (return .STimestamp )  (parseUTCTime (BS.pack . T.unpack $s)  <|> parseUTCTime (BS.pack . T.unpack $s <> "Z")))
-        PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
-        PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
+        PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay) . parseTimeM True defaultTimeLocale "%H:%M:%OS" . T.unpack)
+        PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay ) . parseTimeM True defaultTimeLocale "%Y-%m-%d" .T.unpack)
       PGeom ix a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom ix a). fst . B16.decode .BS.pack . T.unpack)
 
       i -> error ("not defined " <> show i)
@@ -340,8 +321,6 @@ tryquoted parser = do
 
 parseShowableJSON  fun p@(Primitive l i) v = fix parseKTypePrim l v
   where
-    parseKTypePrim f (KDelayed :i) (A.Bool b)
-      =  if b then return (LeftTB1 Nothing)  else fail "no error"
     parseKTypePrim f (KSerial :i)  v = LeftTB1 . Just <$> f i v
     parseKTypePrim f (KOptional :i ) v =
       case v of

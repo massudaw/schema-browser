@@ -16,7 +16,6 @@ module Step.Common (
   ) where
 
 import Types.Common
-import Control.Arrow.Transformer.Static
 import Data.Binary
 import Types.Primitive
 import Data.Tuple
@@ -64,13 +63,6 @@ deriving instance Functor m => Functor (Kleisli m i )
 
 static (P i _ ) = i
 
-
-
-newtype StaticEnv  m t k v = StaticEnv (StaticArrow ((,) (t,t))  m  k v ) deriving (Arrow , Functor,Applicative , Category)
-
-instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (StaticEnv a s i m) where
-  mempty = StaticEnv $ StaticArrow (mempty ,pure mempty)
-  mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow (j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
 
 instance (Ring s ,Arrow m)  => Arrow (Parser m s) where
   arr f = P one (arr f )

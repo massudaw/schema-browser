@@ -1,41 +1,26 @@
 {-# LANGUAGE BangPatterns,FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
 module TP.Widgets where
 
-
-import Control.Concurrent.Async
+import PStream
 import Control.Monad.Writer hiding((<>))
-import Control.Monad
-import Types.Patch
-import Control.Arrow(first)
-import Data.Tuple(swap)
-import qualified Control.Monad.Trans.Writer as Writer
-import GHC.IO.Unsafe
-import Control.Monad
 import Data.Ord
+import qualified Types.Patch as P
 import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
+import Types.Patch
 import Graphics.UI.Threepenny.Core hiding (delete)
 import Graphics.UI.Threepenny.Internal (wTimeZone)
-
 import qualified Data.Map as M
 import qualified Data.Foldable as F
-import Data.Time.LocalTime
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Semigroup
-import Data.Foldable (foldl')
 import Data.Interval (Interval(..))
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
 import qualified Data.List as L
 import Data.Maybe
 import Control.Concurrent
-import qualified Data.Aeson as JSON
-
-import Safe
-
-
-import Debug.Trace
 import Utils
 
 instance Widget (TrivialWidget  a) where
@@ -69,14 +54,11 @@ evalUI el f = liftIO (getWindow el) >>= \w ->  runUI w f
 evalDyn el f = getWindow el >>= \w -> fmap fst $ runDynamic $ runUI w f
 
 
-
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
 adEvent ne t = do
   c <- currentValue (facts t)
   let ev = unionWith const (rumors t) ne
   ui $ stepperT c ev
-
-
 
 liftEvent :: Event (Maybe a) -> (MVar (Maybe a) -> IO  void) -> Dynamic ()
 liftEvent e h = do
@@ -272,39 +254,23 @@ items = mkWriteAttr $ \i x -> void $ do
   c <- i
   return x # set children c
 
-appendItems :: WriteAttr Element [UI Element]
-appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
-
--- Simple checkbox
-buttonClick :: Tidings Bool -> Behavior (Bool -> UI Element )  -> UI (TrivialWidget Bool)
+-- Boolean button
+buttonClick :: Tidings Bool -> Behavior (Bool -> UI Element) -> UI (TrivialWidget Bool)
 buttonClick init style = mdo
   i <- UI.button # sink items (fmap (fmap pure) $ ($) <$> style  <*> facts t)
   ev <- UI.click i
-  let e = unionWith (.) (const <$> rumors init) (const True <$ ev)
+  let e = unionWith (.) (const <$> rumors init) (not <$ ev)
   v <- currentValue (facts init)
   t <- ui $ accumT v e
   return $ TrivialWidget  t i
-
-
-checkedWidget :: Tidings Bool -> UI (TrivialWidget Bool)
-checkedWidget init = do
-  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (facts init)
-  ev <- UI.checkedChange i
+buttonAction :: Tidings () -> UI (TrivialWidget ())
+buttonAction init = do
+  i <- UI.button # set UI.text "Submit"
+  ev <- UI.click i
   let e = unionWith const (rumors init) ev
   v <- currentValue (facts init)
-  b <- ui$ stepper v e
-  dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
-  return $ TrivialWidget  (tidings b e) dv
-
-checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
-checkedWidgetM init = do
-  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (maybe False id <$> facts init)
-  ev <- UI.checkedChange i
-  let e = unionWith const (rumors init) (Just <$>  ev )
-  v <- currentValue (facts init)
-  b <- ui $ stepper v e
-  dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
-  return $ TrivialWidget  (tidings b e) dv
+  t <- ui $ stepperT v e
+  return $ TrivialWidget  t i
 
 
 wrapListBox l p  q = do
@@ -426,6 +392,7 @@ listBoxEl :: (Eq a , Show a) => Element
     -> UI (TrivialWidget (Maybe a))
 
 listBoxEl = listBoxElEq (==)
+
 listBoxElEq ::
     forall a . Show a => (a -> a -> Bool)
     ->  Element
@@ -441,8 +408,8 @@ listBoxElEq eq list bitems bsel bdisplay = do
         bindex   = lookupIndex <$> facts bitems <#> bsel
         lookupIndex indices Nothing    = Nothing
         lookupIndex indices (Just sel) = L.findIndex (eq sel)  indices
-        els = liftA2 (\i j -> mapM (\ix ->  UI.option # j ix ) i) bitems bdisplay
-    element list # sink items (facts els )
+        els = liftA2 (\j -> mapM (\ix ->  UI.option # j ix )) bdisplay bitems
+    element list # sink items (facts els)
 
     -- animate output selection
 
@@ -455,8 +422,7 @@ listBoxElEq eq list bitems bsel bdisplay = do
 
     -- user selection
     selEv <- fmap Just <$> UI.selectionChange list
-    s <- ui $ calmE selEv
-    selBh <- ui $stepper   Nothing s
+    selBh <- ui $ stepper  Nothing selEv
     let
         eindexes = (\l i-> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <#> tidings selBh selEv
     let
@@ -496,7 +462,7 @@ multiListBoxEl :: forall a.( Ord a,Show a)
     -> UI (TrivialWidget [a])
 multiListBoxEl el bitems pbsel bdisplay = do
     bsel <- ui $ cacheTidings pbsel
-    list <- element el # set UI.multiple True
+    _elementMLB <- element el # set UI.multiple True
 
     -- animate output items
 
@@ -506,32 +472,26 @@ multiListBoxEl el bitems pbsel bdisplay = do
         lookupIndex indices sel = catMaybes $ (flip M.lookup indices) <$> sel
 
         els = liftA2 (\i j -> mapM (\ix ->  UI.option # j ix ) i) bitems bdisplay
-    element list # sink items (facts els )
+    element _elementMLB # sink items (facts els )
 
     -- animate output selection
 
 
-    element list # sinkDiff selectedMultiple bindex
+    element _elementMLB # sinkDiff selectedMultiple bindex
 
     -- changing the display won't change the current selection
     -- eDisplay <- changes display
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
-    sel <- selectionMultipleChange list
+    sel <- selectionMultipleChange _elementMLB
     let bindices2 :: Tidings (M.Map Int a)
         bindices2 = M.fromList . zip [0..] <$> bitems
         eindexes = lookupIndex <$> facts bindices2 <@> sel
     e <- currentValue (facts bsel)
-    let
-        -- eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
-        ev =  foldr1 (unionWith const) [eindexes]
-    bsel2 <- ui $ stepper e ev
-    let
-        _selectionMLB = tidings bsel2 ev
-        _elementMLB   = list
+    _selectionMLB <- ui $ stepperT e eindexes
 
-    return $ TrivialWidget (_selectionMLB ) (_elementMLB)
+    return $ TrivialWidget _selectionMLB _elementMLB
 
 
 sink0 :: ReadWriteAttrMIO UI b i o -> Behavior i -> UI b -> UI b
@@ -561,6 +521,8 @@ infixl 4 <#>
 (<#>) :: Behavior (a -> b) -> Tidings a -> Tidings b
 b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
+(<#) :: Behavior b  -> Tidings a -> Tidings b
+b <#  t = tidings  b  (b <@ rumors t)
 fileChange :: Element -> UI (Event (Maybe String))
 fileChange el = domEventAsync "change" el (\call ->ffi "handleFileSelect(%1,%2,$(%3))" call UI.event el)
 
@@ -591,13 +553,6 @@ pruneTidings chw tds =   tidings chkBH chkAll
 
 
 
-testDyn = do
-  list <- multiListBox (pure [1,2,3,4,5]) (pure $ [1])  (pure (line.show))
-  b <- checkedWidget (pure True)
-  out <- ui $ accumDiff (\i -> evalUI (getElement list) $ do
-    UI.div # set text (show i) # sink UI.style (noneShow <$> facts (triding b)))  (fmap S.fromList  $ triding list)
-  nest <- UI.div # sink children (F.toList <$> facts out)
-  UI.div # set children [getElement list,getElement b,nest]
 
 importUI f = do
     runFunction $ ffi "jQuery.ajaxSettings.cache = true"
@@ -611,34 +566,19 @@ css ref =  mkElement "link" # set UI.href ("/static/"<> ref)# set UI.rel "styles
 js ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ("/static/"<> ref)
 jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ref
 
-
-
 testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })
-        ( \w ->  do
+        (\w ->  do
               els <- e
               addBody [els]
               return ())(return 1)
 
-
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 hlabel h = UI.span # set UI.class_ (L.intercalate " "$ ["label","label-default"] ++ h )
 
-
-
 infixl 4 <$|>
-
 
 (<$|>) = traverseUI
 
--- | Returns a new behavior that only notifies for new values.
-calmB :: Eq a => Behavior a -> Dynamic (Behavior a)
-calmB b = do
-  (e, trigger) <- newEvent
-  current <- currentValue b
-  -- liftIO $ trigger current
-  onChangeDynIni [] b (liftIO . trigger)
-  eCalm <- calmE e
-  fmap (fromMaybe (error "calmB")) <$> stepper Nothing (Just <$> eCalm)
 
 data Memory a = Empty | New a | Same a
 updateMemory :: Eq a => a -> Memory a -> Memory a
@@ -651,20 +591,42 @@ isNew (New x) = Just x
 isNew _ = Nothing
 
 -- | Returns a new 'Event' that skips consecutive triggers with the same value.
-calmE :: Eq a => Event a -> Dynamic (Event a)
-calmE e =
-  filterJust . fmap isNew <$> accumE Empty (updateMemory <$> e)
+calmE :: Eq a => Memory a  -> Event a -> Dynamic (Event a)
+calmE ini e =
+  filterJust . fmap isNew <$> accumE ini (updateMemory <$> e)
 
 
 calmT :: Eq a => Tidings a -> Dynamic (Tidings a )
 calmT t = do
-  (e, trigger) <- newEvent
   current <- currentValue (facts t)
-  -- liftIOLater $ trigger current
-  onChangeDynIni [] (facts t) (liftIO . trigger)
-  eCalm <- calmE (rumors t)
-  bh <- stepper current eCalm
-  return $ tidings bh eCalm
+  eCalm <- calmE (New current) (rumors t)
+  stepperT current eCalm
+
+switchManyUIDiff
+  :: (Semigroup a1, Ord a, Show a) =>
+     Tidings a1
+     -> Tidings a
+     -> Map a (UI (TrivialWidget a1))
+     -> UI (TrivialWidget a1)
+switchManyUIDiff t bool map = do
+  (evp,h) <- ui newEvent
+  let
+    fun x = do
+      case M.lookup x map of
+        Just i -> do
+          TrivialWidget ts el <- i
+          onChanges (facts ts) (liftIO . h)
+          return el
+        Nothing -> error ("no ix " ++ (show x))
+
+  els <- traverseUI fun bool
+  out <- UI.div # sink root (facts els)
+  ini <- currentValue (facts t)
+  let ev =  unionWith (<>) (rumors t) evp
+  b <- ui $ stepper ini ev
+  return (TrivialWidget (tidings b ev) out)
+
+
 
 switchManyUI
   :: (Ord a, Show a) =>
@@ -689,6 +651,17 @@ switchManyUI t bool map = do
   let ev =  unionWith const (rumors t) evp
   b <- ui $ stepper ini ev
   return (TrivialWidget (tidings b ev) out)
+
+
+
+switchUIDiff
+  :: Semigroup a1 => Tidings a1
+     -> UI Element
+     -> Tidings Bool
+     -> UI (TrivialWidget a1)
+     -> UI (TrivialWidget a1)
+switchUIDiff t def bool next  = switchManyUIDiff t bool (M.fromList [(True,next),(False , TrivialWidget t <$> def )])
+
 
 
 switchUI

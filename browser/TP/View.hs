@@ -8,7 +8,6 @@ module TP.View where
 
 import qualified Data.Aeson as A
 import Utils
-import SchemaQuery (fixrel)
 import Safe
 import qualified NonEmpty as Non
 import Data.Functor.Identity
@@ -87,8 +86,8 @@ geoPred inf tname geofields (ne,sw) = geo
   where
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
-        PrimColl .
-          fixrel . (, Left (makeInterval (_keyAtom nty)  (sw,ne) ,op nty))
+      PrimColl .
+        fixrel . (, Left (makeInterval (_keyAtom nty)  (sw,ne) ,op nty))
             $ index
       where
         nty= relType index
@@ -117,7 +116,6 @@ timePred inf tname evfields (incrementT,resolution) = time
         go (f:i) = case f of
              KInterval -> IntersectOp
              KOptional -> go i
-             KDelayed -> go i
              KSerial  -> go i
              i -> error ("type not supported : " ++ show i)
     ref (Primitive f a) =  case a of

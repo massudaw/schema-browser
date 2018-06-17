@@ -13,7 +13,7 @@ import Control.Applicative
 
 import Data.Maybe
 import Text.Read
-import Data.Time.Parse
+import Data.Time.Format
 import Text.XML.HXT.Core
 
 
@@ -62,7 +62,7 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- deep getText <<< atTag "ele" -< x
     time <- deep getText <<< atTag "time" -< x
-    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  localTimeToUTC utc . fromJust $ fst Control.Applicative.<$> strptime "%Y-%m-%dT%H:%M:%SZ" time )]
+    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  localTimeToUTC utc . fromJust $ parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" time )]
 
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"

@@ -1,8 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE UndecidableInstances #-}
 module Postgresql.Printer
   (selectQuery
   ,codegen
@@ -24,41 +22,32 @@ module Postgresql.Printer
   )
   where
 
-import Utils
-import Types
-import qualified Types.Index as G
-import Types.Inference
-
-import Query
-
-import Postgresql.Sql.Types
-import Postgresql.Sql.Printer
-import Postgresql.Function
-import RuntimeTypes
-import qualified Data.Poset as P
-import Postgresql.Types
-import Data.Ord
-import Data.String
-import Step.Host (findFK,findAttr)
-import NonEmpty (NonEmpty(..))
-import Data.Functor.Apply
-import Data.Bifunctor
-import qualified Data.Foldable as F
-import Data.Maybe
-import Data.Monoid hiding (Product)
-
-import qualified Data.Text as T
-
-
+import Control.Applicative
 import Control.Monad
 import Control.Monad.RWS
-import Control.Applicative
+import Data.Bifunctor
+import qualified Data.Foldable as F
 import Data.Functor.Identity
 import qualified Data.List as L
 import qualified Data.Map as M
+import Data.Maybe
+import Data.Ord
+import qualified Data.Poset as P
 import qualified Data.Set as S
+import Data.String
+import qualified Data.Text as T
 import Data.Text (Text)
-
+import NonEmpty (NonEmpty(..))
+import Postgresql.Sql.Printer
+import Postgresql.Sql.Types
+import Postgresql.Types
+import Query
+import RuntimeTypes
+import Step.Host (findAttr)
+import Types
+import qualified Types.Index as G
+import Types.Inference
+import Utils
 
 data Relation k
   = RelInline k
@@ -78,6 +67,10 @@ type CodegenT m = RWST [Address Key] String NameMap m
 type Codegen = RWST [Address Key] String NameMap Identity
 
 
+mkKey
+  :: (MonadReader [p] m, MonadState (a, (b, M.Map [p] b)) m, Num b,
+      Ord p) =>
+     p -> m b
 mkKey i = do
   (c,m) <- snd <$> get
   path <- ask
@@ -92,6 +85,7 @@ mkTable i = do
   modify (\(_,j) -> (next,j))
   return (c+1)
 
+atTable :: MonadReader [Address k] m => KVMetadata k -> m a -> m a
 atTable m = local (++ [Root m])
 
 
@@ -130,19 +124,10 @@ lkFK k = lkKey (TableReference $ RelFK k)
 
 newTable m = mkTable (Root m)
 
-tableLabel :: (MonadState
-                  (Int, Int, M.Map [Address Key] Int)
-                  (RWST [Address Key] String NameMap Identity)) => KVMetadata Key -> Codegen Text
-tableLabel m = do
-  (i,k,j) <- get
-  path <- ask
-  return $ "t" <> T.pack (show (justError "no table" (M.lookup (path++[Root m]) j )))
-
-
 dropTable :: Table -> Text
 dropTable r= "DROP TABLE "<> rawFullName r
 
--- createTable :: Table -> Text
+createTable :: TableK (FKey (KType Text)) -> Text
 createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$>  (rawAttrs r) ) <> [renderPK] <> fmap renderFK ( rawFKS r)
@@ -196,6 +181,11 @@ expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta $ (\t -> do
 
 sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
 
+asNewTable
+  :: (MonadReader [Address k] m,
+      MonadState ((a, M.Map [Address k] a), b) m, Num a, Ord k,
+      Show a) =>
+     KVMetadata k -> (Text -> m SQLRow) -> m SQLRow
 asNewTable meta action = do
   tidx <- newTable meta
   let name =    "t" <> T.pack (show tidx)
@@ -312,7 +302,7 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 inner :: Text -> Text -> Text -> Text
 inner b l m = l <> b <> m
 
-intersectionOp :: (Eq b,Show b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> BinaryOperator -> KType (Prim KPrim b)-> (Text -> Text -> Text)
+intersectionOp :: (Eq b,Show b,Show b ) => KType (Prim KPrim b)-> BinaryOperator -> KType (Prim KPrim b)-> (Text -> Text -> Text)
 intersectionOp i op (Primitive (KOptional :xs) j) = intersectionOp i op (Primitive xs j)
 intersectionOp (Primitive (KOptional :xs) i) op j = intersectionOp (Primitive xs i)  op j
 intersectionOp (Primitive [] j) op (Primitive (KArray :_) i )
@@ -334,9 +324,6 @@ explodeDelayed inf m _ t@(Attr k  _ )
   = foldr (=<<) prim (eval<$>kty)
   where
     Primitive kty (AtomicPrim _) = keyType k
-    eval KDelayed = \p -> do
-      l <- lkTB t
-      return $ " case when " <> l <> " is not null then true else null end  as " <> l
     eval _ = return
     prim =  do
       l <- lkTB t
@@ -409,6 +396,12 @@ indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldLU inf
 indexFieldLU inf m e c (ISum nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
 indexFieldLU inf m e c (One nt) v = flip (indexFieldL inf m e c) v  nt
 
+utlabel
+  :: Either (FTB Showable, BinaryOperator) UnaryOperator
+     -> [Text]
+     -> (FKey (KType (Prim KPrim (Text, Text))), Text)
+     -> (Maybe Text,
+         Maybe (KType (Prim KPrim (Text, Text)), FTB Showable))
 utlabel (Right  e) c idx = result e idx
   where
     opvalue  ref i  =  T.intercalate "." (c ++ [ref])  <> " is " <> renderUnary i
@@ -453,6 +446,9 @@ recurseOp i o k | isJust rw =  justError "rw" rw
   where rw = M.lookup (i,o,k)  rewriteOp
 recurseOp i o k = renderBinary o
 
+tlabel' ::
+     TB Key a
+     -> Codegen (Key, Text)
 tlabel' t@(Attr k _) =  do
   l <- lkTB t
   return (k,l)
@@ -474,11 +470,12 @@ loadDelayedQuery
      -> RWST [Address Key] String NameMap Identity Text
 loadDelayedQuery inf m v delayed= do
   tq <- expandBaseTable m v
+  tquery <- expandQuery' inf m False v
   rq <- explodeRecord inf m delayed
   out <- atTable m $ mapM (\i-> do
     v <- lkTB (Attr i (TB1 ()))
     return $   v  <>  " = ?") (_kvpk m)
   let whr = T.intercalate " AND " out
-  return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
+  return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow (tquery tq )<> " WHERE " <> whr <> ") as q "
 
 

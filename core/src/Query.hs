@@ -18,7 +18,6 @@ module Query
   ,searchGist
   ,rawFullName
   ,isTableRec'
-  ,isKDelayed
   ,isKOptional
   ,checkGist
   ,backFKRef
@@ -40,34 +39,23 @@ module Query
 import Data.Tuple(swap)
 import Control.Arrow (first)
 import qualified Control.Lens as Le
-import NonEmpty (NonEmpty(..))
-import qualified Data.Vector as V
 import qualified NonEmpty as Non
-import Data.Time.LocalTime
-import Data.Unique
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
-import Debug.Trace
 import qualified Data.Traversable as Tra
 import Data.Maybe
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
-import qualified Data.Text as T
-import qualified Data.ExtendedReal as ER
 import Utils
 import Control.Monad
-import System.IO.Unsafe
 import Control.Applicative
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
 import Data.Set (Set)
-import Data.Map (Map)
-import Control.Monad.State
 import Data.Text (Text)
-import GHC.Stack
 import Types
 import qualified Types.Index as G
 
@@ -109,7 +97,6 @@ transformKPrim ki kr v
     | otherwise = error ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 
-isKDelayed (Primitive l _)  = isJust  $ L.find (==KDelayed) l
 isKOptional (Primitive (KOptional :_ ) i) = True
 isKOptional _ = False
 
@@ -169,7 +156,7 @@ isPairPrimReflexive i op  j = error $ "isPairPrimReflexive " <> show i <> " - " 
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
 reflexiveRel ks
---  | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
+  | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
   | any (\j -> not $ isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) ( keyType (_relTarget j) )) ks =  const False
@@ -350,7 +337,7 @@ backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reo
           where knm =  M.lookup ko relTable
 
 
-tbpred m un  = G.notOptional . G.getUnique m un
+tbpred m un  = G.notOptional . G.getUnique  un
 
 kvToMap :: Ord k => KV k a -> M.Map k (FTB a)
 kvToMap  = M.mapKeys (_relOrigin . head .F.toList ) . fmap _tbattr . _kvvalues
@@ -381,9 +368,9 @@ searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relT
       where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
 
     lookSGist sidsx rel un pk  v =  join res
-      where res = fmap fst .flip G.lookup v <$> tbpredFK rel un sidsx pk
+      where res = fmap M.keys .flip G.lookup v <$> tbpredFK rel un sidsx pk
 
-    lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
+    lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . join . fmap safeHead . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 
 joinRel2 :: (Show k , Ord k,Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata k->  [(Rel k ,FTB a)] -> G.GiST (G.TBIndex a) (TBData k a) -> Maybe (FTB (TBData k a))
 joinRel2 tb ref table
@@ -406,4 +393,4 @@ joinRel2 tb ref table
 
 checkGist t un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM t  un pk)
 
-tbpredM m un  = G.notOptionalM . G.getUnique m un
+tbpredM m un  = G.notOptionalM . G.getUnique  un

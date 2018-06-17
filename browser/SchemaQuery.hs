@@ -1,106 +1,85 @@
-{-# LANGUAGE RecordWildCards,Arrows, RankNTypes ,RecursiveDo,TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
+{-# LANGUAGE RecordWildCards, Arrows, RankNTypes, RecursiveDo,
+  TypeFamilies, FlexibleContexts, OverloadedStrings, TupleSections
+  #-}
 module SchemaQuery
-  (createUn
-  ,takeMany
-  ,tablePK
-  ,resetCache
-  ,writeSchema
-  ,createFresh
-  ,fixfilters
-  ,fixrel
-  ,childrenRefsUnique
-  ,selectFromTable
-  ,tablePredicate
-  ,refTables'
-  ,lookAttrM
-  ,lookRef
-  ,lookAttr'
-  ,lookAttrs'
-  ,refTables
-  ,tellPatches
-  ,selectFrom
-  ,updateFrom
-  ,patchFrom
-  ,insertFrom
-  ,getFrom
-  ,deleteFrom
-  ,prerefTable
-  ,refTable
-  ,loadFKS
-  ,fullDiffInsert
-  ,fullDiffEdit
-  ,tableLoader'
-  ,fullDiffEditInsert
-  ,transaction
-  ,transactionNoLog
-  ,patchCheckInf
-  ,patchCheck
-  ,tableCheck
-  ,fromR
-  ,innerJoinR
-  ,leftJoinR
-  ,projectV
-  )where
-import Graphics.UI.Threepenny.Core (mapEventDyn)
-
-import RuntimeTypes
-import qualified Data.Interval as Interval
-import Environment
-import Control.Exception (throw)
-import Data.Unique
-import PStream
-import Data.Semigroup(Semigroup)
+  (
+  -- Clear in memory cache
+   resetCache
+  -- Flush to disk in memory DB
+  , writeSchema
+  -- Create fresh variables
+  , createFresh
+  -- Database Mutable Operations
+  , fullInsert
+  , fullEdit
+  , patchFrom
+  , deleteFrom
+  -- Database Read Only Operations
+  , selectFrom
+  , getFrom
+  , refTable
+  , refTables
+  , refTablesPorj
+  , tableLoaderAll
+  , selectFromTable
+  , refTables'
+  -- Pointer Only
+  , revertModification
+  , prerefTable
+  -- Cache Only Operations
+  , loadFKS
+  -- Transaction Operations
+  , transaction
+  , transactionNoLog
+  -- Constraint Checking
+  , tableCheck
+  -- SQL Arrow API
+  , fromR
+  , innerJoinR
+  , leftJoinR
+  , projectV
+  ) where
 import Control.Arrow (first)
-import Control.DeepSeq
-import Step.Host
-import Expression
-import System.Directory
-import Data.String (fromString)
-import qualified Data.Binary as B
-import Types.Primitive
-import Types.Index (checkPred)
-import Control.Concurrent
-import Control.Monad.Catch
 import Control.Arrow
-import Default
-
-import qualified Data.GiST.BTree as G
-import Control.Monad.RWS
-import Step.Common
-
-import Data.Time
-import qualified Control.Lens as Le
-import Database.PostgreSQL.Simple
-import Data.Either
-import Control.Concurrent.Async
-import Control.Monad.Trans.Maybe
-import qualified Data.Poset as P
-import Debug.Trace
-import Data.Ord
-import GHC.Stack
-import qualified NonEmpty as Non
-import Safe
-import Data.Functor.Identity
+import Control.Concurrent
+import Serializer
 import Control.Concurrent.STM
-import Reactive.Threepenny hiding (apply)
-import Utils
-import qualified Data.Map as M
-import qualified Data.HashMap.Strict as HM
-import qualified Data.Set as S
-import qualified Data.Traversable as Tra
-import qualified Data.List as L
+import Control.DeepSeq
+import Control.Exception (throw)
+import qualified Control.Lens as Le
+import Control.Monad.Catch
+import Debug.Trace
+import Control.Monad.RWS
+import Control.Monad.Trans.Maybe
+import qualified Data.Binary as B
+import Data.Either
 import qualified Data.Foldable as F
-import Types
-import Types.Patch
-import Query
-import qualified Types.Index as G
+import qualified Data.GiST.BTree as G
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Interval as Interval
+import qualified Data.List as L
+import qualified Data.Map as M
 import Data.Maybe
+import qualified Data.Poset as P
+import qualified Data.Set as S
+import Data.String (fromString)
 import qualified Data.Text as T
-
---
---  MultiTransaction Postgresql insertOperation
---
-
+import Data.Time
+import qualified Data.Traversable as Tra
+import Environment
+import Expression
+import qualified NonEmpty as Non
+import PStream
+import Query
+import Reactive.Threepenny hiding (apply)
+import RuntimeTypes
+import Safe
+import Step.Common
+import System.Directory
+import Types
+import qualified Types.Index as G
+import Types.Patch
+import Utils
 
 lookDBVar inf mmap table =
     case M.lookup table mmap of
@@ -112,16 +91,15 @@ lookDBVar inf mmap table =
 estLength page size est = fromMaybe 0 page * size  +  est
 
 resetCache :: InformationSchema -> IO ()
-resetCache inf = do
-  atomically $ modifyTVar (mvarMap inf) (const M.empty)
+resetCache inf = atomically $ modifyTVar (mvarMap inf) (const M.empty)
 
 
-prerefTable :: InformationSchema -> Table -> Dynamic (DBRef KeyUnique Showable)
+prerefTable :: InformationSchema -> Table -> Dynamic (DBRef Key Showable)
 prerefTable  inf table  = do
-  mmap <- liftIO $ atomically $ readTVar (mvarMap inf)
+  mmap <- liftIO $  readTVarIO (mvarMap inf)
   lookDBVar inf mmap table
 
-projunion :: InformationSchema -> Table -> TBData Key Showable -> TBData Key Showable
+projunion :: Show a=>InformationSchema -> Table -> TBData Key a -> TBData Key a
 projunion inf table = res
   where
     res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
@@ -164,20 +142,14 @@ refTable  inf table  = do
   return (DBVar2 ref idxTds  (primary <$> dbTds) (secondary <$>dbTds) )
 
 
-secondary (m,s,g) = s
-primary (m,s,g) = g
-
-
-createUn :: (Show k ,Ord k) => KVMetadata k -> [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
-createUn m un   =  G.fromList  (justError ("empty"  ++ show un) .transPred) .  filter (isJust . transPred)
-  where transPred =   G.notOptionalM . G.getUnique m un
-
-
+secondary (TableRep (m,s,g)) = s
+primary (TableRep (m,s,g)) = g
 
 
 selectFrom t a b c d = do
   inf <- askInf
-  tableLoader (lookTable inf t) a b c d
+  let tb = lookTable inf t
+  tableLoader  tb a b c d (allRec' (tableMap inf) tb)
 
 updateFrom  m a  pk b = do
   inf <- askInf
@@ -188,16 +160,25 @@ updateFrom  m a  pk b = do
     isUpdate (i,UpdateRule _ ) =  i (mapKey' keyValue a)
     isUpdate _ = False
   v <- case L.find isUpdate =<< overloaded of
-    Just (_,UpdateRule i) ->  i a b
-    Nothing -> (editEd $ schemaOps inf)m  a pk b
+    Just (_,UpdateRule i) -> i a b
+    Nothing -> (editEd $ schemaOps inf) m a pk b
   tellPatches m (pure v)
   return v
 
 patchFrom m  (pk,PatchRow a)   = do
   inf <- askInf
-  l <- (patchEd $ schemaOps inf)  m pk a
-  tellPatches m (pure l)
+  let l = (RowPatch (pk,PatchRow a))
+  asyncPatches m (pure l )
   return l
+
+
+fullInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
+fullInsert k1 v1 = createRow' k1 <$> recInsert k1 v1
+
+fullEdit ::  KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (RowPatch Key Showable)
+fullEdit k1 old v2 = do
+  i <- fullDiffEdit k1 old v2
+  return $ patchRow' k1 old i
 
 insertFrom  m a   = do
   inf <- askInf
@@ -212,9 +193,27 @@ insertFrom  m a   = do
   return  v
 
 
-getFrom a b = do
+getFrom m b = do
   inf <- askInf
-  (getEd $ schemaOps inf)  a b
+  v <- (getEd $ schemaOps inf)  m b
+  let toPatch :: TBData Key Showable -> RowPatch Key  Showable -> TBData Key Showable
+      toPatch b = (\(PatchRow i ) -> justError "no apply getFrom" $ applyIfChange b i).snd .unRowPatch
+      newRow = toPatch b <$> v
+      allFields = allRec' (tableMap inf) m
+      comp = recComplement inf (tableMeta m) b allFields
+  case newRow of
+    Just i -> do
+      resFKS  <- traverse (getFKS inf mempty m (maybeToList newRow)) comp
+      let
+        result :: Maybe (TBIdx Key Showable)
+        result = do
+          r <- newRow
+          res <- resFKS
+          res <- either (const Nothing) Just (res r) :: Maybe (TBData Key Showable)
+          diff b res
+      traverse (tell . pure . ((mempty,). FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow )) result
+      return result
+    Nothing ->  return Nothing
 
 deleteFrom  m a   = do
   inf <- askInf
@@ -231,25 +230,25 @@ deleteFrom  m a   = do
 
 
 paginateTable table pred = do
-    (ref,(nidx,(_,_,ndata))) <-  tableLoader' table  (Just 0) Nothing [] pred
-    let
-      check ix (i,tb2) = do
-          let
-            iempty = (IndexMetadata M.empty,G.empty)
-            next = ix +1
-            -- Check if estimated size exist and if is bigger then the next page size (next * pagesize)
-            -- or the current is already bigger or euqals the estimated
-            cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * 400 )  (lookIndexMetadata pred i)
-          output <- if cond
-              then  do
-                (_,(nidx,(_,_,ndata))) <- tableLoader' table  (Just next  ) Nothing []  pred
-                -- Check if nothing has changed  or no more data to load
-                if G.size ndata == G.size tb2
-                   then return iempty
-                   else check next (nidx,ndata)
-              else return iempty
-          return $ mergeDBRef (i,tb2) output
-    snd <$> check 0 (nidx,ndata)
+  (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll  table  (Just 0) Nothing [] pred Nothing
+  let
+    check ix (i,tb2) = do
+        let
+          iempty = (IndexMetadata M.empty,G.empty)
+          next = ix +1
+          -- Check if estimated size exist and if is bigger then the next page size (next * pagesize)
+          -- or the current is already bigger or euqals the estimated
+          cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * 400 )  (lookIndexMetadata pred i)
+        output <- if cond
+            then  do
+              (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll  table  (Just next  ) Nothing []  pred Nothing
+              -- Check if nothing has changed  or no more data to load
+              if G.size ndata == G.size tb2
+                 then return iempty
+                 else check next (nidx,ndata)
+            else return iempty
+        return $ mergeDBRef (i,tb2) output
+  snd <$> check 0 (nidx,ndata)
 
 predicate
   :: [Rel (FKey (KType a1))]
@@ -267,31 +266,32 @@ predicate i (WherePredicate l ) =
     removeArray (KArray : i)  (AnyOp o) = o
     removeArray i  o = o
 
-getFKRef inf predtop rtable (me,old) set (FKInlineTable  r j ) =  do
+-- getFKRef _  _   _  old i j |  traceShow (i,old)  False = undefined
+getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
     let
       rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
       table = lookTable rinf $ snd j
       editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $ Inline r)  i )
       nextRef :: [FTB (TBData Key Showable)]
-      nextRef= fmap (\i -> _fkttable $ justError "no it" $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) ) set
+      nextRef = fmap (\i -> _fkttable $ justError "no it" $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) ) set
 
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
-        joinFK <- getFKS rinf predtop table  refs
+        joinFK <- getFKS rinf predtop table  refs tbf
         let joined = editAttr joinFK
         return (me >=> joined,old <> S.singleton r)
       Nothing ->
         return (me ,old <> S.singleton r)
 
-getFKRef inf predtop rtable (me,old) v (FunctionField a b c) = do
+getFKRef inf predtop (me,old) v (FunctionField a b c) tbf = do
   let
     addAttr :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
     addAttr i = Right $ maybe i (\r -> (\(KV i) -> KV (M.insert (keyattrs r) r i) ) i) (evaluate  a b funmap c i)
   return (me >=> addAttr ,old <> S.singleton a )
 
-getFKRef inf predtop rtable (me,old) set (RecJoin i j) = getFKRef inf predtop rtable (me,old) set j
+getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
 
-getFKRef inf predtop rtable (me,old) set (FKJoinTable i j) =  do
+getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
         rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
         table = lookTable rinf $ snd j
@@ -299,7 +299,7 @@ getFKRef inf predtop rtable (me,old) set (FKJoinTable i j) =  do
         primPredicate o k  = do
           i <- unSOptional (_tbattr (lkAttr k o))
           return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-        lkAttr k = justError "no attr" . M.lookup (S.singleton (Inline (_relOrigin k)))
+        lkAttr k v = justError ("no attr " <> show k) $ M.lookup (S.singleton (Inline (_relOrigin k))) (_kvvalues $ tableNonRef (KV v))
         refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
         predm = refs <> predicate i predtop
     tb2 <-  case predm of
@@ -334,11 +334,12 @@ getFKS
      -> TBPredicate Key Showable
      -> TableK Key
      -> [TBData Key Showable]
+     -> KV Key ()
      -> TransactionM
         (TBData Key Showable -> Either
               ([TB Key Showable],[Rel Key])
               (TBData Key Showable))
-getFKS inf predtop table v = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return (return ,S.empty )) sorted
+getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (refLookup (pathRelRel f) tbf) )) (return (return ,S.empty )) sorted
   where
     sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table)
 
@@ -346,50 +347,56 @@ rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tabl
 
 mergeToken (TableRef i)  (TableRef j) = TableRef (Interval.hull i  j)
 
-type TableChannels k v =  (TChan (WherePredicateK k ,Int,Int,PageTokenF v),TChan [TableModificationU k v ])
+type TableChannels k v =  (TChan (IndexMetadataPatch k v), TChan [TableModificationU k v])
 
-tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
+tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TBData Key ()
     -> TransactionM DBVar
-tableLoader (Project table  (Union l)) page size presort fixed  = do
+tableLoader (Project table  (Union l)) page size presort fixed  tbf = do
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     inf <- askInf
     let
       dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure G.empty, pure (M.fromList $ (,G.empty)<$> _rawIndexes table) ) (mapDBVar inf table <$>i )
       dbvar (l,i,j,p) = DBVar2 (justError "head5" $ safeHead l) i j p
-    i <- mapM (\t -> tableLoader t page size presort (rebaseKey inf t  fixed)) l
+    i <- mapM (\t -> tableLoader t page size presort (rebaseKey inf t  fixed) (projunion inf t tbf)) l
     return $ dbvar (dbvarMerge i)
-tableLoader  table page size presort fixed = do
-  ((fixedChan,nchan),(nidx,(_,sidx,ndata))) <- tableLoader'  table page size presort fixed
+tableLoader  table page size presort fixed tbf = do
+  liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
+  ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page size presort fixed tbf
   let
-    tableU = fmap keyFastUnique table
-    fixedU = mapPredicate keyFastUnique fixed
+    tableU = table
+    fixedU = fixed
 
   inf <- askInf
-  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) (tableMeta table,sidx ,ndata) nchan
+  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
   idxTds <- lift $ convertChanStepper0 inf table nidx fixedChan
   dbvar <- lift $ prerefTable inf table
   return (DBVar2 dbvar idxTds (fmap primary vpt) (fmap secondary vpt))
 
-tableLoader' :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
-             -> TransactionM (TableChannels KeyUnique Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
-tableLoader' table  page size presort fixed = do
+tableLoader'
+  :: Table
+   -> Maybe Int
+   -> Maybe Int
+   -> [(Key,Order)]
+   -> WherePredicate
+   -> TBData Key ()
+   -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
+tableLoader' table  page size presort fixed tbf = do
   pageTable (\table page token size presort predicate -> do
-        inf <- askInf
-        let
-          unestPred (WherePredicate l) = WherePredicate $ go predicate l
-            where
-              go pred (AndColl l) = AndColl (go pred <$> l)
-              go pred (OrColl l) = OrColl (go pred <$> l)
-              go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
-              predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
-              predicate i  = [i]
-          tbf = allRec' (tableMap inf) table
-        (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (tableNonRef tbf) page token size presort (unestPred predicate)
-        resFKS  <- getFKS inf predicate table res
-        let result = fmap resFKS   res
-        liftIO $ when (not $ null (lefts result)) $ do
-          print ("lefts",tableName table ,lefts result)
-        return (rights  result,x,o )) table page size presort fixed
+    inf <- askInf
+    let
+      unestPred (WherePredicate l) = WherePredicate $ go predicate l
+        where
+          go pred (AndColl l) = AndColl (go pred <$> l)
+          go pred (OrColl l) = OrColl (go pred <$> l)
+          go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
+          predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
+          predicate i  = [i]
+    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (tableNonRef tbf) page token size presort (unestPred predicate)
+    resFKS  <- getFKS inf predicate table res tbf
+    let result = fmap resFKS   res
+    liftIO $ when (not $ null (lefts result)) $ do
+      print ("lefts",tableName table ,lefts result)
+    return (rights  result,x,o )) table page size presort fixed
 
 
 readTableFromFile
@@ -397,7 +404,7 @@ readTableFromFile
      -> T.Text
      -> TableK Key
      -> IO (Maybe
-             (IndexMetadata KeyUnique Showable, [TBData KeyUnique Showable]))
+             (IndexMetadata Key Showable, [TBData Key Showable]))
 readTableFromFile  inf r t = do
   let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
       s = schemaName inf
@@ -410,7 +417,7 @@ readTableFromFile  inf r t = do
         putStrLn ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
         return Nothing)
              (\(m,g) ->
-               return $ (Just (IndexMetadata $ M.fromList  m   ,  g) :: Maybe ( IndexMetadata KeyUnique Showable ,[TBData KeyUnique Showable])))  f
+               return $ (Just (IndexMetadata $ M.fromList  m   ,  g) :: Maybe ( IndexMetadata Key Showable ,[TBData Key Showable])))  f
       else return Nothing
 
 
@@ -419,54 +426,76 @@ predNull (WherePredicate i) = L.null i
 filterfixedS table fixed (s,v)
   = if predNull fixed
        then v
-       else queryCheckSecond (fixed ,rawPK table) (tableMeta table,s,v)
+       else queryCheckSecond (fixed ,rawPK table) (TableRep (tableMeta table,s,v))
 
+
+-- TODO : Remove recjoin hack and add state to ignore recursive inline tables without foreign keys
+--  What should be the behaviour for recursive inline tables with foreign keys? .
+--  Maybe this should be solved by the where predicate with some CTE like query, that returns recursive traces
 
 childrenRefsUnique
   :: InformationSchema
-  -> TableK KeyUnique
-  -> TableRep  KeyUnique Showable
-  -> (SqlOperation , [RowPatch KeyUnique Showable])
-  -> [RowPatch KeyUnique Showable]
-childrenRefsUnique  inf table (m,sidxs,base) (FKJoinTable rel j ,evs)  =  concat $ (\i -> search  i  sidx) <$>  evs
+  -> (Rel Key -> Rel Key)
+  -> SqlOperation
+  -> [((InformationSchema,Table),[RowPatch Key Showable] -> TableRep  Key Showable  -> [RowPatch Key Showable])]
+childrenRefsUnique  inf pre (RecJoin i j@(FKJoinTable _ _) ) = childrenRefsUnique inf pre j
+childrenRefsUnique  _  _  (RecJoin _ _ ) = []
+childrenRefsUnique  _  _  (FunctionField _ _ _ ) = []
+childrenRefsUnique  inf pre (FKInlineTable rel target)  =    concat $ childrenRefsUnique inf (pre .RelAccess [Inline rel] ) <$> fks
   where
-    rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
-    relf = fmap keyFastUnique <$> filterReflexive rel
-    jtable = lookTable rinf $ snd j
-    sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) sidxs
+    fks = rawFKS targetTable
+    rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
+    targetTable = lookTable rinf $ snd target
+childrenRefsUnique  inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
+   let
+    sidx = M.lookup (_relOrigin  <$> rel) sidxs
     search (RowPatch p@(G.Idex v,PatchRow pattr)) idxM
       = case idxM of
-        Just idx -> concat $ convertPatch  <$> resIndex idx
+        Just idx -> concat $ concat .fmap convertPatch  <$> resIndex idx
         Nothing -> concat $ convertPatch <$> resScan base
       where
-        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (RelAccess rel (Inline t) ,  [(t,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (justError "no key" $  t`L.elemIndex` rawPK jtable),op))] )) <$> rel  )
-        predKey =  mapPredicate keyFastUnique predK
-        resIndex idx = fmap (\(p,_,i) -> (p,i)) $ G.projectIndex (keyFastUnique . _relOrigin <$> rel) predKey idx
-        resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex m i,t), G.getUnique (tableMeta table) (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
-        convertPatch ((pk,ts),G.Idex fks) = (\t -> RowPatch (pk ,PatchRow  [PFK relf [] (recurseAttr t pattr)]) ) <$> ts
+        pkIndex t = justError "no key" $  t`L.elemIndex` pkTable
+        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre (Inline o) ,  [(o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> rel  )
+        predKey =  predK
+        resIndex idx = {- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $ -}
+           fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predKey idx
+        resScan idx = {- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx,predKey ,G.keys idx) $ -}
+           catMaybes $ fmap (\(i,t) -> (G.getIndex m i,t)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [ recurseAttr t pattr]) ) <$> ts
+        taggedRef :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
         taggedRef i p =  go i
           where
             go (G.ManyPath j ) = PatchSet $ go <$> j
             go (G.NestedPath i j ) = matcher i (go j)
-            go (G.TipPath j ) = PAtom p
+            go (G.TipPath j ) = PAtom (p j)
             matcher (PIdIdx ix )  = PIdx ix . Just
             matcher PIdOpt   = POpt . Just
-        recurseAttr (G.PathForeign  _ i ) p = taggedRef i p
-        recurseAttr (G.PathAttr _ i ) p = taggedRef i p
+        recurseAttr (G.PathForeign  _ i ) p = PFK relf [] $ taggedRef i (const p)
+        recurseAttr (G.PathInline r i ) p = PInline r $ taggedRef i   nested
+          where
+            nested  (Many i) =  concat $ nested <$> i
+            nested  (One i) =  [recurseAttr i p]
+        recurseAttr (G.PathAttr _ i ) p = PFK relf [] $ taggedRef i (const p)
         recurseAttr i p = error (show i)
+   in concat $ (\i -> search  i  sidx) <$>  evs))]
+  where
+    rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
+    relf = filterReflexive rel
+    targetTable = lookTable rinf $ snd target
+    pkTable = rawPK targetTable
 
 
 pageTable method table page size presort fixed = do
     inf <- askInf
     let mvar = mvarMap inf
-        tableU = fmap keyFastUnique table
-        fixedU = mapPredicate keyFastUnique fixed
+        tableU = table
+        fixedU = fixed
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else  presort
         pagesize = maybe (opsPageSize $ schemaOps inf) id size
     mmap <- liftIO . atomically $ readTVar mvar
     predbvar <- lift $ lookDBVar inf mmap table
-    ((IndexMetadata fixedmap,(_,sidx,reso)),dbvar)
+    ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- liftIO . atomically $
         cloneDBVar  (fixedU ,rawPK tableU) predbvar
     modify (M.insert (table,fixed) dbvar)
@@ -485,7 +514,7 @@ pageTable method table page size presort fixed = do
              let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
                  (_,mp) = fromMaybe (0,M.empty ) hasIndex
              (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
-             let res =  mapKey' keyFastUnique <$> resK
+             let res =  resK
                  -- # postFilter fetched results
                  resK = if predNull fixed then resOut else G.filterRows fixed resOut
                  -- # removeAlready fetched results
@@ -501,12 +530,12 @@ pageTable method table page size presort fixed = do
            else do
              return (fromMaybe (0,M.empty) hasIndex, reso)
          return $ (M.insert fixedU nidx fixedmap, sidx,ndata )
-    (nidx,sidx,ndata) <-  case hasIndex of
+    (nidx2,sidx2,ndata2) <-  case hasIndex of
           Just (sq,idx) -> case  M.lookup pageidx idx of
              Just v -> return (fixedmap , sidx,reso)
              Nothing -> readNew sq
           Nothing -> readNew maxBound
-    return ((fixedChan,nchan) ,(mapIndexMetadata (recoverKey inf ) (IndexMetadata nidx) ,(tableMeta table,mapSecondary (recoverKey inf) sidx,fmap (mapKey' (recoverKey inf)) ndata)))
+    return ((fixedChan,nchan) ,(IndexMetadata nidx2 ,TableRep(tableMeta table,sidx2, ndata2)))
 
 cloneDBVar
   :: (NFData k ,Show k,Ord k)
@@ -531,7 +560,7 @@ readIndex dbvar = do
   ini <- readTVar (idxVar dbvar)
   nchan <- cloneTChan (idxChan dbvar)
   patches <- tryTakeMany nchan
-  return (apply ini patches,nchan)
+  return (justError "no apply readIndex" $applyIfChange ini patches,nchan)
 
 readState
   :: (Show k ,Ord k ,NFData k)
@@ -539,33 +568,20 @@ readState
       -> DBRef k Showable
       -> STM (TableRep k Showable , TChan [TableModificationU k Showable])
 readState fixed dbvar = do
-  (m,s,v) <-readTVar (collectionState dbvar)
+  TableRep (m,s,v) <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- tryTakeMany chan
   let
     filterPred = filter (checkPatch  fixed)
-    update l v = apply l v
     fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result= update (m,s,fv) (filterPred  $ fmap tableDiff $ concat patches)
+    result=justError "no apply readState" $ applyIfChange (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
   return (result,chan)
 
 
--- Default Checks
-
-patchCheckInf ::  InformationSchema -> KVMetadata Key -> TBIdx Key Showable ->  Either String (TBIdx Key Showable)
-patchCheckInf inf m i = if isJust (createIfChange (defp  ++ i) :: Maybe (TBData Key Showable)) then Right i else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
-  where
-    defp = maybe (deftable inf  (lookTable inf (_kvname m  ))) (defaultTable inf (lookTable inf (_kvname m  )))  (createIfChange i)
-    available = S.unions $ S.map _relOrigin . index <$> i
-    need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
-
-
-patchCheck m (s,i) = if checkAllFilled then Right (s,i) else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
-  where
-      checkAllFilled =  need `S.isSubsetOf`  available
-      available = S.unions $ S.map _relOrigin . index <$> i
-      need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
-
+tableCheck
+  :: (Show t, Show a) =>
+     KVMetadata (FKey (KType t))
+     -> KV (FKey (KType t)) a -> Either [Char] (KV (FKey (KType t)) a)
 tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
   where
       checkAllFilled =  need `S.isSubsetOf`  available
@@ -579,53 +595,54 @@ dynFork a = do
 convertChanEventIndex inf table nchan = do
     (e,h) <- newEvent
     dynFork $ forever $ catchJust notException ( do
-            a <- atomically $ takeMany nchan
-            h (mapIndexMetadataPatch (recoverKey inf) <$> a )) (\e -> atomically (takeMany nchan) >>= (\d ->  putStrLn $ show ("error convertChanStep"  ,e :: SomeException,d)<>"\n"))
+      a <- atomically $ takeMany nchan
+      h ( a )) (\e -> atomically (takeMany nchan) >>= (\d ->  putStrLn $ show ("error convertChanStep"  ,e :: SomeException,d)<>"\n"))
     return e
+
 convertChanStepper0
   :: Show v =>
     InformationSchema
     -> TableK Key
     -> IndexMetadata Key v
-    -> TChan (WherePredicateK KeyUnique,Int,Int,PageTokenF v)
+    -> TChan (WherePredicateK Key,Int,Int,PageTokenF v)
     -> Dynamic
         (Tidings (IndexMetadata Key v ))
 convertChanStepper0  inf table ini nchan = do
     e <- convertChanEventIndex inf table nchan
-    toTidings <$> accumS  ini e
+    accumT  ini (flip apply <$> e)
 
 convertChan
   :: InformationSchema
   -> TableK Key
      -> (TBPredicate Key Showable, [Key])
-     -> DBRef KeyUnique Showable
+     -> DBRef Key Showable
      -> Dynamic
       (Tidings (IndexMetadata Key Showable ),Tidings (TableRep Key Showable))
 convertChan inf table fixed dbvar = do
   ((ini,result),cloneddbvar) <- liftIO $ atomically $
-    cloneDBVar (first (mapPredicate keyFastUnique ) $ fmap keyFastUnique <$> fixed) dbvar
-  (,) <$> convertChanStepper0 inf table (mapIndexMetadata (recoverKey inf) ini) (idxChan cloneddbvar)
-      <*> convertChanTidings0 inf table fixed (mapTableRep (recoverKey inf) result ) (patchVar cloneddbvar)
+    cloneDBVar ( fixed) dbvar
+  (,) <$> convertChanStepper0 inf table ( ini) (idxChan cloneddbvar)
+      <*> convertChanTidings0 inf table fixed ( result ) (patchVar cloneddbvar)
 
 convertChanEvent
   ::
     InformationSchema -> TableK Key
      -> (TBPredicate Key Showable, [Key])
      -> Behavior (TableRep Key Showable)
-     -> TChan [TableModificationU KeyUnique Showable]
+     -> TChan [TableModificationU Key Showable]
      -> Dynamic
           (Event [RowPatch Key Showable])
 convertChanEvent inf table fixed bres chan = do
   (e,h) <- newEvent
   dynFork $ forever $ catchJust notException (do
     ml <- atomically $ takeMany chan
-    (_,_,v) <- currentValue bres
+    TableRep (_,_,v) <- currentValue bres
     let
       meta = tableMeta table
-      m = firstPatchRow (recoverKey inf) . tableDiff <$> concat  ml
-      newRows =  filter (\d -> checkPatch fixed d && isNothing (G.lookup (index d) v) ) m
+      m =  tableDiff <$> concat  ml
+      newRows =  filter (\d -> checkPatch fixed d && L.any (\i -> isNothing  (G.lookup i  v)) (index d) ) m
       filterPred = nonEmpty . filter (checkPatch fixed)
-      filterPredNot j = nonEmpty . catMaybes . map (\d -> if isJust (G.lookup (index d) j) && not (checkPatch fixed d) then Just (RowPatch (index d,DropRow ))  else Nothing )
+      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i  j) ) (index d) && not (checkPatch fixed d) then Just (rebuild (index d) DropRow )  else Nothing )
       oldRows = filterPredNot v m
       patches = oldRows <> filterPred m
     traverse  h patches
@@ -633,7 +650,7 @@ convertChanEvent inf table fixed bres chan = do
   return e
 
 
-mapTableRep f (m,i,j)= (f <$> m, mapSecondary f i, mapPrimary f j)
+mapTableRep f (TableRep (m,i,j))= TableRep (f <$> m, mapSecondary f i, mapPrimary f j)
 mapSecondary f = M.mapKeys (fmap f) . fmap (fmap (fmap (fmap (G.mapAttributePath f))))
 mapPrimary  f = fmap (mapKey' f)
 
@@ -643,12 +660,11 @@ convertChanTidings0
   -> TableK Key
   -> (TBPredicate Key Showable, [Key])
   -> TableRep Key Showable
-  -> TChan [TableModificationU KeyUnique Showable]
+  -> TChan [TableModificationU Key Showable]
   -> Dynamic (Tidings (TableRep Key Showable))
 convertChanTidings0 inf table fixed ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed (facts t) nchan
-    s <- accumS ini evdiff
-    let t = toTidings s
+    t <- accumT ini (flip apply <$> evdiff)
     return  t
 
 tryTakeMany :: TChan a -> STM [a]
@@ -669,39 +685,39 @@ createRow (RowPatch (_,CreateRow i)) = i
 createRow (RowPatch (_,PatchRow i)) = create i
 
 
-fullDiffInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
-fullDiffInsert k1 v1 = do
-   inf <- askInf
-   ret <- KV <$>  Tra.traverse (tbInsertEdit k1) (unKV v1)
-   mod <- insertFrom k1 ret
-   return mod
 
+tableLoaderAll table  page size presort fixed tbf = do
+  inf <- askInf
+  tableLoader'  table page size presort fixed (fromMaybe (allRec' (tableMap inf) table ) tbf)
 
-fullInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullInsert k1  v1 = do
+recInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+recInsert k1  v1 = do
    inf <- askInf
    ret <- KV <$>  Tra.traverse (tbInsertEdit k1 )  (unKV v1)
    let tb  = lookTable inf (_kvname k1)
-   (_,(_,(_,_,l))) <- tableLoader'  tb Nothing Nothing [] mempty
+   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty Nothing
    if  (isNothing $ join $ fmap (flip G.lookup l) $ G.tbpredM k1  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
         tb  <- insertFrom k1 ret
         return $ createRow tb) (\e -> liftIO $ do
           throw e
-          putStrLn $ "failed insertion: "  ++ (show (e :: SomeException))
+          putStrLn $ "Failed insertion: "  ++ (show (e :: SomeException))
           return ret)
       else do
         return ret
 
-noEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-noEdit k1 v1 v2  = do
-  KV <$>  Tra.sequence ( M.intersectionWith (tbDiffEditInsert k1) (unKV v1) (unKV v2))
 
+itRefFun :: RelOperations (KV Key Showable)
+itRefFun = (id,id,noEdit,noInsert)
+  where
+    noInsert k1 v1   = do
+      KV <$>  Tra.traverse (tbInsertEdit k1)  (unKV v1)
+    noEdit k1 v1 v2  = do
+      KV <$>  Tra.sequence ( M.intersectionWith (tbDiffEditInsert k1) (unKV v1) (unKV v2))
 
-noInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-noInsert k1 v1   = do
-  KV <$>  Tra.traverse (tbInsertEdit k1)  (unKV v1)
-
+asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
+asyncPatches m i =
+  tell =<< mapM (fmap (mempty,) . asyncModification m) i
 
 tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 tellPatches m i =
@@ -731,23 +747,19 @@ withDynamic  f i =  do
 transaction :: Show a=>InformationSchema -> TransactionM a -> Dynamic a
 transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ transactionNoLog inf log
 
-fullDiffEditInsert :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
-fullDiffEditInsert k1 old v2 = do
+
+fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
+fullDiffEdit k1 old v2 = do
    inf <- askInf
    edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
    when (isJust $ diff (tableNonRef old) (tableNonRef edn)) $ void $ do
-      traverse (updateFrom  k1 old  (G.getIndex k1 edn)) (diff old edn)
+     traverse (patchFrom k1 . (G.getIndex k1 edn,) . PatchRow) (diff old edn)
    return edn
-
-fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
-fullDiffEdit = fullDiffEditInsert
-
 
 tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
 tbDiffEditInsert k1 i j
-  | i == j =  return j
   | isJust (diff i  j) = tbEdit k1 i j
-  | otherwise = tbInsertEdit  k1 j
+  | otherwise =  return j
 
 
 tbEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
@@ -757,16 +769,14 @@ tbEdit m (IT a1 a2) (IT k2 t2) = do
   inf <- askInf
   let r = _keyAtom $ keyType k2
       m2 = lookSMeta inf r
-      fun =(id,id,noEdit,noInsert)
-  IT k2 <$> tbEditRef fun m2 [Inline k2] a2 t2
+  IT k2 <$> tbEditRef itRefFun m2 [Inline k2] a2 t2
 tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = do
   inf <- askInf
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
     pkrel = fmap (_relOrigin. head. F.toList) .M.keys  $ _kvvalues pk
-    fun = (snd.unTBRef,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,fullInsert)
-  recoverFK pkrel rel2 <$> (tbEditRef fun m2 rel2 (liftFK g) (liftFK f))
+  recoverFK pkrel rel2 <$> (tbEditRef (tbRefFun rel2) m2 rel2 (liftFK g) (liftFK f))
 
 type RelOperations b
   = (b -> TBData Key Showable
@@ -780,9 +790,9 @@ tbEditRef fun@(funi,funo,edit,insert) m2 rel v1 v2 = mapInf (go rel v1 v2)
     mapInf = localInf (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf)))
     go rel2 a2 t2 = case (a2,t2) of
       (TB1 ol,TB1 l) -> do
-          if G.getIndex m2 (funi ol) == G.getIndex m2 (funi l)
-             then (TB1 . funo  <$> edit m2 (funi ol) (funi l))
-             else (TB1 . funo <$> insert m2 (funi l))
+        if G.getIndex m2 (funi ol) == G.getIndex m2 (funi l)
+          then (TB1 . funo  <$> edit m2 (funi ol) (funi l))
+          else (TB1 . funo <$> insert m2 (funi l))
       (LeftTB1  i ,LeftTB1 j) -> do
         LeftTB1 <$> if isNothing i
           then traverse (tbInsertRef fun m2 rel2) j
@@ -799,16 +809,17 @@ tbInsertEdit m (Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit m (IT k2 t2) = do
   inf <- askInf
   let RecordPrim r = _keyAtom $ keyType k2
-      fun =(id,id,noEdit,noInsert)
-  IT k2 <$> tbInsertRef fun  (tableMeta $ lookSTable inf r) [Inline k2]  t2
+  IT k2 <$> tbInsertRef itRefFun (tableMeta $ lookSTable inf r) [Inline k2]  t2
 tbInsertEdit m f@(FKT pk rel2 t2) = do
   inf <- askInf
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
     pkrel = fmap (_relOrigin. head. F.toList) .M.keys  $ _kvvalues pk
-    fun = (snd.unTBRef,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,fullInsert)
-  recoverFK  pkrel rel2 <$> tbInsertRef fun m2 rel2 (liftFK f)
+  recoverFK  pkrel rel2 <$> tbInsertRef (tbRefFun rel2) m2 rel2 (liftFK f)
+
+tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
+tbRefFun rel2 = (snd.unTBRef,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,recInsert)
 
 tbInsertRef ::Show b => RelOperations b -> KVMetadata Key -> [Rel Key] -> FTB b -> TransactionM (FTB b)
 tbInsertRef (funi,funo,_,insert) m2 rel = mapInf . go rel
@@ -816,7 +827,7 @@ tbInsertRef (funi,funo,_,insert) m2 rel = mapInf . go rel
     mapInf = localInf (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf)))
     go rel t2  = case t2 of
       TB1 l -> do
-        (TB1. funo  <$> insert m2 (funi l))
+        TB1. funo  <$> insert m2 (funi l)
       LeftTB1 i ->
         LeftTB1 <$> traverse (go (Le.over relOri unKOptional <$> rel))  i
       ArrayTB1 l -> do
@@ -838,7 +849,7 @@ loadFK :: TBData Key Showable -> SqlOperation -> TransactionM (Maybe (Column Key
 loadFK table (FKJoinTable rel (st,tt) )  = do
   inf <- askInf
   let targetTable = lookTable inf tt
-  (i,(_,(_,_,mtable ))) <- tableLoader' targetTable Nothing Nothing [] mempty
+  (i,(_,TableRep (_,_,mtable ))) <- tableLoaderAll targetTable Nothing Nothing [] mempty Nothing
   let
     relSet = S.fromList $ _relOrigin <$> rel
     tb  = F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef $ table))
@@ -854,37 +865,27 @@ loadFK table (FKInlineTable ori to )   = do
 
 loadFK  _ _ = return Nothing
 
+refTablesPorj inf table page pred proj = do
+  ref  <-  transactionNoLog inf $ tableLoader  table page Nothing [] pred proj
+  return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
+
 refTables' inf table page pred = do
-  (ref)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
+  ref  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTables inf table = refTables' inf table Nothing mempty
 
-lookRef k = _fkttable . lookAttrs' k
+projectRec :: T.Text
+ -> Maybe Int
+ -> Maybe Int
+ -> [(Key, Order)]
+ -> [(Rel T.Text , AccessOp Showable )]
+ -> TransactionM
+      DBVar
+projectRec t a b c p = do
+  inf  <- askInf
+  selectFrom  t a b c (tablePredicate inf t p)
 
-lookAttrs' k = err . lookAttrsM k
-  where
-      err= justError ("no attr " <> show k )
-
-lookAttr' k = _tbattr . err . lookAttrM k
-  where
-      err= justError ("no attr " <> show k )
-
-lookAttrsM k m = M.lookup (S.fromList k) ta
-    where
-      ta = M.mapKeys (S.map (keyValue._relOrigin)) (unKV m)
-
-lookAttrM k =  lookAttrsM [k]
-
-fixrel (Inline  i,op) = (Inline i,[(i,op)])
-fixrel (RelAccess i j , op) = (RelAccess i (fst sub),snd sub)
-  where sub = fixrel . (,op) $ j
-fixrel (i,op) = (i,[])
-
-fixfilters (IProd j i,op) = (IProd j i,[(i,op)])
-fixfilters (Nested i j , op) = (Nested i (fmap fst sub),concat $  fmap snd sub)
-  where sub = fixfilters . (,op) <$> j
-fixfilters (i,op) = (i,[])
 
 selectFromTable :: T.Text
  -> Maybe Int
@@ -897,18 +898,17 @@ selectFromTable t a b c p = do
   inf  <- askInf
   selectFrom  t a b c (tablePredicate inf t p)
 
-tablePredicate inf t p = (WherePredicate $ AndColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
 
-createTableRefs :: InformationSchema -> [MutRec [[Rel Key]]] -> Table ->   Dynamic (Collection KeyUnique Showable,DBRef KeyUnique Showable)
+createTableRefs :: InformationSchema -> [MutRec [[Rel Key]]] -> Table ->   Dynamic (Collection Key Showable,DBRef Key Showable)
 createTableRefs inf re (Project i (Union l)) = do
-  let table = fmap keyFastUnique i
+  let table = i
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup i map of
     Just ref  ->  do
       liftIO$ putStrLn $ "Loading Cached Table: " ++ T.unpack (rawName i)
       liftIO $ atomically $ do
         idx <- readTVar (idxVar ref )
-        (_,_,st) <- readTVar (collectionState ref)
+        TableRep (_,_,st) <- readTVar (collectionState ref)
         return (( idx,  st) ,ref)
     Nothing -> do
       liftIO$ putStrLn $ "Loading Union Table: " ++ T.unpack (rawName i)
@@ -916,7 +916,7 @@ createTableRefs inf re (Project i (Union l)) = do
               let look i = HM.lookup (tableName i , keyValue k) (keyMap inf)
               new <- look i
               old <- look t
-              return (keyFastUnique old,keyFastUnique new)
+              return (old,new)
           tableRel t = M.fromList $ catMaybes $ keyRel t<$> tableAttrs t
       res <- mapM (\t -> do
         ((IndexMetadata idx,sdata),ref) <- createTableRefs inf re t
@@ -924,11 +924,11 @@ createTableRefs inf re (Project i (Union l)) = do
       let
         (uidx,udata) = foldr mergeDBRef (IndexMetadata M.empty,[]) (fst <$> res)
         udata2 = createUn (tableMeta table) (rawPK table) udata
-        sidx :: M.Map [KeyUnique] (SecondaryIndex KeyUnique Showable)
-        sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> ((G.getUnique (tableMeta table)un  i,[]),n,j)) $ G.getEntries udata2))) (L.delete (rawPK table) $ _rawIndexes table )
+        sidx :: M.Map [Key] (SecondaryIndex Key Showable)
+        sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un  i,[]),n,j)) $ G.getEntries udata2))) (L.delete (rawPK table) $ _rawIndexes table )
 
       midx <-  liftIO$ atomically$ newTVar uidx
-      collectionState <-  liftIO$ atomically $ newTVar  (tableMeta table,sidx, udata2)
+      collectionState <-  liftIO$ atomically $ newTVar  (TableRep (tableMeta table,sidx, udata2))
       mdiff <-  liftIO$ atomically $ newBroadcastTChan
       nmdiff <- liftIO$ atomically $ dupTChan mdiff
       chanidx <-  liftIO$ atomically $ newBroadcastTChan
@@ -938,7 +938,7 @@ createTableRefs inf re (Project i (Union l)) = do
       liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)
       return ((uidx,udata2) ,dbref)
 createTableRefs inf re tableK = do
-  let table = fmap keyFastUnique tableK
+  let table = tableK
       i = tableK
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup tableK map of
@@ -946,12 +946,12 @@ createTableRefs inf re tableK = do
       liftIO$ putStrLn $ "Loading Cached Table: " ++ T.unpack (rawName i)
       liftIO $ atomically $ do
         idx <- readTVar (idxVar ref )
-        (_,_,st) <- readTVar (collectionState ref)
+        TableRep (_,_,st) <- readTVar (collectionState ref)
         return (( idx,  st) ,ref)
     Nothing -> do
       liftIO$ putStrLn $ "Loading New Table: " ++ T.unpack (rawName i)
       let
-          diffIni :: [TBIdx KeyUnique Showable]
+          diffIni :: [TBIdx Key Showable]
           diffIni = []
       mdiff <-  liftIO$ atomically $ newBroadcastTChan
       chanidx <-  liftIO$ atomically $ newBroadcastTChan
@@ -960,33 +960,12 @@ createTableRefs inf re tableK = do
       (iv,v) <- readTable inf "dump" i re
       midx <-  liftIO$ atomically$ newTVar iv
       refSize <- liftIO $ atomically $  newTVar 1
-      depmap <- liftIO $ atomically $ readTVar (mvarMap inf )
       let
-        move (FKJoinTable i j)  =  do
-              let rtable = M.lookup (lookSTable inf j) depmap
-                  rinf = fromMaybe inf $ HM.lookup (fst j) (depschema inf)
-              Just . (FKJoinTable i j,)<$> maybe (fmap snd $ createTableRefs rinf re (lookSTable inf j)) return rtable
-        move (FKInlineTable _ _) = return Nothing
-        move i = return Nothing
-        sidx :: M.Map [KeyUnique] (SecondaryIndex KeyUnique Showable)
-        sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> ((G.getUnique (tableMeta table)un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _rawIndexes table )
+        sidx :: M.Map [Key] (SecondaryIndex Key Showable)
+        sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _rawIndexes table )
 
-      nestedFKS <-   (fmap catMaybes $ traverse move $   F.toList (rawFKS i))
-      newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan . patchVar)) nestedFKS
-      collectionState <-  liftIO$ atomically $ newTVar  (tableMeta table,sidx,v)
-      mapM_ (\(j,var)-> dynFork $ forever $ catchJust notException(do
-          atomically (do
-              let isPatch (RowPatch (_,PatchRow _ )) = True
-                  isPatch _ = False
-              ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
-              when (not $ L.null $ ls ) $ do
-                state <- readTVar collectionState
-                let patches = childrenRefsUnique inf table state (j,ls)
-                when (not $ L.null $ patches) $
-                  writeTChan  nmdiff (FetchData table <$> patches)
-              )
-          )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-          ) newNestedFKS
+      collectionState <-  liftIO$ atomically $ newTVar  (TableRep (tableMeta table,sidx,v))
+
       dynFork $ forever $ catchJust notException (do
           atomically (do
               ls <- takeMany nchanidx
@@ -994,73 +973,111 @@ createTableRefs inf re tableK = do
               )
           )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
       dynFork $ forever $ catchJust notException (do
-        pa <- atomically $ do
+        upa <- atomically $ do
             patches <- fmap concat $ takeMany nmdiff
             e <- readTVar collectionState
-            let out = applyUndo e (tableDiff <$> patches)
+            let cpatches = compact patches
+            let out = applyUndo e (tableDiff <$> cpatches)
             traverse (writeTVar collectionState . fst) out
-            return (patches,fmap snd out)
-        either (putStrLn  .("### Error applying: " ++ ) . show ) (\li -> do
-          mapM (\(m,u) -> (do
-            val <- logger (schemaOps inf) inf. mapModification (recoverKey inf) $ m
+            return  $ zip cpatches . snd <$> out
+        either (putStrLn  .("### Error applying: " ++ ) . show ) (
+          mapM_ (\(m,u) -> (do
+            let mmod =   m
+            mmod2 <- case mmod of
+              AsyncTableModification  t (RowPatch (pk,PatchRow p))  ->  do
+                let m = tableMeta t
+                closeDynamic $ transactionNoLog inf $ do
+                  l <- (patchEd $ schemaOps inf) m  [pk] p
+                  wrapModification m l
+
+              AsyncTableModification  t (BatchPatch pk (PatchRow p))  ->  do
+                let m = tableMeta t
+                closeDynamic $ transactionNoLog inf $ do
+                  l <- (patchEd $ schemaOps inf) m  pk p
+                  wrapModification m l
+              i -> return i
+            val <- logger (schemaOps inf) inf mmod2
             case val of
               TableModification (Just v) i j k _ -> do
-                logger (schemaOps inf) inf (RevertModification v (firstPatchRow (recoverKey inf) u))
+                undo (schemaOps inf) inf (RevertModification val ( u))
                 return ()
-              _ -> return () )`catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException)))  (zip (fst pa) (reverse li))
-          return ()) (snd pa)
+              _ -> return () ))
+          ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
         return ()
             )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
       let dbref = DBRef table 0 refSize nmdiff midx nchanidx collectionState
       liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)
+      depmap <- liftIO $ atomically $ readTVar (mvarMap inf )
+      let
+        childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS i
+      nestedFKS <- mapM (\((rinf, t),l) -> do
+        liftIO $ print  $ "Load reference " <> show (tableName t)
+        t <- createTableRefs   rinf re t
+        return (l,snd t)
+          ) (M.toList childrens)
+      newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan . patchVar)) nestedFKS
+
+      mapM_ (\(j,var)-> dynFork $ forever $ catchJust notException (do
+          atomically (do
+              let isPatch (RowPatch (_,PatchRow _ )) = True
+                  isPatch _ = False
+              ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
+              when (not $ L.null $ ls ) $ do
+                state <- readTVar collectionState
+                let patches =  concat $ (\f ->  f ls state) <$> j
+                when (not $ L.null $ patches) $
+                  writeTChan  nmdiff (FetchData table <$> patches)
+              )
+          )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
+          ) newNestedFKS
       return ((iv,v),dbref)
 
 loadFKSDisk inf targetTable re = do
   let
-    (fkSet2,pre) = F.foldl' (\(s,l) i   -> (S.map keyFastUnique (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $ F.toList (rawFKS targetTable))
+    psort = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ F.toList (rawFKS targetTable)
+    (fkSet2,pre) = F.foldl' (\(s,l) i -> ( (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )))  (S.empty , return []) psort
   prefks <- pre
   return (\table ->
     let
       items = unKV $ table
       fks = catMaybes $  ($ table) <$>  prefks
-      fkSet:: S.Set KeyUnique
-      fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ F.toList (rawFKS targetTable))
-      nonFKAttrs :: [(S.Set (Rel KeyUnique) ,Column KeyUnique Showable)]
+      fkSet:: S.Set Key
+      fkSet =    S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  psort
+      nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]
       nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
    in kvlist  (fmap snd nonFKAttrs <> fks ))
 
-loadFKDisk :: InformationSchema ->  S.Set KeyUnique -> [MutRec [[Rel Key]]] ->  SqlOperation -> Dynamic (TBData KeyUnique Showable -> Maybe (Column KeyUnique Showable))
--- loadFKDisk _ old  _ m | traceShow (old,m) False = undefined
+loadFKDisk :: InformationSchema ->  S.Set Key -> [MutRec [[Rel Key]]] ->  SqlOperation -> Dynamic (TBData Key Showable -> Maybe (Column Key Showable))
 loadFKDisk inf old re (FKJoinTable rel (st,tt) ) = do
   let
     targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
     targetTable = lookTable targetSchema tt
   ((_,mtable ),_) <- createTableRefs targetSchema re targetTable
-
   return (\table ->  do
     let
-        relSet = S.fromList $ _relOrigin <$> relU
-        refl = S.fromList $ keyFastUnique . _relOrigin <$> filterReflexive rel
-        relU = (fmap keyFastUnique <$> rel)
-        tb  = F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef $ table))
-        fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) (replaceRel  relU <$> tb) mtable
-    case  FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU  <$>  fkref of
-      Nothing ->  if F.any (isKOptional.keyType . _relOrigin) rel
-                     then Just $ FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
-                     else Nothing
-      i -> i)
-loadFKDisk inf old re (FKInlineTable ori (st,tt) )  = do
+      relSet = S.fromList $ _relOrigin <$> relU
+      refl = S.fromList $ _relOrigin <$> filterReflexive rel
+      relU = rel
+      tb  = F.toList (M.filterWithKey (\k l -> not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef $ table))
+      fkref = joinRel2 (tableMeta targetTable) (replaceRel relU <$> tb) mtable
+    case fkref of
+      Nothing ->
+        if F.any (isKOptional.keyType . _relOrigin) rel
+          then Just $ FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
+          else Nothing
+      i -> FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU <$> i )
+loadFKDisk inf old re (FKInlineTable ori (st,tt)) = do
   let targetTable = lookTable targetSchema tt
       targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
   loadVtPre <- loadFKSDisk inf  targetTable re
   return (\table ->
     let v = do
-          IT rel vt  <- M.lookup ( (S.singleton. Inline .keyFastUnique)   ori) (unKV $ table)
+          IT rel vt  <- M.lookup ( (S.singleton. Inline )   ori) (unKV $ table)
           let loadVt = loadVtPre  <$> vt
           return $ IT rel loadVt
     in case v of
         Nothing ->  if  (isKOptional .keyType) ori
-                      then  Just (IT (keyFastUnique $ ori ) (LeftTB1 Nothing))
+                      then  Just (IT (ori ) (LeftTB1 Nothing))
                       else  Nothing
         v -> v)
 
@@ -1085,40 +1102,39 @@ writeSchema (schema,schemaVar) = do
     createDirectory sdir
   mapM_ (uncurry (writeTable schemaVar sdir ) ) varmap
 
-tablePK t = (_rawSchemaL t ,_rawNameL t)
 
 
-writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -> IO ()
+writeTable :: InformationSchema -> String -> Table -> DBRef Key Showable -> IO ()
 writeTable inf s (Project i (Union l)) v = return ()
 writeTable inf s t v = do
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
   putStrLn("Dumping Table: " <> tname)
-  ((_,_,iv),_) <- atomically $ readState mempty  v
+  (TableRep (_,_,iv),_) <- atomically $ readState mempty  v
   (IndexMetadata iidx ,_)<- atomically $ readIndex v
   let
-    sidx = first (mapPredicate (keyFastUnique.recoverKey inf))  <$> M.toList iidx
-    sdata = traverse (\i ->   fmap (mapKey' keyFastUnique) . typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef $ i) $  iv
+    sidx = first (mapPredicate keyFastUnique)  <$> M.toList iidx
+    sdata = traverse (\i ->  fmap (mapKey' keyFastUnique) .  typecheck (typeCheckTable (tablePK t)) .tableNonRef $ i) $  iv
   either (putStrLn .unlines ) (\sdata ->  do
     when (not (L.null sdata) )$
       B.encodeFile  tname (sidx, G.toList sdata)) sdata
   return ()
 
 
-readTable :: InformationSchema -> T.Text -> Table -> [MutRec [[Rel Key]]] -> Dynamic (Collection KeyUnique Showable)
+readTable :: InformationSchema -> T.Text -> Table -> [MutRec [[Rel Key]]] -> Dynamic (Collection Key Showable)
 readTable inf r  t  re = do
   let
       s = schemaName inf
   o <- liftIO $ readTableFromFile inf r t
   let (m,prev) = fromMaybe (IndexMetadata M.empty ,[]) o
   disk <- loadFKSDisk inf t re
-  let v = createUn (tableMeta (fmap keyFastUnique t)) (keyFastUnique <$> rawPK t) $ (\f -> disk  f) <$> prev
+  let v = createUn (tableMeta t) (rawPK t) $ (\f -> disk  f) <$> prev
   return (m,v)
 
 
 fromTable origin whr = do
   inf <- askInf
-  (_,(n,(_,_,amap) )) <- tableLoader' (lookTable inf origin) Nothing Nothing [] (tablePredicate inf origin whr)
-  return (origin,inf,amap)
+  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing Nothing [] (tablePredicate inf origin whr) Nothing
+  return (origin,inf,primary rep)
 
 innerJoin
   :: TransactionM  (T.Text,InformationSchema,G.GiST (TBIndex Showable) (TBData Key Showable))
@@ -1196,11 +1212,50 @@ createFresh  tname inf i ty@(Primitive l  atom)  =
       return newinf
   where tableO = lookTable inf tname
 
+getRow (G.Idex ix) table =  do
+  inf <- askInf
+  let pred = AndColl $ zipWith (\v i -> PrimColl (Inline i ,[(i,Left (v,Equals))])) ix (rawPK table)
+  (ref,(nidx,rep)) <-  tableLoaderAll table  Nothing Nothing [] (WherePredicate pred) Nothing
+  return $safeHead (G.toList $ primary rep)
+
+revertModification :: Int ->  TransactionM ()
+revertModification idx = do
+  inf <- askInf
+  let table = lookTable (meta inf) "undo_modification_table"
+      pred = [(keyRef "modification_id",Left (int idx,Equals))]
+  (ref,(nidx,TableRep (_,_,ndata))) <- localInf (const (meta inf)) $ tableLoaderAll table  (Just 0) Nothing [] (tablePredicate (meta inf) (tableName table) pred) Nothing
+  let
+    mod :: RevertModification (T.Text,T.Text) (RowPatch T.Text Showable)
+    mod@(RevertModification source delta)  = decodeT (mapKey' keyValue $ justError "row not found" $ safeHead $ F.toList ndata)
+    targetName = snd (tableObj source)
+    targetTable = lookTable inf targetName
+
+  let op = unRowPatch $ liftRowPatch inf targetName  delta
+  r <- getRow (fst op) targetTable
+  traverse (\r ->
+    case  snd op of
+      DropRow -> do
+        deleteFrom (tableMeta targetTable) r
+      PatchRow p -> do
+        fullEdit (tableMeta targetTable) r (apply r p)
+      CreateRow p -> do
+        fullInsert (tableMeta targetTable) r
+          ) r
+  return ()
 
 newKey table name ty =
   let un = maximum (keyPosition <$> tableAttrs table) + 1
   in  Key name Nothing [FRead,FWrite] un Nothing (tableUnique table) ty
 
+asyncModification m a = do
+  inf <- askInf
+  now <- liftIO getCurrentTime
+  AsyncTableModification  (lookTable inf (_kvname m) )<$>  return a
+
+
+tableModification inf m a = do
+  now <- getCurrentTime
+  TableModification Nothing now (snd $username inf) m<$>  return a
 
 wrapModification m a = do
   inf <- askInf
@@ -1283,17 +1338,17 @@ leftJoinR (P j k) (P l n) srel alias
       nv <- n -< ()
       Kleisli (\(emap,amap) -> do
         inf <- askInf
-        let origin = sourceTable inf (JoinV j l LeftJoin srel alias)
-            target = sourceTable inf l
         let
+          origin = sourceTable inf (JoinV j l LeftJoin srel alias)
+          target = sourceTable inf l
           rel = (\(Rel i o j ) -> Rel (lkKey origin i ) o (lkKey target j) )<$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
           joinFK :: TBData Key Showable ->  Column Key Showable
           joinFK m  = IT aliask (LeftTB1 $ joinRel2 (tableMeta target ) (fmap replaceRel $ taratt ) amap)
-                  where
-                    replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
-                    taratt = getAtt tar (tableNonRef m)
+            where
+              replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
+              taratt = getAtt tar (tableNonRef m)
           addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
           addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ Inline aliask ) r i ))
           joined i = addAttr (joinFK i) i

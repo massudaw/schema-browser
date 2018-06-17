@@ -37,12 +37,12 @@ addSchemaIO clientId minf inf six = do
   now <- liftIO getCurrentTime
   let new = addSchema clientId  now inf six
       mkPatch = PatchRow . liftPatch minf "clients"
-  transactionNoLog minf $ do
+  transactionNoLog minf $
     patchFrom (tableMeta cli) (mkPatch <$>new)
   registerDynamic (void $ do
     now <- liftIO getCurrentTime
     let new = removeSchema clientId  now inf six
-    runDynamic $ transactionNoLog minf $ do
+    runDynamic $ transactionNoLog minf $
       patchFrom (tableMeta cli) (mkPatch <$>new))
 
 
@@ -56,13 +56,13 @@ addClientLogin inf =  transactionNoLog inf $ do
       obj = liftTable' inf "clients" (encodeT row)
       m = lookMeta inf  "clients"
     lift $ prerefTable inf (lookTable inf "clients")
-    i <-  insertFrom  m obj
+    i <-  fullInsert m obj
     lift . registerDynamic . closeDynamic $ do
       now <- liftIO getCurrentTime
       let
         pt = [PAttr (lookKey inf "clients" "up_time") (PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))]
-      transactionNoLog inf $ do
-        patchFrom m  (index i,PatchRow pt)
+      transactionNoLog inf $
+        patchFrom m  (head $ index i,PatchRow pt)
       return ()
     return i
 
@@ -81,15 +81,15 @@ trackTable minf cid table six ix = do
       cli  = lookTable minf "clients"
       mcli = tableMeta cli
   ref <- prerefTable minf cli
-  transactionNoLog minf $ do
+  transactionNoLog minf $
     patchFrom mcli (mkPatch cpatch)
   registerDynamic (void $ do
     now <- getCurrentTime
     let dpatch = removeTable  cid now table six ix
-    closeDynamic $ transactionNoLog minf $ do
+    closeDynamic $ transactionNoLog minf $
       patchFrom mcli (mkPatch dpatch))
 
-atClient idClient =  (G.Idex [LeftTB1 $ Just $ num idClient],)
+atClient idClient =  (G.Idex [LeftTB1 . Just . num $ idClient],)
 atSchema  six v = PInline "selection" (POpt $ Just $ PIdx six $ Just$ PAtom v)
 atTable tix v = PInline "selection" (POpt $ Just $ PIdx tix $ Just$ PAtom v)
 atRow rix v = PInline "selection" (POpt $ Just $ PIdx rix $ Just$ PAtom v)
@@ -116,11 +116,11 @@ createRow now tdi = ClientRowSelection (startTime now) (uncurry ClientPK . first
 
 instance DecodeTable ClientPK where
   isoTable = iassoc arr  (identity <$$> prim  "key") (identity <$$> prim "val")
-    where arr = IsoArrow (\(i,j) -> ClientPK i j ) (\(ClientPK i j) -> (i,j))
+    where arr = IsoArrow (uncurry ClientPK ) (\(ClientPK i j) -> (i,j))
 
 instance DecodeTable ClientRowSelection where
   isoTable = iassoc (isoArrow arr) ( prim  "up_time") (nest "data_index")
-    where arr = (\(i,j) -> ClientRowSelection i j , \(ClientRowSelection i j) -> (i,j) )
+    where arr = (uncurry ClientRowSelection , \(ClientRowSelection i j) -> (i,j) )
 
 instance DecodeTable ClientTableSelection where
   isoTable = iassoc3  (isoArrow arr) (identity <$$>prim  "table") (prim "up_time") (nest "selection")
@@ -199,7 +199,7 @@ lookClient clientId metainf = do
   (_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
   return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId <$> clientState)
 
-indexTable inf (tix,table) = join . fmap lookT
+indexTable inf (tix,table) = (lookT =<<)
   where
     lookT iv = do
       let tables = table_selection iv
@@ -214,10 +214,10 @@ logRowAccess
      -> (Int, InformationSchemaKV Key Showable)
      -> (Int, TableK (FKey a))
      -> Int
-     -> KV (FKey a) Showable
+     -> TBIndex Showable
      -> Dynamic ()
-logRowAccess w (six,inf) (tix,table) ix row = do
-  let sel =  Non.fromList . M.toList $ getPKM (tableMeta table) row
+logRowAccess w (six,inf) (tix,table) ix (G.Idex row) = do
+  let sel =  Non.fromList  (zip (rawPK table) row)
   let lift =  liftPatch minf "clients"
       cli = lookTable minf "clients"
       minf = meta inf
@@ -228,7 +228,7 @@ logRowAccess w (six,inf) (tix,table) ix row = do
   registerDynamic (void $ do
     now <- liftIO getCurrentTime
     let d = lift <$> removeRow (wId w) now  six  tix ix
-    runDynamic $ transactionNoLog minf $ do
+    runDynamic $ transactionNoLog minf $
       patchFrom (tableMeta cli) (PatchRow<$>d))
 
 

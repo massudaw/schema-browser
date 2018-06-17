@@ -42,7 +42,6 @@ import Types
 import SchemaQuery
 import TP.Widgets
 import Control.Monad.Reader
-import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
 import qualified Data.List as L
@@ -127,7 +126,7 @@ legendStyle dashes lookDesc table b = traverse render item
     render (c, _, _, _, _) = do
       element b # set UI.class_ "col-xs-1"
       label <-
-        UI.div # sink text (T.unpack . ($table) <$> facts lookDesc) #
+        UI.div # set text (T.unpack  lookDesc) #
         set UI.class_ "fixed-label col-xs-11"
       UI.label # set children [b, label] #
         set UI.style [("background-color", c)] #

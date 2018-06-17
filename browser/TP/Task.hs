@@ -7,66 +7,40 @@
 
 module TP.Task where
 
-import GHC.Stack
-import Environment
-import TP.View
-import qualified Data.Set as S
-import Data.Void
-import Data.Ord
-import Utils
-import Step.Host
-import Control.Lens (_2,(^.))
+import Control.Arrow
+import Control.Lens ((^.), _2)
+import Control.Monad.Writer
+import Data.Either
+import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
+import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
+import Data.Ord
+import qualified Data.Set as S
+import qualified Data.Text as T
+import Data.Void
+import Environment
+import qualified Graphics.UI.Threepenny as UI
+import Graphics.UI.Threepenny.Core hiding (apply, delete, get)
+import MasterPlan.Backend.Graph as MP
+import MasterPlan.Data as MP
+import MasterPlan.Parser as MP
 import NonEmpty (NonEmpty)
 import qualified NonEmpty as Non
-import Data.Functor.Identity
-import Control.Concurrent
-import Types.Patch
-import Control.Arrow
-import Data.Either
-import Data.Interval (Interval(..))
-import Control.Monad.Writer
-import Data.Time.Calendar.WeekDate
-import Data.Char
-import qualified Data.Text.Encoding as TE
-import Control.Concurrent.Async
-import Safe
-import Query
-import Data.Time
-import qualified Data.Aeson as A
-import Text
-import qualified Types.Index as G
-import Debug.Trace
-import Types
-import SchemaQuery
-import TP.Widgets
 import Prelude hiding (head)
-import TP.QueryWidgets
-import Control.Monad.Reader
-import Schema
-import Data.Maybe
-import Reactive.Threepenny hiding(apply)
-import qualified Data.List as L
-import qualified Data.ByteString.Lazy.Char8 as BSL
-
+import PrimEditor
 import RuntimeTypes
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
-import Data.Monoid hiding (Product(..))
-
-import qualified Data.Foldable as F
-import qualified Data.Text as T
-import Data.Text (Text)
-import MasterPlan.Data as MP
-import MasterPlan.Backend.Graph as MP
-import MasterPlan.Backend.Identity as MPT
-import MasterPlan.Parser as MP
-
-import qualified Data.Map as M
+import SchemaQuery
+import Step.Host
+import TP.View
+import TP.Widgets
+import Text
+import Types
+import qualified Types.Index as G
+import Utils
 
 columnName name = irecord $ iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel name Equals "ordinal_position"] (irecord (ifield  "column_name" (ivalue $  readV PText)))
-
-
 
 taskWidgetMeta inf = do
     fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (taskDef inf)()
@@ -105,7 +79,7 @@ taskDef inf
               to (STime (SDate i )) = STime $ SDate i
           convField (IntervalTB1 i) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
           convField v = [("start",toLocalTime $v)]
-          convField i = errorWithStackTrace (show i)
+          convField i = error (show i)
           scolor =  "#" <> renderPrim color
           renderTitle t = L.intercalate "," $ renderShowable <$> F.toList t
           lkRel i r=  unSOptional =<< recLookupInf inf tname (indexerRel i) r
@@ -171,7 +145,7 @@ taskWidget (incrementT,resolutionT) sel inf = do
           =  do
             let item = M.lookup table  (M.fromList  $ fmap (\i@(_,b,_,_)-> (b,i)) dashes )
             traverse (\k@(c,tname,_,_) ->   do
-              header <-  UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-11"
+              header <-  UI.div # set text  (T.unpack  lookDesc) # set UI.class_ "col-xs-11"
               element b # set UI.class_ "col-xs-1"
               UI.label # set children [b,header]
                        # set UI.style [("background-color",renderShowable c)] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]

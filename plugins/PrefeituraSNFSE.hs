@@ -9,7 +9,6 @@ import qualified Network.Wreq.Session as Sess
 import Types
 import Utils
 import Pdf
-import Gpx
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL

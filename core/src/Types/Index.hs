@@ -4,6 +4,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -47,6 +48,7 @@ module Types.Index
   , cinterval
   , PathTID(..)
   , splitIndexPKB
+  , alterWith
   , splitIndexPK
   , module G
   ) where
@@ -55,6 +57,7 @@ import Control.Applicative
 import Control.DeepSeq
 import Control.Monad
 import Data.Binary
+import GHC.Generics
 import Data.Char
 import Data.Either
 import qualified Data.ExtendedReal as ER
@@ -83,8 +86,6 @@ import Types
 import Utils
 
 --- Row Level Predicate
-instance (Binary a)  => Binary (TBIndex a)
-instance (NFData a)  => NFData (TBIndex a)
 
 cinterval ::Ord a=> a -> a -> Interval a
 cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
@@ -92,14 +93,14 @@ cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
-getUnique :: (Show k ,Ord k) => KVMetadata k -> [k] -> TBData k a -> TBIndex  a
-getUnique m ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn m (Set.fromList ks) $ v
+getUnique :: (Show k ,Ord k) => [k] -> TBData k a -> TBIndex  a
+getUnique ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn  (Set.fromList ks) $ v
 
-getUniqueM :: (Show k, Ord k) => KVMetadata k -> [k] -> TBData k a -> Maybe (TBIndex a)
-getUniqueM m un = notOptionalM . getUnique m un
+getUniqueM :: (Show k, Ord k) => [k] -> TBData k a -> Maybe (TBIndex a)
+getUniqueM un = notOptionalM . getUnique  un
 
 getIndex :: (Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
-getIndex m  = getUnique m (_kvpk m)
+getIndex m  = getUnique  (_kvpk m)
 
 getBounds :: (Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
 getBounds m [] = (ER.NegInf,False) `interval` (ER.PosInf,False)
@@ -115,7 +116,7 @@ notOptional :: Show a => TBIndex a -> TBIndex a
 notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
 tbpredM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
-tbpredM m = notOptionalM . getUnique m (_kvpk m)
+tbpredM m = notOptionalM . getUnique  (_kvpk m)
 
 tbpred :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
 tbpred m = notOptional . getIndex m
@@ -302,6 +303,7 @@ instance (Show v,Affine v ,Range v,ConstantGen (FTB v) , Positive (Tangent v), S
       access (PrimColl (Inline  i,_) )  = i
       access (AndColl l) = minimum $ fmap  access l
       access (OrColl l) = minimum $ fmap  access l
+      access i = error (show i)
 
       go :: BoolCollection
                 (Rel Int, [(Int,Either (FTB v, BinaryOperator) UnaryOperator)])
@@ -378,7 +380,7 @@ data PathIndex  a b
   = ManyPath (Non.NonEmpty (PathIndex a b))
   | NestedPath a (PathIndex a b)
   | TipPath b
-  deriving(Eq,Ord,Show,Functor)
+  deriving(Eq,Ord,Show,Functor,Generic)
 
 mapAttributePath :: (a -> b) -> AttributePath a i -> AttributePath b i
 mapAttributePath f (PathAttr k l) = PathAttr (f k ) l
@@ -389,7 +391,7 @@ data AttributePath  k b
   = PathAttr k (PathIndex PathTID b)
   | PathInline k (PathIndex PathTID  (Union (AttributePath k b)))
   | PathForeign [Rel k ] (PathIndex PathTID (Union (AttributePath k b)))
-  deriving(Eq,Ord,Show,Functor)
+  deriving(Eq,Ord,Show,Functor,Generic)
 
 data PathTID
   = PIdIdx Int
@@ -397,7 +399,7 @@ data PathTID
   | PIdTraverse
   | PIdInter Bool
   | PIdAtom
-  deriving (Eq,Ord,Show)
+  deriving (Eq,Ord,Show,Generic)
 
 
 
@@ -424,13 +426,15 @@ indexPredIx (n@(RelAccess nk nt ) ,eq) r
     recPred i = error (show ("IndexPredIx",i))
 -- indexPredIx  (a,i) r | traceShow (a,i,indexField a r) False = undefined
 indexPredIx (a@(Inline key),eqs) r =
-  case attrLookup (Set.singleton a ) r of
+  case attrLookup (Set.singleton a ) (tableNonRef r) of
     Nothing ->  Nothing
     Just rv  ->
-      PathAttr key <$> recPred eq rv
+      PathAttr key <$> recPred rv
   where
     Just (k,eq) = L.find ((==key).fst) eqs
-    recPred eq i  = if match eq (Right i) then  Just (TipPath (eq,i)) else Nothing
+    recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
+    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred i  =  if match eq (Right i) then  Just (TipPath (eq,i)) else Nothing
 indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 
@@ -472,31 +476,15 @@ queryCheck (WherePredicate b ,pk)
    isPK = fmap WherePredicate $ splitIndexPK b pk
 
 projectIndex :: (Show k,Ord k) => [k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
-projectIndex pk l = G.queryL (mapPredicate (pkIndex pk) l)
+projectIndex pk l = G.queryL (mapPredicate (justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk) l)
 
 filterIndex l =  L.filter (flip checkPred l . leafValue)
 filterRows l =  L.filter (flip checkPred l )
 
-pkIndex :: (Show a, Eq a) => [a] -> a -> Int
-pkIndex pk i = justError ("no predicate " ++ show (i,pk)) $  L.elemIndex i pk
+pkIndexM :: (Show a, Eq a) => [a] -> a -> Maybe Int
+pkIndexM pk i =   L.elemIndex i pk
 
 -- Atomic Predicate
-
-
-data DiffPosition
-  = DiffPosition3D (Double,Double,Double)
-  | DiffPosition2D (Double,Double)
-  deriving(Eq,Ord ,Show)
-
-data DiffShowable
-  = DSText [Int]
-  | DSDouble Double
-  | DSPosition DiffPosition
-  | DSInt Int
-  | DSDiffTime NominalDiffTime
-  | DSDays Integer
-  deriving(Eq,Ord,Show)
-
 
 class Range v where
   pureR :: v -> Interval  v
@@ -695,6 +683,11 @@ instance ( Range v
     (fmap notneg $ subtraction (fst (lowerBound' j)) (fst $ lowerBound' i)) <>
     (fmap notneg $ subtraction (fst $ upperBound' i) (fst $ upperBound' j))
   {-# INLINE penalty #-}
+
+alterWith f k v
+  = case lookup k v of
+      Just i -> G.insert ( f (Just i) ,k) indexParam v
+      Nothing -> G.insert ( f Nothing ,k) indexParam v
 
 -- Higher Level operations
 fromList pred = foldl' acc G.empty

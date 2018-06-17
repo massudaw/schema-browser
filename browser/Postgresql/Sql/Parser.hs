@@ -3,6 +3,7 @@ module Postgresql.Sql.Parser where
 import Types
 import Postgresql.Sql.Types
 import Data.Attoparsec.Char8 as A
+import Data.Attoparsec.Char8 as A
 import Data.Either
 import Control.Applicative
 import Control.Monad
@@ -14,7 +15,9 @@ import qualified Data.ByteString.Char8 as BS
 import Database.PostgreSQL.Simple
 
 
-name = T.pack . BS.unpack <$> A.takeWhile1 (not . (`elem` (";() .,"::String)))
+name = do
+   l <- letter_ascii
+   T.pack . (l:) . BS.unpack <$> A.takeWhile1 (not . (`elem` ("';() .,"::String)))
 
 parseColumn = full <|> simple
     where

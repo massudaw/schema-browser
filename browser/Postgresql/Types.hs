@@ -58,7 +58,6 @@ topconversion f (Primitive v a) = go v
     go v = case v of
       KArray :n ->  f (Primitive v a) <|> fmap lifa (go  n )
       KInterval :n ->  f (Primitive v a) <|> fmap lifi (go n )
-      KDelayed :n -> f (Primitive v a) <|> fmap lifd (go  n )
       KSerial :n -> f (Primitive v a) <|> fmap lifd (go  n )
       KOptional :n -> f (Primitive v a) <|> fmap lifd (go  n )
       [] ->  f (Primitive [] a)
@@ -264,7 +263,6 @@ renderType (Primitive [] (AtomicPrim t) ) =
 renderType (Primitive (KArray :xs)i) = (<>"[]") <$> renderType (Primitive xs i)
 renderType (Primitive (KOptional :xs)i) = renderType (Primitive xs i)
 renderType (Primitive (KSerial :xs)i) = renderType (Primitive xs i)
-renderType (Primitive (KDelayed :xs)i) = renderType (Primitive xs i)
 
 
 

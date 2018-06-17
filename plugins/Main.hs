@@ -2,41 +2,27 @@
   UndecidableInstances, ScopedTypeVariables, OverloadedStrings #-}
 module Main ( main
   ) where
-import Control.Concurrent
-import Control.Concurrent.STM
 import Control.Exception
 import Query
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 import Types.Patch
-import Data.Unique
-import Debug.Trace
--- import PatchSync
 import Plugins (plugList)
 import Plugins.Schema
 import Poller
-import Postgresql.Backend (connRoot)
-import Rmtc
-import Safe
 import Schema
 import SchemaQuery
 import System.Environment
-import System.Process (rawSystem)
 import ClientAccess (addClientLogin)
 import TP.Main
 import TP.QueryWidgets
 import Types
-import qualified Types.Index as G
 
-import Data.Monoid hiding (Product(..))
 import Graphics.UI.Threepenny.Core
-import Graphics.UI.Threepenny.Internal (wId)
-import Reactive.Threepenny
 import RuntimeTypes
 
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Database.PostgreSQL.Simple.Internal
 
 
 main :: IO ()
@@ -55,8 +41,9 @@ main = do
     runDynamic $ do
       keyTablesInit smvar ("code", T.pack $ user db) amap []
       addPlugins plugList smvar
+  print "Register Plugins"
   regplugs <- plugs smvar amap db plugListLoad
-  print "Load Polling Process"
+  -- print "Load Polling Process"
   -- poller smvar amap db regplugs False
   --cp <- lookupEnv "SYNC_SERVER_PORT"
   --ch <- lookupEnv "SYNC_SERVER_HOST"

@@ -11,13 +11,11 @@ import Step.Host
 import TP.AgendaSelector
 import Control.Monad.Writer as Writer
 import TP.View
-import TP.Selector
 import qualified Data.Interval as Interval
 import Control.Concurrent
 import Utils
 import Types.Patch
 import Control.Arrow
-import TP.Browser
 import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
 import qualified Data.List as L
 import Data.Either
@@ -40,7 +38,6 @@ import TP.Widgets
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
-import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding (apply)
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -71,7 +68,7 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
         in traverse (\(k@(c,tname,_,_)) -> do
           element  b # set UI.class_"col-xs-1"
-          label <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10"
+          label <- UI.div # set text  (T.unpack  lookDesc) # set UI.class_ "fixed-label col-xs-10"
           UI.label # set children [b,label]
             # set UI.style [("background-color",renderShowable c)]# set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
             ) item

@@ -17,6 +17,7 @@
 module Types.Patch
   -- Class Patch Interface
   ( Compact(..)
+  , foldCompact
   , Patch(..)
   -- Patch Data Types and to be moved methods
   , patchSet
@@ -182,6 +183,16 @@ joinEditor (Diff i) = i
 joinEditor Keep = Keep
 joinEditor Delete = Delete
 
+
+foldCompact :: (a -> a -> Maybe a) -> [a] -> [a]
+foldCompact f [] = []
+foldCompact f (x:xs) =
+  let (l,i) = F.foldl' fun ([],x)  xs
+      fun (o,c) j = case f c j  of
+          Just n -> (o,n)
+          Nothing -> (c:o,j)
+  in reverse (i:l)
+
 instance (Compact i) => Compact (Editor i) where
   compact l = [F.foldl' pred Keep l]
     where
@@ -196,19 +207,23 @@ firstPatchRow ::
   -> RowPatch k a
   -> RowPatch j a
 firstPatchRow f (RowPatch (ix, i))  = RowPatch (ix,firstRowOperation f i)
+firstPatchRow f (BatchPatch rows  i)  = BatchPatch rows (firstRowOperation f i)
 
 firstRowOperation f (CreateRow i) = CreateRow $ mapKey' f i
 firstRowOperation f DropRow = DropRow
 firstRowOperation f (PatchRow i) = PatchRow $ firstPatch f i
 
-newtype RowPatch k a = RowPatch { unRowPatch :: (G.TBIndex a, RowOperation k a)}
+data RowPatch k a
+  = RowPatch   { unRowPatch :: (G.TBIndex a, RowOperation k a) }
+  | BatchPatch { targetRows :: [G.TBIndex a]
+               , operation  :: RowOperation k a }
   deriving (Show, Eq, Functor, Generic)
 
 data RowOperation k a
   = CreateRow (TBData k a)
   | PatchRow (TBIdx k a)
   | DropRow
-  deriving (Show, Eq, Functor, Generic)
+  deriving (Show, Eq,Ord, Functor, Generic)
 
 instance (NFData k, NFData a) => NFData (RowPatch k a)
 instance (Binary k, Binary a) => Binary (RowPatch k a)
@@ -216,24 +231,38 @@ instance (Binary k, Binary a) => Binary (RowPatch k a)
 instance (NFData k, NFData a) => NFData (RowOperation k a)
 instance (Binary k, Binary a) => Binary (RowOperation k a)
 
-instance (Ord k ,Compact v, Show v,Show k,Patch v,Ord v , v ~ Index v)=> Compact (RowOperation k v) where
-  compact  l =  if L.null l then l else [F.foldl' ops DropRow l]
-     where
-      ops (CreateRow i ) (PatchRow j) = CreateRow $ apply i j
-      ops (PatchRow i ) (PatchRow j) = PatchRow $ (compact $ i ++ j)
+instance (Ord k, Compact v, Show v, Show k, Patch v, Ord v, v ~ Index v) =>
+         Compact (RowOperation k v) where
+  compact l =
+    if L.null l
+      then l
+      else [F.foldl' ops DropRow l]
+    where
+      ops (CreateRow i) (PatchRow j) = CreateRow $ apply i j
+      ops (PatchRow i) (PatchRow j) = PatchRow $ (compact $ i ++ j)
       ops i (CreateRow j) = CreateRow j
       ops i DropRow = DropRow
-      ops DropRow j  = j
+      ops DropRow j = j
 
-instance (Ord k ,Patch v,Compact v, Show v,Show k,v ~ Index v,Ord v) => Compact (RowPatch k v) where
-  compact i = fmap (uncurry rebuild) $ fmap (head. compact) <$> groupSplit2 index content i
+instance (Ord k, Patch v, Compact v, Show v, Show k, v ~ Index v, Ord v) =>
+         Compact (RowPatch k v) where
+  compact = flipop . op
+    where
+      op, flipop :: [RowPatch k v] -> [RowPatch k v]
+      flipop i =
+        (\(i, j) -> rebuild (concat j) i) <$> groupSplit2 content index i
+      op i =
+        (uncurry rebuild) . fmap (head . compact) <$>
+        groupSplit2 index content i
 
 instance Address (RowPatch k v) where
-  type Idx (RowPatch k v) = TBIndex v
+  type Idx (RowPatch k v) = [TBIndex v]
   type Content (RowPatch k v) = RowOperation k v
-  index = fst . unRowPatch
-  content =  snd . unRowPatch
-  rebuild i j = RowPatch (i,j)
+  index (RowPatch (i,_)) = [i]
+  index (BatchPatch i _ ) = i
+  content (RowPatch (_,i) ) = i
+  content (BatchPatch _ i ) = i
+  rebuild i j = if L.length i > 1 then BatchPatch  i j else RowPatch (head i, j)
 
 -- type TBIdx k a = Map (Set k) [PValue k a]
 type TBIdx k a = [PathAttr k a]
@@ -247,11 +276,11 @@ patchEditor i
     normalize i = [i]
 
 splitMatch (b, pk) p =
-  G.match
+  L.any (\i -> G.match
     (mapPredicate
        (\i -> justError ("no index" ++ show (i, pk)) $ L.elemIndex i pk)
        b)
-    (Right (index p))
+    (Right i)) (index p)
 
 checkPatch fixed@(WherePredicate b, pk) d =
   case (notPK, isPK) of
@@ -476,6 +505,7 @@ instance PatchConstr k a => Patch (AValue k a)  where
   -- createIfChange = createAValueChange
   -- patch = patchAValue
 -}
+
 instance PatchConstr k a => Patch (TB k a) where
   type Index (TB k a) = PathAttr k (Index a)
   diff = diffAttr
@@ -516,11 +546,9 @@ instance Patch () where
 instance Patch Showable where
   type Index Showable = Showable
   diff = diffPrim
-  apply _ i = i
-  applyIfChange _ = Just
+  applyUndo (SNumeric s) (SDelta (DSInt i))  = Right (SNumeric (s + i),SDelta (DSInt $ negate i))
   applyUndo j i = Right (i, j)
   createIfChange = Just
-  create = id
   patch = id
 
 instance (Compact a , Compact b) => Compact (a,b) where
@@ -726,7 +754,7 @@ applyRecordChange (KV v) k =
        v)
   where
     add (v, p) =
-      ( foldr (\p v -> Map.insert (index p) (create p) v) v $
+      ( foldr (\p v -> maybe (traceShow p v) (\i -> Map.insert (index p) i v) (createIfChange p) ) v $
         filter (isNothing . flip Map.lookup v . index) k
       , p)
     edit l (i, tr) = fmap (: tr) <$> applyUndoAttrChange i l
@@ -948,7 +976,7 @@ applyUndoFTBM b (PatchSet l) =
         (\(i, l) ->
            maybe (Left "empty patchset") Right $
            (i, ) . PatchSet <$> Non.nonEmpty l)
-applyUndoFTBM a b = error ("applyFTB: ")
+applyUndoFTBM a b = error ("applyFTB: " ++ show (a,let v = createUndoFTBM b  in (v == Right a ,v)))
 
 checkInterM ::
      (Show a, Ord a)

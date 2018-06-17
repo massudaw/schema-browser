@@ -19,10 +19,7 @@ import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.Dynamic
-import Data.Profunctor.Cayley
 import qualified Data.Foldable as F
-import Data.Profunctor
-import Data.Profunctor.Product
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Interval as Interval
 import Data.Time
@@ -31,7 +28,6 @@ import qualified Data.Map as M
 import Database.PostgreSQL.Simple
 import qualified NonEmpty as Non
 import RuntimeTypes
-import SchemaQuery
 import Step.Host
 import Types
 import Step.Common
@@ -157,7 +153,7 @@ class IsoProfunctor f => IsoDivisible f where
   isplit :: (Either a b |-> c) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c)
 
 instance (Monoid j ,Monoid i) => IsoDivisible  (SIso i j) where
-  itotal = isoMap (IsoArrow fromJust Just )
+  itotal = isoMap (IsoArrow (justError "partial output") Just )
   isplit (IsoArrow aenc adec) fa fb =  SIso (stoken fa  `mappend` stoken fb) (void . traverse (either (encodeIso'  fa.Just ) (encodeIso' fb . Just) ). fmap adec) (\i -> fmap aenc $ (Left <$> (decodeIso fa $ i)) <|> (Right <$> (decodeIso fb $ i)) )
     where
           pR (Right i) = Just i
@@ -228,23 +224,33 @@ instance IsoProfunctor (SIso i l ) where
 data Reference k
   = AttrRef (KType KPrim) k
   | InlineTable (KType Text) k (Union (Reference k))
+  | JoinTable  [Rel k] (Union (Reference k))
   deriving(Eq,Ord,Show)
 
 
-prim :: (Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
+prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
   k -> SIso (Union (Reference k))  (TBData k Showable) (f a)
 prim ix = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
-          lk =  _tbattr . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
+          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . M.lookup (S.singleton $ Inline ix) . _kvvalues
           mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
+
+nestJoin :: (Functor f, DecodeTB1 f) =>
+  [Rel Text] -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
+nestJoin ix nested = SIso (Many [One $ JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+    where i@(SIso l fs bs) = isoFTB
+          j@(SIso kp fsp bsp) = nested
+          lk =  _fkttable . justError ("no attr: " ++ show (S.fromList $ ix)). M.lookup (S.fromList $ ix) . _kvvalues
+          mk = KV. M.singleton (S.fromList $ ix) . FKT mempty ix
+
 
 nestWith :: (Functor f, DecodeTB1 f) =>
   Text -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
 nestWith ix nested = SIso (Many [One $ InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          lk =  _fkttable . fromJust . M.lookup (S.singleton $ Inline ix) . _kvvalues
+          lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). M.lookup (S.singleton $ Inline ix) . _kvvalues
           mk = KV. M.singleton (S.singleton $ Inline ix) . IT ix
 
 nest :: (Functor f, DecodeTable a, DecodeTB1 f) =>
@@ -300,6 +306,13 @@ instance DecodeTable (Access Text) where
       destroy  (IProd _ i ) = Right i
       destroy  (Nested i j) = Left (i,j)
 
+rowPatchArr = IsoArrow (uncurry rebuild) (\i -> (index i ,content i ))
+instance DecodeTable (RevertModification (Text, Text) (RowPatch Text Showable )) where
+  isoTable = iassoc  (IsoArrow (\(a,b) -> RevertModification a b) (\(RevertModification a b ) -> (a,b)))
+      (identity <$$> nestJoin [Rel "modification_id" Equals "modification_id"] isoTable)
+      (iassoc rowPatchArr
+          (identity <$$> prim "data_index")
+          (identity<$$> prim "modification_data"))
 
 instance DecodeTable (TableModificationK (Text, Text) (RowPatch Text Showable )) where
   isoTable = iassoc5  (IsoArrow (\(a,b,c,d,e) -> TableModification a b c d e) (\(TableModification a b c d e ) -> (a,b,c,d,e)))
@@ -309,7 +322,7 @@ instance DecodeTable (TableModificationK (Text, Text) (RowPatch Text Showable ))
       (iassoc id
           (identity <$$> prim "schema_name")
           (identity <$$> prim "table_name"))
-      (IsoArrow RowPatch unRowPatch <$$> iassoc id
+      (iassoc rowPatchArr
           (identity <$$> prim "data_index")
           (identity<$$> prim "modification_data"))
 
@@ -368,7 +381,7 @@ instance DecodeShowable (FTB Showable)  where
       decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
 
 
-instance DecodeShowable (TBIndex Showable)  where
+instance DecodeShowable [TBIndex Showable]  where
   isoS = SIso (PDynamic "row_index") (tell . encodeS) decodeS
     where
       encodeS i  = SDynamic (HDynamic  (toDyn i))

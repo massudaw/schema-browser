@@ -75,7 +75,6 @@ import Control.Applicative
 import Control.DeepSeq
 import Control.Monad
 import Data.Binary (Binary(..))
-import Data.Binary.Orphans
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import Data.Functor.Identity
@@ -100,11 +99,9 @@ import Prelude hiding (head)
 import Safe
 import Utils
 
-newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Show,Eq,Ord,Functor)
 
 newtype KV k a
-  -- = KV { _kvvalues :: Map (Set (Rel k)) (AValue k a) }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
-         = KV
+  = KV
   { _kvvalues :: Map (Set (Rel k)) (TB k a)
   } deriving (Eq, Ord, Functor, Foldable, Traversable, Show, Generic)
 
@@ -128,11 +125,17 @@ mapBothKV k f (KV n) = KV (Map.mapKeys (S.map (fmap k)) $ fmap f n)
 
 mapKV f (KV n) = KV (fmap f n)
 
+traverseKV
+  :: Applicative f =>
+     (TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
 traverseKV f (KV n) = KV <$> traverse f n
 
+filterKV :: (TB k a -> Bool) -> KV k a -> KV k a
 filterKV i (KV n) = KV $ Map.filterWithKey (\k -> i) n
 
+findKV :: (TB k a -> Bool) -> KV k a -> Maybe (Set (Rel k), TB k a)
 findKV i (KV n) = L.find (i . snd) $ Map.toList n
+
 
 type Column k a = TB k a
 
@@ -156,8 +159,6 @@ renderBinary (AnyOp op) = renderBinary op <> " any"
 renderBinary (Flip (AllOp op)) = " all" <> renderBinary op
 renderBinary (Flip (AnyOp op)) = " any" <> renderBinary op
 -- Symetric Operators
-renderBinary (Flip i) = renderBinary i
-renderBinary i = error (show i)
 
 readBinaryOp :: T.Text -> BinaryOperator
 readBinaryOp "=" = Equals
@@ -188,9 +189,6 @@ instance Binary BinaryOperator
 
 instance NFData BinaryOperator
 
--- Reference labeling
--- exchange label reference for values when labeled
--- inline values reference when unlabeled
 data Rel k
   = Inline { _relOri :: k }
   | Rel { _relOri :: k
@@ -331,6 +329,8 @@ data TB k a
      , _fkrelation :: [Rel k]
      , _ifkttable :: FTB (KV k a) }
   deriving (Functor, Foldable, Traversable, Generic, Eq, Ord, Show)
+
+newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Show,Eq,Ord,Functor)
 
 _fkttable (IT _ i) = i
 _fkttable (FKT _ _ i) = i

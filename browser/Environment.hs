@@ -8,7 +8,6 @@ import Step.Client
 import Query
 import Types
 import Control.Exception
-import Postgresql.Types
 import Data.Time
 import Step.Common
 import Debug.Trace

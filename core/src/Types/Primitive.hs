@@ -17,17 +17,16 @@ module Types.Primitive where
 import Control.Applicative
 import Control.DeepSeq
 import qualified Control.Lens as Le
+import Data.Binary.Orphans
 import Control.Lens.TH
 import Control.Monad
 import Data.Aeson
 import Data.Bifunctor
 import Data.Binary (Binary)
-import qualified Data.Binary as B
 import qualified Data.ByteString as BS
 import Data.Dynamic
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
-import qualified Data.HashMap.Strict as HM
 import qualified Data.Interval as Interval
 import qualified Data.List as L
 import Data.Map (Map)
@@ -62,7 +61,6 @@ data KTypePrim
   | KArray
   | KInterval
   | KOptional
-  | KDelayed
   deriving (Eq, Ord, Show, Generic)
 
 instance Binary Order
@@ -101,6 +99,8 @@ isArray _ = False
 newtype TBIndex a =
   Idex [FTB a]
   deriving (Eq, Show, Ord, Functor, Generic)
+instance (Binary a)  => Binary (TBIndex a)
+instance (NFData a)  => NFData (TBIndex a)
 
 data Union a
   = Many [Union a]
@@ -130,6 +130,27 @@ data Constant
 instance NFData Constant
 
 instance Binary Constant
+
+data DiffPosition
+  = DiffPosition3D (Double,Double,Double)
+  | DiffPosition2D (Double,Double)
+  deriving(Eq,Ord ,Show,Generic)
+
+data DiffShowable
+  = DSText [Int]
+  | DSDouble Double
+  | DSPosition DiffPosition
+  | DSInt Int
+  | DSDiffTime NominalDiffTime
+  | DSDays Integer
+  deriving(Eq,Ord,Show,Generic)
+
+instance Binary DiffShowable
+instance Binary DiffPosition
+
+instance NFData DiffPosition
+instance NFData DiffShowable
+
 
 data UnaryOperator
   = IsNull
@@ -324,7 +345,6 @@ showTy f (Primitive l i) = f i ++ join (showT <$> l)
     showT KOptional = "?"
     showT KInterval = "()"
     showT KSerial = "*"
-    showT KDelayed = "_"
 
 instance Eq (FKey a) where
   k == l = keyFastUnique k == keyFastUnique l
@@ -405,8 +425,6 @@ instance Show HDynamic where
 
 deriving instance Ord Value
 
-instance Ord (HM.HashMap Text Value) where
-  compare i j = foldl (<>) EQ (HM.intersectionWith compare i j)
 
 data Showable
   = SText Text
@@ -418,6 +436,7 @@ data Showable
   | STime STime
   | SBinary BS.ByteString
   | SDynamic HDynamic
+  | SDelta DiffShowable
   deriving (Ord, Eq, Show, Generic)
 
 type SqlOperation = SqlOperationK Key
@@ -462,7 +481,6 @@ data TableK k
         , _rawSchemaL :: Text
         , _rawTableTypeL :: TableType
         , rawTranslation :: Maybe Text
-        , rawDelayed :: [k]
         , __rawIsSum :: Bool
         , _rawNameL :: Text
         , uniqueConstraint :: [[k]]
@@ -628,12 +646,11 @@ data KVMetadata k = KVMetadata
   , _kvdesc :: [k]
   , _kvuniques :: [[k]]
   , _kvattrs :: [k]
-  , _kvdelayed :: [k]
   , _kvjoins :: [SqlOperationK k]
   , _kvrecrels :: [MutRec [[Rel k]]]
   } deriving (Functor, Foldable, Generic)
 
-kvempty = KVMetadata "" "" [] [] [] [] [] [] [] []
+kvempty = KVMetadata "" "" []  [] [] [] [] [] []
 
 instance Binary k => Binary (KVMetadata k)
 
@@ -650,7 +667,6 @@ tableMeta t =
     (rawDescription t)
     (fmap F.toList $ uniqueConstraint t)
     (F.toList $ rawAttrs t)
-    (F.toList $ rawDelayed t)
     (rawFKS t)
     (paths' <> paths)
   where
@@ -679,7 +695,7 @@ makeLenses ''TableK
 --- Attr Cons/Uncons
 --
 unIndexItens ::
-     (Show (KType k), Show a)
+     (Show k, Show a)
   => Int
   -> Int
   -> TB (FKey (KType k)) a
@@ -687,7 +703,7 @@ unIndexItens ::
 unIndexItens ix o = unIndex (ix + o)
 
 unIndex ::
-     (Show (KType k), Show a)
+     (Show k, Show a)
   => Int
   -> TB (FKey (KType k)) a
   -> Maybe (TB (FKey (KType k)) a)
@@ -805,7 +821,6 @@ kOptional = Le.over (keyTypes . keyFunc) (KOptional :)
 
 kArray = Le.over (keyTypes . keyFunc) (KArray :)
 
-kDelayed = Le.over (keyTypes . keyFunc) (KDelayed :)
 
 unKOptional (Key a v c m n d (Primitive (KOptional:cs) e)) =
   Key a v c m n d (Primitive cs e)
@@ -815,15 +830,6 @@ unKOptional (Key a v c m n d (Primitive [] e)) =
   Key a v c m n d (Primitive [] e)
 unKOptional i = i -- error ("unKOptional" <> show i)
 
-unKTDelayed (KDelayed:e) = e
-unKTDelayed (KSerial:e) = e
-unKTDelayed (KOptional:e) = KOptional : unKTDelayed e
-unKTDelayed (KArray:e) = KArray : unKTDelayed e
-unKTDelayed i = i
-
-unKDelayed (Key v a c m n d e) =
-  (Key v a c m n d (Le.over keyFunc unKTDelayed e))
-unKDelayed i = error ("unKDelayed" <> show i)
 
 unKArray (Key a v c d m n (Primitive (KArray:xs) e)) =
   Key a v c d m n (Primitive xs e)
@@ -994,10 +1000,10 @@ getPKM :: (Show k, Ord k) => KVMetadata k -> KV k a -> Map k (FTB a)
 getPKM m = Map.fromList . getPKL m
 
 getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(k, FTB a)]
-getPKL m = getUn m (S.fromList $ _kvpk m)
+getPKL m = getUn (S.fromList $ _kvpk m)
 
-getUn :: (Show k, Ord k) => KVMetadata k -> Set k -> KV k a -> [(k, FTB a)]
-getUn m un k =
+getUn :: (Show k, Ord k) => Set k -> KV k a -> [(k, FTB a)]
+getUn  un k =
   concat $
   F.toList
     ((\ix ->

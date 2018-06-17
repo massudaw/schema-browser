@@ -7,62 +7,45 @@
 
 module TP.Chart (chartDef,chartWidget,chartWidgetMetadata) where
 
-import GHC.Stack
-import Data.Ord
 import Environment
 import qualified NonEmpty as Non
 import Step.Host
 import Control.Monad.Writer as Writer
 import TP.View
 import qualified Data.Interval as Interval
-import Control.Concurrent
-import Utils
-import Types.Patch
 import Control.Arrow
-import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
+import Control.Lens ((^.), _2)
 import qualified Data.List as L
-import Data.Either
 import Data.Interval (Interval(..))
 import Data.Time.ISO8601
-import Data.Time.Calendar.WeekDate
-import Data.Char
 import qualified Data.Text.Encoding as TE
-import Control.Concurrent.Async
-import Safe
-import Query
-import Data.Time hiding(readTime)
+import Data.Time
 import qualified Data.Aeson as A
 import Text
 import qualified Types.Index as G
-import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
-import Prelude hiding (head)
-import TP.QueryWidgets
-import Control.Monad.Reader
-import Schema
 import qualified Data.HashMap.Strict as HM
 import Data.Maybe
-import Reactive.Threepenny hiding (apply)
+import Reactive.Threepenny
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
-import Data.Monoid hiding (Product(..))
+import Graphics.UI.Threepenny.Core
 import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
-instance ToJS (FTB Showable ) where
+instance ToJS (FTB Showable) where
   render  = return .JSCode . BSL.unpack . A.encode
 
-calendarCreate cal def = runFunction $ ffi "createChart(%1,%2)" cal def
-calendarAddSource cal chart t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4,%5)" cal (tableName t) fields evs chart
-calendarRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tableName t)
+chartCreate = runFunction . ffi "createChart(%1)"
+chartAddSource cal chart t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4,%5)" cal (tableName t) fields evs chart
+chartRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tableName t)
+
 
 chartDef inf
   = projectV
@@ -98,12 +81,12 @@ chartDef inf
           pks <- pksM
           values <- mapM (\(SText i)->  unSOptional =<< recLookupInf inf tname (indexerRel i) r) mfields
           let fields = fmap fromJust $ Non.filter isJust $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
-          return $ fmap A.toJSON $ HM.fromList
-                    [("value" :: Text,ArrayTB1  $ values )
+          return $ A.toJSON <$> HM.fromList
+                    [("value" :: Text,ArrayTB1 values)
                     ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
                     ,("color" , TB1 color)
                     ]
-      returnA -< ("#" <> renderPrim color ,lookTable inf tname,F.toList $ fmap TB1 mfields,((fmap TB1 . F.toList <$> evfields),(fmap TB1 . F.toList <$> gfields),TB1 chart),proj )
+      returnA -< ("#" <> renderPrim color ,lookTable inf tname,F.toList $ fmap TB1 mfields,(fmap TB1 . F.toList <$> evfields,fmap TB1 . F.toList <$> gfields,TB1 chart),proj )
 
 
 chartWidgetMetadata inf =  do
@@ -122,42 +105,34 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     let
       legendStyle  lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,t,_)-> (b,i)) dashes)
-        in traverse (\(k@(c,tname,_,_,_)) -> do
+        in traverse (\k@(c,tname,_,_,_)-> do
           element b # set UI.class_"col-xs-1"
-          header <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-11"
+          header <- UI.div # set text  (T.unpack  lookDesc ) # set UI.class_ "fixed-label col-xs-11"
           UI.label # set children [b,header]# set UI.style [("background-color",c),("display","-webkit-box")]
             ) item
-    calendar <- UI.div # set UI.class_ "col-xs-10"
-    -- element body # set children [calendar]
-    let calFun (resolution,incrementT,positionB) = mdo
-            edits <- ui$ accumDiff (\tref->  evalUI calendar $ do
-              let
-                evc = eventClick calendar
-              charts <- UI.div  # set UI.style [("height", "300px"),("width", "900px")]
-              calendarCreate  charts (show incrementT)
-              let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-              traverse (\(_,t,fields,(timeFields,geoFields,chart),proj)-> do
-                    let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
-                        fieldKey (TB1 (SText v))=   v
-                    reftb <- ui $ refTables' inf t Nothing pred
-                    let v = reftb ^. _2
-                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (readPK inf . T.pack ) evc
-                    tdib <- ui $ stepper Nothing (join <$> evsel)
-                    let tdi = tidings tdib (join <$> evsel)
-                    TrivialWidget _ el <- crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) t)  tdi
-                    traverseUI
-                      (\i -> do
-                        calendarAddSource charts chart t (renderShowable <$> fields ) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap proj $ L.sortBy (comparing (G.getIndex (tableMeta t)))$ G.toList i)
-                        ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
-                       v
-                    element el # sink UI.style  (noneShow . isJust <$> tdib)
-                    UI.div # set children [charts,el] # set UI.class_ "row"
-                                   ) ref) sel
+    chart <- UI.div # set UI.class_ "col-xs-10"
+    let
+      calFun (resolution,incrementT,positionB) = do
+        edits <- ui$ accumDiff (\tref->  evalUI chart $ do
+          charts <- UI.div # set UI.class_ "row" # set UI.style [("height", "300px"),("width", "900px")]
+          chartCreate  charts
+          let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
+          F.traverse_ (\(_,t,fields,(timeFields,geoFields,chart),proj)-> do
+                let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
+                    fieldKey (TB1 (SText v))=   v
+                reftb <- ui $ refTables' inf t Nothing pred
+                let v = reftb ^. _2
+                traverseUI
+                  (\i -> do
+                    chartAddSource charts chart t (renderShowable <$> fields ) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap proj $ L.sortOn (G.getIndex (tableMeta t)) $ G.toList i)
+                    ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ chartRemoveSource charts t)) v
+                               ) ref
+          return charts) sel
 
-            element calendar # sink children ( catMaybes .F.toList <$> facts edits)
-        exec = do
-          onFFI "google.charts.setOnLoadCallback(%1)" (evalUI calendar $ traverseUI calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
-          return [calendar]
+        element chart # sink children (F.toList <$> facts edits)
+      exec = do
+        onFFI "google.charts.setOnLoadCallback(%1)" (evalUI chart $ traverseUI calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
+        return [chart]
 
     return  (legendStyle , dashes ,exec)
 
@@ -178,14 +153,4 @@ readTime v = case unsafeFromJSON v of
            parseISO8601 e)
         [i,a] -> (,) <$> Just i <*> (Right <$> parseISO8601 a)
 
-eventClick:: Element -> Event String
-eventClick el = fmap fst $ filterJust $ readTime <$> domEvent "eventClick" el
 
-eventDrop :: Element -> Event DateChange
-eventDrop el = filterJust $ readTime <$> domEvent "eventDrop" el
-
-eventDragDrop :: Element -> Event DateChange
-eventDragDrop el = filterJust $ readTime <$> domEvent "externalDrop" el
-
-eventResize :: Element -> Event DateChange
-eventResize el = filterJust $ readTime <$> domEvent "eventResize" el

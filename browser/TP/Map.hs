@@ -9,8 +9,6 @@ import Step.Host
 import qualified NonEmpty as Non
 import Data.String
 import TP.MapSelector
-import TP.Browser
-import TP.Selector
 import Environment
 import Utils
 import Database.PostgreSQL.Simple
@@ -40,7 +38,6 @@ import TP.Widgets
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
-import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
 import qualified Data.List as L

@@ -7,62 +7,32 @@
 
 module TP.Browser where
 
-import Control.Monad.Writer (runWriterT,tell)
-import Control.Lens (_1,_2,(^.),over)
-import GHC.Generics
 import ClientAccess
-import Safe
-import qualified Data.Dynamic as Dyn
-import qualified NonEmpty as Non
-import Graphics.UI.Threepenny.Internal (wId)
-import Data.Char
-import Serializer
-import Step.Common
-import qualified Data.Vector as V
-import Step.Host
+import Control.Monad.Reader
+import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
+import Data.Monoid hiding (Product(..))
+import qualified Data.Set as S
+import qualified Data.Text as T
+import qualified Graphics.UI.Threepenny as UI
+import Graphics.UI.Threepenny.Core hiding (apply, delete, get)
 import Query
-import Data.Time
-import Text
-import qualified Types.Index as G
-import Data.Bifunctor (first)
+import RuntimeTypes
+import Schema
+import SchemaQuery
+import TP.QueryWidgets
 import TP.Selector
 import TP.Widgets
-import TP.QueryWidgets
 import Types
-import SchemaQuery
-import Database.PostgreSQL.Simple
-import Postgresql.Backend (postgresOps)
-import Control.Monad.Reader
-import System.Environment
-import Data.Ord
+import qualified Types.Index as G
 import Utils
-import Schema
-import Types.Patch
-import Data.Maybe
-import Reactive.Threepenny hiding(apply)
-import qualified Data.List as L
-import qualified Data.ByteString.Char8 as BS
 
-import RuntimeTypes
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
-import qualified Data.ExtendedReal as ER
-import qualified Data.Interval as Interval
-import Data.Interval  (Interval)
-import Data.Monoid hiding (Product(..))
-
-import qualified Data.Foldable as F
-import qualified Data.Text as T
-import Data.Text (Text)
-import qualified Data.Set as S
-import qualified Data.Map as M
-import GHC.Stack
-
-
-layFactsDiv i j =  case i of
-   Vertical -> "col-xs-" <> show (12 `div` fromIntegral (max 1 j))
-   Horizontal -> "col-xs-12"
-   Tabbed -> "col-xs-12"
+layFactsDiv i j =
+  case i of
+    Vertical -> "col-xs-" <> show (12 `div` fromIntegral (max 1 j))
+    Horizontal -> "col-xs-12"
+    Tabbed -> "col-xs-12"
 
 data Layout
   = Vertical
@@ -99,9 +69,8 @@ layoutSel' keyword list = do
   return (getElement sel,body)
 
 layoutSel k l = do
-  (i,j) <- layoutSel'  k l
-  UI.div # set children [i,j]
-
+  (i, j) <- layoutSel' k l
+  UI.div # set children [i, j]
 
 chooserTable six inf bset cliTid cli = do
   let
@@ -115,7 +84,6 @@ chooserTable six inf bset cliTid cli = do
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
     let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
-    ui $ trackTable (meta inf) (wId w) table six ix
     body <-
       if L.null (rawUnion table)
          then
@@ -127,10 +95,9 @@ chooserTable six inf bset cliTid cli = do
               (\i ->UI.button
                   # set UI.class_ "buttonSel btn"
                   # set text (T.unpack $ tableName i))
-           els <- traverseUI ((\t -> do
+           els <- traverseUI (\t -> do
              b <- viewer t
-             element b # set UI.class_ "col-xs-12"
-             return b))(triding unions)
+             element b # set UI.class_ "col-xs-12") (triding unions)
            body <- UI.div # sink root (facts els)
            UI.div # set children [getElement unions, body]
     UI.div
@@ -143,35 +110,50 @@ viewerMode
   ::
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
-  let
-  reftb@(_,vpt,_,_) <- ui $ refTables' inf table Nothing mempty
+  reftb@(_,vpt,_,_) <- ui $ refTablesPorj inf table Nothing mempty (recPKDesc inf (tableMeta table) (allRec' (tableMap inf) table))
   let
     tdip = listRows inf table <$> cliTid
-    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> vpt <*> fmap activeRows tdip
-  itemList <- multiSelector inf table reftb (pure Nothing) tdi
-  v <- ui $ currentValue (facts tdi)
-  tds <- do
-      let
-        updatedValue = (\i j -> const . catMaybes  $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> facts (triding itemList) <@> rumors vpt
-        selection = const <$> rumors (triding itemList)
-      ui $ accumT  v (unionWith (.) selection  updatedValue)
+    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> facts vpt <#> fmap activeRows tdip
 
-  nav  <- buttonDivSet  (["Edit","Table"]) (pure  Nothing) (\i ->
-        UI.button # set UI.text i # set UI.class_ "buttonSet btn-sm btn-default pull-right" )
-  cru <- switchManyUI tds (triding nav)
-    $ M.fromList [("Edit",fmap maybeToList <$> crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) (safeHead <$> tds)),
-    ("Table",batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds)]
+  nav  <- buttonDivSet  ["Edit","Table"] (pure Nothing)
+      (\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-sm btn-default pull-right" )
+
+  v <- ui $ currentValue (facts tdi)
+
+  cru <- switchManyUI tdi (triding nav) $
+    M.fromList [
+    ("Edit",do
+      itemList <- selector inf table reftb (pure Nothing) (safeHead <$> tdi)
+      let
+        updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts (triding itemList)<@> rumors vpt
+        selection = const <$> rumors (triding itemList)
+        tds = triding itemList
+        tds2 = (\i j -> join $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> triding itemList  <*> vpt
+      title <- UI.h5
+        # sink text (facts $ maybe "" (attrLine inf  (tableMeta table)) <$> tds)
+        # set UI.class_ "header col-xs-12"
+      TrivialWidget tdf ev <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
+      element ev # set UI.class_ "col-xs-12"
+      TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,title,ev]
+    ),
+    ("Table",do
+      itemList <- multiSelector inf table reftb (pure Nothing) tdi
+      let
+          tds = triding itemList
+          tds2 = (\i j -> catMaybes  $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> triding itemList  <*> vpt
+      title <- UI.h5
+        # sink text (facts $ L.intercalate "," . fmap (attrLine inf  (tableMeta table)) <$> tds)
+        # set UI.class_ "header col-xs-12"
+      TrivialWidget tdf ev <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
+      element ev # set UI.class_ "col-xs-12"
+      TrivialWidget tds <$> UI.div # set children [getElement itemList,title,ev]
+    )]
 
   w  <- askWindow
-  ui $ accumDiffCounterIni (L.length v)
-    (logRowAccess w (six,inf) (tix,table))
-    (S.fromList <$> tds)
-
-  title <- UI.h5
-    # sink text (facts $ L.intercalate "," . fmap (attrLine inf  (tableMeta table)) <$> tds)
-    # set UI.class_ "header col-xs-10"
-  element nav # set UI.class_ "col-xs-2"
-  insertDivBody <- UI.div # set children [title,getElement nav,getElement cru] # set UI.class_ "col-xs-12"
-  element cru # set UI.class_ "col-xs-12"
-  UI.div # set children [getElement itemList,insertDivBody]
+  ui $ do
+    calmPK <-  calmT (S.fromList . fmap (G.getIndex (tableMeta table))<$> triding cru)
+    accumDiffCounterIni (L.length v)
+      (logRowAccess w (six,inf) (tix,table))
+        calmPK
+  UI.div # set children [getElement nav , getElement cru]
 

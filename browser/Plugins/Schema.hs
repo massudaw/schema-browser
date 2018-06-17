@@ -43,7 +43,7 @@ import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
 
-codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (error "no ops 3" ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _-> return Nothing )  mapKeyType  ((\ a -> liftIO . logTableModification a)) 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops")
+codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (error "no ops 3" ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _-> return Nothing )  mapKeyType  ((\ a -> liftIO . logTableModification a)) ((\ a -> liftIO . logUndoModification a))400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops")
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList
@@ -74,7 +74,6 @@ ktypeRec f v@(Primitive (KOptional:xs) i) =   f v <|> fmap (addToken KOptional) 
 ktypeRec f v@(Primitive (KArray :xs) i) =   f v <|> fmap (addToken KArray) (ktypeRec f (Primitive xs i))
 ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) (ktypeRec f (Primitive xs i))
 ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
-ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
 ktypeRec f v@(Primitive []  i ) = f v
 
 
@@ -104,7 +103,7 @@ list = justError "empty union list " . list'
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
-  (_,(_,(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoader' (lookTable (meta metaschema) "plugins") Nothing Nothing [] mempty
+  (_,(_,TableRep(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoaderAll (lookTable (meta metaschema) "plugins") Nothing Nothing [] mempty Nothing
   dbstats <- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
   (event,handle) <- R.newEvent
   let mk = tableMeta $ lookTable (meta metaschema) "plugins"
@@ -135,7 +134,7 @@ addPlugins iniPlugList smvar = do
       mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()
-  watch <- liftIO$ addWatch inotify  [CloseWrite] "Plugins.hs" modifyed
+  watch <- liftIO$ addWatch inotify  [CloseWrite] "./plugins/Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
   liftIO $ mapM (traverse (handle . createRow' (lookMeta metaschema "plugin_code").liftTable' metaschema "plugin_code") . row)  iniPlugList
   return  iniPlugList
@@ -191,10 +190,7 @@ initSession modStrNames = do
 addPkgDb :: GhcMonad m => FilePath -> m ()
 addPkgDb fp = do
   dfs <- getSessionDynFlags
-  let pkg  = PkgConfFile fp
-  let dfs' = dfs { extraPkgConfs = (pkg:) . extraPkgConfs dfs }
-  setSessionDynFlags dfs'
-  _ <- liftIO $ initPackages dfs'
+  _ <- liftIO $ initPackages dfs
   return ()
 
 

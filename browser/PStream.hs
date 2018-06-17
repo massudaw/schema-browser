@@ -98,6 +98,12 @@ test = runDynamic $ do
   liftIO $print "End"
 
 
+focus :: Patch b => (a -> b) -> (Index a -> Maybe (Index b)) -> PStream a -> PStream b
+focus  f fp (PStream b e) =
+  PStream (f <$> b) (filterJust $ fp <$> e)
+
+
+
 toTidings :: Patch a => PStream a -> Tidings a
 toTidings  (PStream b e) = tidings b (P.apply <$> b <@> e)
 

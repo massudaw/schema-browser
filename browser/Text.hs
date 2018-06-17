@@ -3,6 +3,7 @@ module Text where
 import Types
 import Types.Patch
 import qualified NonEmpty as Non
+import Data.Time.Format
 import Data.Hashable
 import Data.Ord
 import Data.Dynamic
@@ -18,7 +19,6 @@ import qualified Data.Char as Char
 import Control.Applicative
 import Data.Maybe
 import Text.Read hiding (choice)
-import Data.Time.Parse
 import Data.Time.LocalTime
 import qualified Data.ByteString.Char8 as BS
 
@@ -35,10 +35,10 @@ import qualified Data.Text as T
 
 -- This module contains text backend printer and parser
 
-explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> replicate i depth ++ j)
+explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> concat (replicate i depth) ++ j)
 
 ident :: [(Int,String)] -> String
-ident = explode '\n' '\t'
+ident = explode '\n' "  "
 
 renderTablePatch :: RowOperation T.Text Showable -> String
 renderTablePatch (CreateRow i) = "CreateRow " ++ ident (renderTable i)
@@ -52,29 +52,31 @@ renderTable :: Show a => TBData a Showable ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
 
+offset ix =  fmap (first (+ix))
 renderPatch :: Show a => PathAttr a Showable ->  [(Int,String)]
 renderPatch (PFK rel k v )
-  = [(0,L.intercalate " AND " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] => ")]
-  ++ fmap (first (+1)) (renderFTBPatch renderRowPatch v)
+  = [(0,L.intercalate " && " (fmap renderRel rel))]
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] {")]
+  ++  offset 1 (renderFTBPatch renderRowPatch v)++ [(0,"}")]
 renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch renderPrimPatch v))]
-renderPatch (PInline k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (renderFTBPatch renderRowPatch v)
+renderPatch (PInline k v ) = [(0,show k ++ " {")] ++ offset 1 (renderFTBPatch renderRowPatch v) ++ [(0,"}")]
+renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch renderPrimPatch v))]
 
 
 renderPrimPatch i = [(0,renderPrim  i)]
 
 renderAttr :: Show a => TB a Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
-  = [(0,L.intercalate " AND " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> F.toList (_kvvalues k))  ++ "] => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
+  = [(0,L.intercalate " && " (fmap renderRel rel))]
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> F.toList (_kvvalues k))  ++ "] => ")] ++  (renderFTB renderTable v)
 
 renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB renderPrimPatch v)
-renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ fmap (first (+1)) i  ) $  nonEmpty (renderFTB renderTable v)
+renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ offset 1 i )$  nonEmpty (renderFTB renderTable v)
 
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
 renderFTBPatch f (PAtom i) = f i
 renderFTBPatch f (POpt i) = concat $ maybeToList $ fmap (renderFTBPatch f ) i
-renderFTBPatch f (PIdx ix i)  = maybe  [(0,show ix ++ "-")] (fmap (fmap (\e -> show ix ++ "-" ++ e )) . renderFTBPatch f) i
+renderFTBPatch f (PIdx ix i)  = [(0, show ix ++ " : {")]  ++ maybe [] (offset (1) .renderFTBPatch f) i ++ [(0,"}")]
 renderFTBPatch f (PatchSet l ) =  concat $ F.toList $ fmap (renderFTBPatch f) l
 renderFTBPatch f (PInter b i)  = [(0,showFin i)]
   where
@@ -108,12 +110,12 @@ renderPrim (SBoolean a) = show a
 renderPrim (SDouble a) = show a
 renderPrim (STime i)
   = case i of
-    STimestamp a ->  show a
+    STimestamp a -> formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S%Q" a
     SDate a -> show a
     SDayTime a -> show a
     SPInterval a -> show a
 renderPrim (SBinary i) = "Binary= " ++ show (hash i )
-renderPrim (SDynamic (HDynamic s)) = fromMaybe  "can't render SDynamic" $ fmap renderShowable (fromDynamic s) <|> fmap renderPK (fromDynamic s) <|> fmap renderTablePatch (fromDynamic s)
+renderPrim (SDynamic (HDynamic s)) = fromMaybe  "can't render SDynamic" $ fmap renderShowable (fromDynamic s) <|> fmap (L.intercalate "," . map renderPK) (fromDynamic s) <|> fmap renderTablePatch (fromDynamic s)
 renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i
 
@@ -184,14 +186,14 @@ readPrim t =
       readBin = nonEmpty (\i-> fmap (SBinary . BS.pack ) . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
-      readDate =  fmap (STime . SDate . localDay . fst) . strptime "%Y-%m-%d"
-      readDayTime =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
-      readDayTimeMin =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M"
-      readDayTimeHour =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H"
+      readDate =  fmap (STime . SDate . localDay ) . parseTimeM True defaultTimeLocale "%Y-%m-%d"
+      readDayTime =  fmap (STime . SDayTime . localTimeOfDay ) . parseTimeM True defaultTimeLocale"%H:%M:%OS"
+      readDayTimeMin =  fmap (STime . SDayTime . localTimeOfDay ) . parseTimeM True defaultTimeLocale"%H:%M"
+      readDayTimeHour =  fmap (STime . SDayTime . localTimeOfDay ) . parseTimeM True defaultTimeLocale"%H"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
       readMultiPolygon = nonEmpty (fmap SMultiGeom . fmap (fmap (\(i:xs) -> SPolygon i xs)). readMaybe)
-      readTimestamp =  fmap (STime . STimestamp  .  localTimeToUTC utc . fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
+      readTimestamp =  fmap (STime . STimestamp  .  localTimeToUTC utc ) . (\i -> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%OS" i <|> parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" i)
       readInterval =  fmap (STime . SPInterval) . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i

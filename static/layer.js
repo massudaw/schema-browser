@@ -196,8 +196,8 @@ function addChartColumns(el,table,fields,source,chart){
 	var axisY = fields.map(function(i){return {lineThickness:2}});
 	var ix = 0;
   var dataCol = fields.map(function(i){
-	  var data = dataInp.map(function(r){
-						return {label: r.title.slice(0,20),y:parseFloat(r.value[ix])}
+	  var data = dataInp.filter(function(i){ return i}).map(function(r){
+						return {label:  r.title.slice(0,20)  ,y:parseFloat(r.value[ix])}
 				}); 
 				return { type :chart
                ,name : i
@@ -232,50 +232,16 @@ function addChartColumns(el,table,fields,source,chart){
 
 	chart.render();
 }
-/*
-function addChartColumns(el,table,fields,source){
-  var data = JSON.parse(source);
-  var chart = el.chart
-  var dataTable = new google.visualization.DataTable();
-          dataTable.addColumn({ type: 'string', id: 'Name' });
-          fields.map(function(i){dataTable.addColumn({ type: 'number',id: i,label : i });});
-          dataTable.addRows(data.filter(function (o){ return  o.value != null }).map(function(o){
-            return [o.title].concat(o.value.map(parseFloat)) ;
-          }));
 
-          var ix = 0;
-          var axis = fields.map(function(i){
-              ix++; 
-              return {title :i,textPosition:ix == 2 ? 'in' : 'out'};
-          });
-          var series ={};
-          var ix= 0;
-          fields.map(function(i){;
-              var i = ix
-              series [i] = {type :'bars',targetAxisIndex:i};
-              ix++
-              });
-          var options = {
-                width :1000,
-                title: table,
-                vAxes: axis,
-                hAxis:{title : 'id'},
-                series:series
-                };
-
-          chart.draw(dataTable, options);
-
-}
-*/
-function createChart(el,tdate,view){
-          var container = el ;
-          var chart = new google.visualization.ComboChart(container);
-          el.chart = chart;
+function createChart(el){
+      var container = el ;
+      var chart = new google.visualization.ComboChart(container);
+      el.chart = chart;
 };
 
 
 function createAgenda(el,tdate,view){
-  var date = new Date(tdate);
+  var date = moment(tdate,"YYYY-MM-DDTHH:mm:ss.SSS").toDate();
   var d = date.getDate();
   var m = date.getMonth();
   var y = date.getFullYear();

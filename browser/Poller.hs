@@ -132,16 +132,16 @@ poller schmRef authmap db plugs is_test = do
                           i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transaction inf $
                               case elemp of
                                 Right action  -> do
-                                  getP <- getFrom (lookTable inf a) inp
+                                  getP <-  getFrom (lookTable inf a) inp
                                   ovm  <- fmap (liftTable' inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
-                                         p <- fullDiffEdit (tableMeta $ lookTable inf a)inp ov
+                                         fullEdit (tableMeta $ lookTable inf a)inp ov
                                          return ()) ovm
                                 Left action -> do
                                     getP <- getFrom (lookTable inf a) inp
                                     ovm  <- fmap (liftPatch inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                     maybe (return ()) (\ov-> do
-                                      p <- fullDiffEditInsert (tableMeta $ lookTable inf a)inp (apply inp ov)
+                                      fullEdit (tableMeta $ lookTable inf a) inp (apply inp ov)
                                       return ()) ovm
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
@@ -159,7 +159,7 @@ poller schmRef authmap db plugs is_test = do
 
                       transactionNoLog metas  $ do
                           fktable2 <- loadFKS ( lookTable metas "polling") (liftTable' metas "polling"  table2)
-                          fullDiffEdit ( lookMeta metas "polling")curr fktable2
+                          fullEdit ( lookMeta metas "polling")curr fktable2
                       return ()
 
           pid <- forkIO (void $ do

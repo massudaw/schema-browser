@@ -1,7 +1,6 @@
 module Expression (buildAccess,readFun,funmap,evaluateFFI,evaluate) where
 
 import Control.Monad
-import Safe
 import Data.Either
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
@@ -84,7 +83,7 @@ replaceAny l (TCon i ) =  TCon i
 ops = (\((inp,out),_) -> Forall [TV "a"]  $ L.foldr TArr ( replaceAny (TVar (TV "a")) . ktypeToType  $ out ) (replaceAny (TVar (TV "a")). ktypeToType <$> inp) ) <$> funmap
 
 renderPostgres :: Expr -> String
-renderPostgres  e = go e
+renderPostgres = go 
   where
     go :: Expr -> String
     go (Function i e) = T.unpack i ++ "(" ++  L.intercalate "," ( fmap  go   e) ++ ")"

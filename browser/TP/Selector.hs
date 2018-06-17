@@ -4,49 +4,50 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Selector (paginateList,tableOrder,calendarSelector,positionSel,tableChooser,selectFromTable,offsetFieldFiltered,offsetField,sorting,selectListUI,multiSelector,selector,attrLine) where
+module TP.Selector
+  ( paginateList
+  , tableOrder
+  , calendarSelector
+  , positionSel
+  , tableChooser
+  , selectFromTable
+  , offsetFieldFiltered
+  , offsetField
+  , selectListUI
+  , multiSelector
+  , selector
+  , attrLine
+  ) where
 
-import TP.View
-import Control.Monad.Writer (runWriterT, WriterT(..))
-import Control.Lens (_1, _2, (^.), over)
-import Safe
-import qualified NonEmpty as Non
-import Data.Maybe
-import qualified Data.Functor.Contravariant as C
-import Data.Char
-import Step.Common
-import Query
-import Step.Host
-import Data.Time
-import Text
-import qualified Types.Index as G
-import Data.Bifunctor (first)
-import Debug.Trace
-import Types
-import SchemaQuery
-import TP.Widgets
-import Prelude
 import Control.Monad.Reader
-import Data.Ord
-import Environment
-import Utils
-import Schema
-import Types.Patch
-import Data.Maybe
-import Reactive.Threepenny hiding (apply)
-import qualified Data.List as L
-import qualified Data.ByteString.Char8 as BS
-import RuntimeTypes
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
-import Data.Monoid hiding (Product(..))
+import Data.Char
 import qualified Data.Foldable as F
+import PrimEditor
+import qualified Data.Functor.Contravariant as C
+import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
+import Data.Monoid hiding (Product(..))
+import Data.Ord
+import qualified Data.Set as S
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Set as S
-import qualified Data.Map as M
-import GHC.Stack
-
+import Data.Time
+import qualified Graphics.UI.Threepenny as UI
+import Graphics.UI.Threepenny.Core hiding (apply, delete, get)
+import Prelude
+import RuntimeTypes
+import Safe
+import Schema
+import SchemaQuery
+import Step.Common
+import TP.View
+import TP.Widgets
+import Text
+import Types
+import qualified Types.Index as G
+import Types.Patch
+import Utils
 
 
 calendarSelector = do
@@ -94,79 +95,75 @@ positionSel = do
     return (bcpos,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 
-
-tableUsage inf orderMap selection table = (L.elem table (M.keys selection), tableOrder inf table orderMap )
-
-tableChooser :: InformationSchemaKV Key Showable
-          -> [Table]
-          -> Tidings ( Tidings (Table -> Text) -> Table -> Element -> UI (Maybe Element))
-          -> Tidings (TableK Key -> Bool)
-          -> Text
-          -> Text
-          -> Tidings [TableK Key]
-          -> UI
-               (
-                TrivialWidget (S.Set  (TableK Key) ))
-tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
-  let
-    pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-    authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
-  (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
-      (,,) <$> ((selectFromTable "ordering"  Nothing Nothing []  pred2))
-           <*> ((selectFromTable "authorization" Nothing Nothing [] authPred))
-           <*> ((selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
+filterString :: UI (TrivialWidget String)
+filterString = do
   filterInp <- UI.input # set UI.placeholder "Search.." # set UI.style [("width","100%")]
   filterInpE <- UI.valueChange filterInp
-  filterInpBh <- ui $ stepper "" (T.pack <$> filterInpE)
-  let filterInpT = tidings filterInpBh (T.pack <$> filterInpE )
-      ordRow orderMap pkset =  (pk,) <$> field
-          where
-            field =  lookAttr' "usage" <$> G.lookup pk orderMap
-            pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
+  filterInpT <- ui $ stepperT "" filterInpE
+  return $ TrivialWidget filterInpT filterInp
+
+tableChooser
+  :: InformationSchemaKV Key Showable
+    -> [Table]
+    -> Tidings (Text -> Table -> Element -> UI (Maybe Element))
+    -> Tidings (TableK Key -> Bool)
+    -> Tidings [TableK Key]
+    -> UI (TrivialWidget (S.Set  (TableK Key) ))
+tableChooser  inf tables legendStyle tableFilter iniTables = do
+  let
+    tablePred =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
+    authPred = [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> tablePred
+  (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
+      (,,) <$> selectFromTable "ordering" Nothing Nothing [] tablePred
+           <*> selectFromTable "authorization" Nothing Nothing [] authPred
+           <*> selectFromTable "table_name_translation" Nothing Nothing [] tablePred
+  let
+    ordRow orderMap pkset = field
+      where
+        field =  lookAttr' "usage" <$> G.lookup pk orderMap
+        pk = ordPK pkset
+    ordPK pkset = idex (meta inf) "ordering" [("table",int $ tableUnique pkset),("schema",int $ schemaId inf)]
+  filterInp <- filterString
   let
     -- Table Description
     lookDescT =  flip (lookDesc inf) <$> collectionTid translation
     -- Authorization
-    authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
+    autho_pk t = idex (meta inf) "authorization" [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ fst $ username inf)]
+    authorize =  (\autho t -> isJust $ G.lookup (autho_pk t) autho) <$> collectionTid authorization
     -- Text Filter
-    filterLabel = (\j d i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i))<$> filterInpT <*> lookDescT
+    filterLabel = (\j d i -> T.isInfixOf (T.toLower (T.pack j)) (T.toLower  $ d i)) <$> triding filterInp <*> lookDescT
   all <- checkedWidget (pure False)
   bset <- do
     let
       buttonString k = do
-          b <- UI.input # set UI.type_ "checkbox"
-          chkE <- UI.checkedChange b
-          return (b,chkE)
+        b <- UI.input # set UI.type_ "checkbox"
+        chkE <- UI.checkedChange b
+        return (b,chkE)
       visible  = (\i j k tb -> i tb && j tb && k tb ) <$> filterLabel <*> authorize <*> tableFilter
       allTablesSel True = S.fromList  $ tables
       allTablesSel False = S.empty
       iniSel =  S.fromList  <$> iniTables
     iniValue <- currentValue (facts iniSel)
     let iniEvent = unionWith const (rumors iniSel) (allTablesSel <$> rumors (triding all))
-
     iniT <- ui $ stepperT iniValue  iniEvent
-    ordIni <- currentValue (facts $ collectionTid orddb)
-
     checkDivSetTGen
-        tables
-        (fmap (fmap snd).  ordRow <$>  pure ordIni)
-        iniT
-        buttonString
-        ((\lg visible i j -> if (visible i) then Just (maybe UI.div return =<<  lg lookDescT i j) else Nothing  )
-         <$> legendStyle <*> visible )
+      tables
+      (ordRow <$>  collectionTid orddb)
+      iniT
+      buttonString
+      ((\lg desc visible i j -> if (visible i) then Just (maybe UI.div return =<<  lg (desc i) i j) else Nothing  )
+       <$> legendStyle <*> lookDescT <*>  visible )
   let
-    incClick (pk, TB1 usage)=  (lookMeta (meta inf ) "ordering" ,pk ,[PAttr (lookKey (meta inf) "ordering" "usage") (PAtom $ usage + SNumeric 1) ])
+    incClick = [PAttr (lookKey (meta inf) "ordering" "usage") (PAtom . SDelta $ DSInt 1)]
   sel0 <- ui $ currentValue (facts $ triding bset)
   let diffSet = (\j (o,_) -> (j, S.difference j o )) <$> rumors (triding bset)
   old <- ui $ accumT (sel0,S.empty)  diffSet
-  ui $ onEventIO
-      ((\i j  -> fmap incClick . ordRow i <$> F.toList (snd  j)) <$> facts (collectionTid orddb) <@> rumors old)
-      (runDynamic . traverse (traverse (\(m,pk,p) -> do
-        _ <- transactionNoLog (meta inf ) $ patchFrom m (pk ,PatchRow p)
-        putPatch (patchVar $  iniRef orddb) [FetchData (lookTable (meta inf) (_kvname m)) $ RowPatch $ (pk,PatchRow p)] )))
+  ui $ onEventDyn
+    (fmap ordPK . F.toList . snd <$> rumors old)
+    (traverse (transaction (meta inf) . patchFrom (lookMeta (meta inf) "ordering") . (,PatchRow incClick)))
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
-  header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
+  header <- UI.div # set children [getElement all, getElement filterInp] # set UI.style [("display","inline-flex")]
   tbChooserI <- UI.div # set children [header,getElement bset]  # set UI.style [("height","100%")]
   return $ (TrivialWidget (triding bset) tbChooserI)
 
@@ -180,33 +177,24 @@ instance Ord a => Ord (AscDesc a) where
   compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
 
 
-sorting :: Ord k=> [(k ,Bool)] -> [TBData k Showable]-> [TBData k Showable]
-sorting ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues )  )
-
 paginateList inf table itemListEl predicate (vpt,gist,_,_) constr tdi =  do
-      filterInp <- UI.input # set UI.placeholder "Search.."
-      filterInpE <- UI.valueChange filterInp
-      filterInpBh <- ui $ stepper "" filterInpE
+      filterInp <- filterString
       wheel <- fmap negate <$> UI.mousewheel itemListEl
       let
         filtering i k = filter (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText inf (tableMeta table)) k
-        filterInpT = tidings filterInpBh filterInpE
         pageSize = 20
         lengthPage (IndexMetadata fixmap)  predicate = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
           where s = maybe 0 fst $  M.lookup (fromMaybe mempty predicate) fixmap
+        sortList = reverse . L.sortOn (G.getIndex (tableMeta table))
 
-        preindex =  gist
-        sortList :: ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
-        sortList =  sorting (fmap (,True) $ rawPK table)
-
-      presort <- ui $ cacheTidings (sortList . G.toList <$> preindex)
+      presort <- ui $ cacheTidings ( G.toList <$> gist)
       -- Filter and paginate
       (offset,res3)<- do
         let
           aconstr = liftA2 applyConstr presort constrT
           constrT =  traverse  snd constr
           applyConstr m l =  filter (F.foldl' (\l (C.Predicate c) ->  liftA2 (&&) l (not <$> c) ) (pure True)  l) m
-        res3 <- ui$ cacheTidings (filtering  <$> filterInpT <*> aconstr)
+        res3 <- ui$ cacheTidings (filtering  <$> triding filterInp <*> aconstr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i) <$>  facts res3 <#> tdi) wheel  (flip lengthPage <$> facts predicate <#> vpt)
         return (offset, res3)
@@ -218,10 +206,10 @@ paginateList inf table itemListEl predicate (vpt,gist,_,_) constr tdi =  do
           let page = i `div` (opsPageSize (schemaOps inf) `div` pageSize)
           transactionNoLog inf $ selectFrom (tableName table) (Just page ) Nothing  [] (fromMaybe mempty pred)
       ui $ onEventDyn (rumors idxRequest) loadPage
-      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> res3)
+      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> (fmap sortList res3))
       element filterInp # set UI.class_ "col-xs-10"
       element offset # set UI.class_ "label label-default col-xs-2 pull-right"
-      fInp <-  UI.div # set children [filterInp,getElement offset]
+      fInp <-  UI.div # set children [getElement filterInp,getElement offset]
       return (res4,fInp)
 
 multiSelectListUI
@@ -233,27 +221,29 @@ multiSelectListUI
   -> SelTBConstraint
   -> Tidings [TBData Key Showable]
   -> UI (Tidings [TBData Key Showable], Element)
-multiSelectListUI inf table itemListEl predicate ref constr tdi = do
+multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_,_) constr tdi = do
+  let m = tableMeta table
   (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr (safeHead <$> tdi)
-  lbox <- multiListBoxEl itemListEl res4  tdi (showFK inf (tableMeta table))
+  lbox <- multiListBoxEl itemListEl (fmap (G.getIndex m )<$> res4 ) (fmap (G.getIndex m) <$> tdi) (showFKLook inf (tableMeta table) vpt)
   out <- UI.div # set children [fInp,itemListEl]
-  return ( triding lbox ,out )
+  return ((\i j -> catMaybes $ fmap (flip G.lookup  j) i) <$> triding lbox <*> vpt ,  out  )
 
 
 selectListUI
   :: InformationSchema
-     -> TableK CoreKey
-     -> Element
-     -> Tidings (Maybe WherePredicate)
-     -> RefTables
-     -> SelTBConstraint
-     -> Tidings (Maybe (TBData Key Showable))
-     -> UI (Tidings (Maybe (TBData Key Showable)), Element)
-selectListUI inf table itemListEl predicate ref  constr tdi = do
+   -> TableK CoreKey
+   -> Element
+   -> Tidings (Maybe WherePredicate)
+   -> RefTables
+   -> SelTBConstraint
+   -> Tidings (Maybe (TBData Key Showable))
+   -> UI (Tidings (Maybe (TBData Key Showable)), Element)
+selectListUI inf table itemListEl predicate ref@(_,vpt,_,_)  constr tdi = do
+  let m = tableMeta table
   (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr tdi
-  lbox <- listBoxEl itemListEl ((Nothing:) . fmap Just  <$>    res4 ) (fmap Just <$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFK inf (tableMeta table))
+  lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just  . G.getIndex m) <$> res4 ) (fmap (Just . G.getIndex m)<$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) vpt)
   out <-  UI.div # set children [fInp,itemListEl]
-  return ( join <$> triding lbox ,out)
+  return ((\i j -> join $ fmap (flip G.lookup  j) (join i)) <$> triding lbox <*> vpt   ,out)
 
 multiSelector
   :: InformationSchema
@@ -285,6 +275,7 @@ selector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   return (TrivialWidget tds itemSel)
 
 
+showFKLook inf m collection = (\col v j -> j  # set text (maybe "No reference" (showFKText inf m) (G.lookup v col ))) <$>  collection
 showFK inf m = pure (\v j -> j  # set text (showFKText inf m v))
 
 offsetField  initT eve  max = offsetFieldFiltered initT eve [max]

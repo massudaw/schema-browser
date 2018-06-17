@@ -13,7 +13,6 @@ import Control.Arrow
 import Step.Host
 import Control.Monad.Writer as Writer
 import TP.View
-import TP.Selector
 import qualified Data.Interval as Interval
 import qualified Data.HashMap.Strict as HM
 import NonEmpty (NonEmpty)
@@ -44,7 +43,6 @@ import SchemaQuery
 import TP.Widgets
 import Prelude hiding (head)
 import Control.Monad.Reader
-import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding (apply)
 import qualified Data.List as L
@@ -141,8 +139,6 @@ calendarView
 calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     (eselg,hselg) <- ui $ newEvent
     bhsel <- ui $ stepper Nothing eselg
-
-
     let
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
@@ -164,7 +160,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
                                   ) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
-      patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i)) >>= (tellPatches (tableMeta t). pure )))
+      patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i)) ))
     return ([innerCalendar],tidings bhsel eselg)
 
 calendarSelRow readSel (agenda,resolution,incrementT) = do

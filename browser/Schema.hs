@@ -5,7 +5,6 @@ import Data.String
 import Serializer
 import System.Environment
 import Data.Either
-import Debug.Trace
 import qualified Data.Aeson as A
 import Postgresql.Sql.Parser
 import Postgresql.Sql.Types
@@ -29,7 +28,6 @@ import Types.Patch
 import Control.Monad.RWS
 import qualified Types.Index as G
 import SchemaQuery
-import Data.Unique
 import qualified Data.Foldable as F
 import Data.Maybe
 import Data.Bifunctor(second,first)
@@ -53,18 +51,17 @@ import qualified Reactive.Threepenny as R
 import Postgresql.Parser
 
 
-createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text,Maybe Int32) -> KType (Prim (Text,Text,Maybe Word32) (Text,Text))
-createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname,typmod)
+createType :: (Bool,Bool,Bool,Bool,Bool,Text,Text,Maybe Int32) -> KType (Prim (Text,Text,Maybe Word32) (Text,Text))
+createType  (isNull,isArray,isRange,isDef,isComp,tysch,tyname,typmod)
   = Primitive comp base
   where
     add i v = if i then (v:) else id
-    comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial . add isDelayed KDelayed $ []
+    comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial  $ []
     base
       | isComp =  RecordPrim (tysch ,tyname)
       | otherwise = AtomicPrim (tysch ,tyname,fromIntegral <$> typmod)
 
 
-meta inf = Data.Maybe.fromMaybe inf (metaschema inf)
 
 
 
@@ -85,6 +82,8 @@ fromShowable2 i v = case  parseValue v of
   where toExpr v =  case v of
               Lit v -> ConstantExpr . fromShowable i <$>  (A.decode $ BSL.pack $ T.unpack v)
               ApplyFun t l -> Function t <$> (traverse toExpr l)
+              Cast i j -> toExpr i
+              i -> error (show i)
 
 
 testSerial  =(=="nextval"). fst . T.break(=='(')
@@ -121,7 +120,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        color <- liftIO$ query conn "SELECT color FROM metadata.schema_style where schema = ? " (Only schemaId )
        [Only uid] <- liftIO$ query conn "select oid from metadata.\"user\" where usename = ?" (Only user)
        uniqueMap <- liftIO$ fmap (\(toid,t,c,op,mod,tr) -> ((t,c), (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def (toid) )) ) <$>  query conn "select t.oid ,o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o join metadata.tables t on o.table_name = t.table_name and o.table_schema = t.schema_name  left join metadata.table_translation tr on o.column_name = tr.column_name   where table_schema = ? "(Only schema)
-       res2 <- liftIO$ fmap (\i@(t,c,j,k,del,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b,typ)) ) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
+       res2 <- liftIO$ fmap (\i@(t,c,j,k,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,d,z,b,typ)) ) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           backendkeyMap = M.fromList keyList
@@ -181,7 +180,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
                                   inlineFK =  fmap (\k -> (FKInlineTable k . inlineName ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attrMap =  M.fromList $ fmap (\i -> (keyPosition i,i)) $ S.toList $ justError "no attr" $ M.lookup c all
                                   attr = S.toList $ S.difference (justError ("no collumn" <> show c) $ M.lookup c all) ( S.fromList $ Data.Maybe.fromMaybe [] (M.lookup c descMap) <>  pks)
-                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey c )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (Data.Maybe.fromMaybe [] $ M.lookup  c descMap) (fromMaybe []  $ M.lookup c efks<>M.lookup c fks<>  inlineFK  ) attr )) res :: [(Text,Table)]
+                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap)  is_sum c (fromMaybe [] (fmap ( fmap (lookupKey c )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (Data.Maybe.fromMaybe [] $ M.lookup  c descMap) (fromMaybe []  $ M.lookup c efks<>M.lookup c fks<>  inlineFK  ) attr )) res :: [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
@@ -274,39 +273,30 @@ catchPluginException inf pname tname  idx i =
               id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (fmap (TBRecord2  . second (Binary . B.encode) . first keyValue) (M.toList idx)) , t )
               return (Left ((\(Only i) -> i)$ head $id)))
 
+logUndoModification
+  :: InformationSchema
+  -> RevertModification Table (RowPatch Key Showable)  -> IO ()
+logUndoModification inf (RevertModification id ip) = do
+  time <- getCurrentTime
+  env <- lookupEnv "ROOT"
+  let mod = modificationEnv env
+      ltime =  utcToLocalTime utc time
+  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (fromJust . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
+  let modt = lookTable (meta inf)  mod
+  return ()
 
 logTableModification
-  ::
-     InformationSchema
+  :: InformationSchema
      -> TableModification (RowPatch Key Showable)  -> IO (TableModification (RowPatch Key Showable))
 logTableModification inf i@(FetchData _ ip) = do
   return i
-logTableModification inf (RevertModification id ip) = do
-  let i = fmap patchNoRef $ case unRowPatch ip of
-            (ix,PatchRow i) -> (ix,i)
-            (i,DropRow ) -> (i,[])
-            (ix,CreateRow i) -> (ix,patch i)
-  time <- getCurrentTime
-  env <- lookupEnv "ROOT"
-  let mod = modificationEnv env
-  let ltime =  utcToLocalTime utc time
-      (G.Idex pidx,pdata) = firstPatch keyValue  <$> i
-
-  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (id, Binary . B.encode $    pidx  , Binary  . B.encode . snd $unRowPatch $ firstPatchRow keyValue ip)
-  let modt = lookTable (meta inf)  mod
-  return (RevertModification id ip )
 logTableModification inf (TableModification Nothing ts u table ip) = do
-  let i = fmap patchNoRef $ case unRowPatch ip of
-            (ix,PatchRow i) -> (ix,i)
-            (i,DropRow ) -> (i,[])
-            (ix,CreateRow i) -> (ix,patch i)
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
   let ltime =  utcToLocalTime utc time
-      (G.Idex pidx,pdata) = firstPatch keyValue  <$> i
 
-  [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (snd $ username inf ,ltime,tableName table,  Binary . B.encode $    pidx  , Binary  . B.encode . snd . unRowPatch $firstPatchRow keyValue ip, schemaName inf)
+  [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (snd $ username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
   (dbref ,_) <-R.runDynamic $ prerefTable (meta inf) modt
 

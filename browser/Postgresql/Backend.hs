@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
-module Postgresql.Backend (postgresqlRules,connRoot,postgresOps) where
+module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import Step.Client
@@ -9,40 +9,25 @@ import Control.Arrow hiding(first)
 import SchemaQuery
 import GHC.Int
 import Control.Monad.RWS hiding(pass)
-import qualified Data.ByteString.Char8 as BS
 import Environment
 import Postgresql.Types
 import Default
-import Step.Common
-import qualified Data.Poset as P
 import Postgresql.Printer
-import Step.Host
-import Postgresql.Sql.Printer
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
-import System.Environment
-import Control.Concurrent.STM
-import Safe
-import Control.Monad
-import Postgresql.Printer
 import Postgresql.Parser
 import Utils
 import Text
-import Control.Monad.Reader
 import Control.Lens as Le
 import Schema
 import RuntimeTypes
 import Data.Bifunctor
 import Query
 import Control.Monad.Writer hiding (pass)
-import System.Time.Extra
 import Types.Patch
-import Debug.Trace
 import Data.Ord
-import Data.Functor.Identity
 import qualified  Data.Map as M
-import qualified  Data.HashMap.Strict as HM
 
 import Data.Tuple
 import Data.String
@@ -57,7 +42,6 @@ import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as S
-import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 
 filterFun  = M.filter (\ v-> not $ isFun v )
@@ -67,9 +51,14 @@ filterFun  = M.filter (\ v-> not $ isFun v )
 overloadedRules = M.fromListWith (++) (translate <$> postgresqlRules)
 postgresqlRules  = [dropSchema,createSchema,alterSchema,createTableCatalog, dropTableCatalog,createColumnCatalog,dropColumnCatalog]
 
+schema_name
+  :: Monad m => Text -> PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable)
 schema_name  s
   = iforeign [(Rel s Equals "name")] (irecord $ ifield "name" (ivalue (readV PText)))
 
+column_type
+  :: (Monad m ) =>
+    PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable,Showable)
 column_type
   = isum [iinline "primitive" . iopt . irecord $
              iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
@@ -78,6 +67,8 @@ column_type
              iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
                (irecord ((,) <$> ifield "schema_name" (ivalue (readV PText)) <*> ifield "table_name" (ivalue (readV PText))))]
 
+createColumnCatalog
+  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 createColumnCatalog  =
   aschema "metadata" $
     atable "catalog_columns" $
@@ -94,6 +85,8 @@ createColumnCatalog  =
             executeLogged (rootconn inf)  sqr args
             return ()) -< (s,t,c,sty,ty)
 
+dropColumnCatalog
+  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 dropColumnCatalog  = do
   aschema "metadata" $
     atable "catalog_columns" $
@@ -149,6 +142,8 @@ dropTableCatalog = do
           returnA -< ()
 
 
+createSchema
+  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 createSchema  = do
   aschema "metadata" $
     atable "catalog_schema" $
@@ -169,6 +164,8 @@ createSchema  = do
           ifield "oid" (ivalue (writeV (PInt 8))) -< SNumeric oid
           returnA -< ()
 
+alterSchema
+  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 alterSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
@@ -186,6 +183,8 @@ alterSchema = do
               executeLogged (rootconn inf) "ALTER SCHEMA ? RENAME TO ?" (DoubleQuoted n, DoubleQuoted nnewm) ) -< (n,o,onewm,nnewm)
           returnA -< ()
 
+dropSchema
+  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 dropSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
@@ -246,10 +245,10 @@ attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = keyValue i
 
 
-deletePatch
+deleteIdx
   ::
      Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
-deletePatch conn m ix@(G.Idex kold) t = do
+deleteIdx conn m ix@(G.Idex kold) t = do
     executeLogged conn qstr qargs
     return ()
   where
@@ -260,64 +259,78 @@ deletePatch conn m ix@(G.Idex kold) t = do
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
-type SetterGen c = (Text
-                -> (Text -> Text)
-                -> KType (Prim PGType (Text, Text))
-                -> PathFTB c
-                -> Writer [(Maybe (KType (Prim PGType (Text, Text)), FTB Showable), Text)] ())
 applyPatch
   ::
-     Connection -> KVMetadata PGKey ->(TBIndex Showable ,TBIdx PGKey Showable) -> IO ()
-applyPatch conn m patch@(G.Idex kold,skv)  = do
+     Connection -> KVMetadata PGKey ->([TBIndex Showable] ,TBIdx PGKey Showable) -> IO ()
+applyPatch conn m patch@(pks,skv)  = do
     executeLogged conn qstr qargs
     return ()
   where
     qstr = fromString $ T.unpack up
-    qargs = ((first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> koldPk )
+    qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat ( fmap koldPk pks)
     equality k = k <> "="  <> "?"
-    koldPk = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
-    pred   = " WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
+    koldPk (G.Idex kold) = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
+    pred   (G.Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     inputs = execWriter $ mapM (attrPatchName Nothing) skv
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
-    up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
+    paren i = "(" <> i <> ")"
+    up = "UPDATE " <> kvMetaFullName m <> setter <> " WHERE " <> T.intercalate " OR " ( paren . pred  <$> pks)
 
 
 attrPatchName :: Maybe Text -> PathAttr PGKey Showable -> Writer [(Maybe (KType (Prim PGType (Text, Text)) , FTB Showable), Text)] ()
-attrPatchName pre (PAttr k p ) = nestP atom (maybe "" (\i -> i <> ".") pre <> escapeReserved ( keyValue k)) id (keyType k) p
-      where
-        atom k c ty i  = inp $ ((ty,create i) , k <> "=" <> c "?")
-attrPatchName pre (PInline k p ) = nestP atom (maybe "" (\i -> i <> ".") pre <> escapeReserved ( keyValue k)) id (keyType k) p
-      where
-        atom k c ty (PAtom i)  = mapM_ (attrPatchName (Just k)) i
+attrPatchName pre (PAttr k p ) = sqlPatchFTB atom (maybe "" (\i -> i <> ".") pre <> escapeReserved ( keyValue k)) id (keyType k) p
+  where
+    atom k c ty (PAtom (SDelta (DSInt i))) = inpVariable  (ty,TB1 $ SNumeric i) ( k <> "=" <> c  (k <> " + ?"))
+    atom k c ty i  = inpVariable  (ty,create i) ( k <> "=" <> c "?")
+attrPatchName pre (PInline k p ) = sqlPatchFTB atom (maybe "" (\i -> i <> ".") pre <> escapeReserved ( keyValue k)) id (keyType k) p
+  where
+    atom k c ty (PAtom i)  = mapM_ (attrPatchName (Just k)) i
+attrPatchName pre i = error $ show (pre,i)
 
-six ix = "[" <> T.pack (show ix) <> "]"
-sixUp ix = "[" <> T.pack (show ix) <> ":]"
-sixDown ix = "[:" <> T.pack (show ix) <> "]"
-inp (i,j) = tell [(Just i,j)]
+
+inpVariable :: (KType (Prim PGType (Text, Text)), FTB Showable) -> Text -> UpdateOperations
+inpVariable i j = tell [(Just i,j)]
+
+inpStatic :: Text -> UpdateOperations
 inpStatic j = tell [(Nothing,j)]
 
-nestP :: Show c => SetterGen c ->SetterGen c
-nestP f k call (Primitive (KOptional:xs) c) (POpt (Just j)) = do
-  nestP f k call (Primitive xs c) j
-nestP f k call (Primitive (KOptional:xs) c) (POpt (Just j)) = do
-  nestP f k call (Primitive xs c) j
-nestP f k _ (Primitive (KOptional:xs) c) (POpt Nothing) = do
-  inpStatic $  (k <> "=" <>   "null" )
-nestP f k ca (Primitive (KArray:xs) c) (PIdx ix (Just j)) = do
-  nestP f (k <> six ix ) ca (Primitive xs c) j
-nestP f k _ (Primitive (KArray :xs) c) (PIdx ix Nothing) = do
-  inpStatic $ (k <> " = " <>  k <> sixDown (ix -1) <> " || " <> k <> sixUp (ix + 1)  )
-nestP f k ca (Primitive (KInterval:xs) c) (PInter True (NegInf,j)) =
-  inpStatic (k <> " = " <> "lowerI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
-nestP f k ca (Primitive (KInterval:xs) c) (PInter True (Finite b,j)) =
-  nestP f k ((\i ->"lowerI(" <> k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca) (Primitive xs c) b
-nestP f k ca (Primitive (KInterval:xs) c) (PInter False (PosInf,j)) =
-  inpStatic (k <> " = " <> "upperI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
-nestP f k ca (Primitive (KInterval:xs) c) (PInter False (Finite b,j)) =
-  nestP f k ((\i -> "upperI(" <>  k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca ) (Primitive xs c) b
-nestP f k c ty (PatchSet b) = mapM_ (nestP f k c ty) b
-nestP f k c ty i@(PAtom _) = f k c ty i
-nestP _ k  _ ty i = error $ show (k,ty,i)
+type UpdateOperations =  Writer [(Maybe (KType (Prim PGType (Text, Text)), FTB Showable), Text)] ()
+type SetterGen c = (Text
+                -> (Text -> Text)
+                -> KType (Prim PGType (Text, Text))
+                -> PathFTB c
+                -> UpdateOperations)
+
+sqlPatchFTB :: Show c => SetterGen c ->SetterGen c
+sqlPatchFTB f k call (Primitive l c ) s = go k call l s
+  where
+    go  k call (KSerial:xs)  (POpt o) = do
+      case o of
+        Just j ->go  k call xs  j
+        Nothing -> inpStatic $  (k <> "=" <>   "null" )
+    go  k call (KOptional:xs)  (POpt o) = do
+      case o of
+        Just j ->go  k call xs  j
+        Nothing -> inpStatic $  (k <> "=" <>   "null" )
+    go  k ca (KArray:xs)  (PIdx ix o) = do
+      case o of
+        Just j -> go  (k <> six ix ) ca xs  j
+        Nothing -> inpStatic $ (k <> " = " <>  k <> sixDown (ix -1) <> " || " <> k <> sixUp (ix + 1)  )
+      where
+        six ix = "[" <> T.pack (show ix) <> "]"
+        sixUp ix = "[" <> T.pack (show ix) <> ":]"
+        sixDown ix = "[:" <> T.pack (show ix) <> "]"
+    go  k ca (KInterval:xs) b@(PatchSet _ ) =
+      f k ca (Primitive (KInterval:xs) c ) b
+    go  k ca (KInterval:xs)  (PInter s (v,j)) =
+      case (s,v) of
+        (True,NegInf) ->   inpStatic (k <> " = " <> "lowerI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
+        (True,Finite b) -> go  k ((\i ->"lowerI(" <> k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca) xs  b
+        (False,PosInf) -> inpStatic (k <> " = " <> "upperI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
+        (False ,Finite b) -> go  k ((\i -> "upperI(" <>  k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca ) xs  b
+    go  k c ty (PatchSet b) = mapM_ (go  k c ty) b
+    go  k ca ty i@(PAtom _) = f k ca (Primitive ty c) i
+    go  k  _ ty i = error $ show (k,ty,i)
 
 updatePatch
   ::
@@ -354,20 +367,15 @@ paginate
   -> IO (Int, [TBData Key Showable])
 paginate inf meta t order off size koldpre wherepred = do
   let ((que,attr),name) = selectQuery inf meta t koldpre order wherepred
-  v <- do
-      let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-      print  =<< formatQuery (conn  inf) quec (fromMaybe [] attr)
-      queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr)
-  let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
+  let quec = fromString $ T.unpack $ "SELECT row_to_json(q),(case WHEN ROW_NUMBER() over () = 1 then count(*) over () else null end) as count FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+  print  =<< formatQuery (conn  inf) quec (fromMaybe [] attr)
+  v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr)
+  let estimateSize = maybe 0 (\c-> c - off ) $ join $ safeHead ( fmap snd v :: [Maybe Int])
   print estimateSize
   return (estimateSize, fmap fst v)
   where
-        offsetQ = " OFFSET " <> T.pack (show off)
-        limitQ = " LIMIT " <> T.pack (show size)
-
-
-
--- High level db operations
+    offsetQ = " OFFSET " <> T.pack (show off)
+    limitQ = " LIMIT " <> T.pack (show size)
 
 
 insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))
@@ -376,7 +384,7 @@ insertMod m j  = do
   liftIO $ do
       let
         table = lookTable inf (_kvname m)
-        ini = defaultTable inf table j ++  patch j
+        ini = defaultTableData inf table j ++  patch j
       d <- insertPatch  inf (conn  inf) (create ini) table
       l <- liftIO getCurrentTime
       return    $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
@@ -388,7 +396,7 @@ deleteMod m t = do
   liftIO $  do
       let table = lookTable inf (_kvname m)
           idx = G.getIndex m t
-      deletePatch (conn inf) (recoverFields inf <$> m) idx  table
+      deleteIdx (conn inf) (recoverFields inf <$> m) idx  table
       l <- liftIO getCurrentTime
       return $  RowPatch (idx,DropRow )
 
@@ -397,61 +405,43 @@ updateMod m old pk p = do
   inf <- askInf
   liftIO$ do
       let table = lookTable inf (_kvname m)
-          ini = either (error . unlines ) id (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) $ create $ defaultTable inf table kv ++  patch kv)
+          ini = either (error . unlines ) id (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) $ create $ defaultTableData inf table kv ++  patch kv)
           kv = apply old  p
       updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) ini )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
       let mod =   RowPatch (G.notOptional pk  ,PatchRow p)
       return $ mod
 
-patchMod :: KVMetadata Key -> TBIndex Showable -> TBIdx Key Showable-> TransactionM (((RowPatch Key Showable)))
+patchMod :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable-> TransactionM (((RowPatch Key Showable)))
 patchMod m pk patch = do
   inf <- askInf
   liftIO $ do
-    let table = lookTable inf (_kvname m)
-    applyPatch (conn inf) (recoverFields inf <$>m )(pk,firstPatch (recoverFields inf ) patch)
-    l <- liftIO getCurrentTime
-    let mod =   RowPatch (G.notOptional pk,PatchRow patch)
-    return (mod)
+    applyPatch (conn inf) (recoverFields inf <$> m) (pk,patchNoRef $ firstPatch (recoverFields inf) patch)
+    return $ rebuild  pk (PatchRow patch)
 
-loadDelayed :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
+loadDelayed :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
 loadDelayed table  values = do
   inf <- askInf
-  liftIO $ check inf
+  let
+    v = tableNonRef $ allRec' (tableMap inf) table
+    nonRefV = tableNonRef values
+    delayed =  recComplement inf m nonRefV v
+  -- liftIO $ print delayed
+  liftIO $ fmap join $ traverse (check inf nonRefV v)  delayed
   where
-    check inf
-      | L.null $ _kvdelayed m = return Nothing
-      | L.null delayedattrs  = return Nothing
-      | otherwise = do
+    m = tableMeta table
+    check inf values v delayed = do
            let
-               delayedTB1 :: TBData Key () -> TBData Key ()
-               delayedTB1 (KV i ) = KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i
-               delayed =  mapKey' unKDelayed (mapFValue (fmap (const ())) (delayedTB1 v))
                (str,namemap) = codegen (loadDelayedQuery inf m v delayed)
-               pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m(tableNonRef values)
+               pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m values
                qstr = (fromString $ T.unpack str)
            print  =<< formatQuery (conn  inf) qstr pk
            is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
            res <- case is of
-                [i] ->return $ diff (KV filteredAttrs) (makeDelayed i)
-                [] -> error "empty query"
-                _ -> error "multiple result query"
+                    [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow <$> diff values i
+                    [] -> error "empty query"
+                    _ -> error "multiple result query"
            return res
-      where
-        v=  allRec' (tableMap inf) table
-        m = tableMeta table
-        makeDelayed = mapKey' makeDelayedK . mapFValue makeDelayedV
-        makeDelayedV i = join $ (LeftTB1 . Just . TB1) <$>  i
-        makeDelayedK = Le.over (keyTypes.keyFunc) (++[KDelayed])
-        split (KOptional:xs) (LeftTB1 i) = maybe False (split xs) i
-        split (KDelayed:xs) (LeftTB1 i) = isNothing i
-        split [] _ = False
-        checkDelayed (Attr k i ) =split (_keyFunc $ keyType k) i
-        checkDelayed i = False
-        delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
-        filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed m) && (checkDelayed  v)  ) (_kvvalues $ values)
-
-
 
 selectAll
   ::
@@ -464,15 +454,16 @@ selectAll
      -> WherePredicate
      -> TransactionM ([KV Key Showable],PageToken,Int)
 selectAll meta m offset i  j k st = do
-      inf <- askInf
-      let
-          unIndex (Idex i) = i
-          unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
-      (l,i) <- liftIO$ paginate inf meta m k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
-      return (i,(TableRef $ G.getBounds meta i) ,l)
+  inf <- askInf
+  let
+      unIndex (Idex i) = i
+      unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
+  (l,i) <- liftIO$ paginate inf meta m k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
+  return (i,(TableRef $ G.getBounds meta i) ,l)
 
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )
 
 tSize = 400
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod   selectAll loadDelayed mapKeyType (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules
+
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod   selectAll loadDelayed mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules

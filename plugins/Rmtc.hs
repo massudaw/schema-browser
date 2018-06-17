@@ -1,5 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables,Arrows #-}
-module Rmtc where
+module Rmtc (pollRmtc )where
 
 import Control.Monad
 import TP.QueryWidgets

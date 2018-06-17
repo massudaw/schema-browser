@@ -11,7 +11,6 @@ import Step.Common
 import Query
 import Step.Host
 import Data.Time
-import Text
 import qualified Types.Index as G
 import Data.Bifunctor (first)
 import Debug.Trace
@@ -23,7 +22,6 @@ import Control.Monad.Reader
 import Data.Ord
 import Environment
 import Utils
-import Schema
 import Types.Patch
 import Data.Maybe
 import Reactive.Threepenny hiding (apply)
@@ -35,7 +33,6 @@ import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
 import Data.Monoid hiding (Product(..))
 import qualified Data.Foldable as F
 import qualified Data.Text as T
-import Data.Text (Text)
 import qualified Data.Set as S
 import qualified Data.Map as M
 import GHC.Stack
