@@ -734,8 +734,9 @@ transactionNoLog inf log = do
   liftIO $ atomically $ traverse (\(k,v) -> do
     ref <- case M.lookup k s of
       Nothing -> do
-        mmap <- readTVar (mvarMap inf)
-        return $ justError (show k) $ M.lookup (fst k) mmap
+        let rinf = fromMaybe inf $ HM.lookup (rawSchema (fst k)) $  depschema inf
+        mmap <- readTVar (mvarMap rinf)
+        return $ justError ("No table found" ++  show k) $ M.lookup (fst k) mmap
       Just i -> return i
     putPatchSTM (patchVar ref) v
     ) (M.toList aggr)

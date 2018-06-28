@@ -131,7 +131,7 @@ instance Patch Day where
   diff i = Just .  diffDays i
 
 instance PrimEditor UTCTime where
-  primEditor tdi = timeUI ("%Y-%m-%d %H:%M:%S%Q", "yyyy-mm-dd hh:ii:ss.SSSSSS") tdi
+  primEditor tdi = timeUI ("%Y-%m-%d %H:%M:%S%Q", "yyyy-mm-dd hh:ii:ss") tdi
 
 instance PrimEditor Day where
   primEditor tdi = timeUI ("%Y-%m-%d", "yyyy-mm-dd") tdi
