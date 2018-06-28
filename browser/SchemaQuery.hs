@@ -210,7 +210,7 @@ getFrom m b = do
           r <- newRow
           res <- resFKS
           res <- either (const Nothing) Just (res r) :: Maybe (TBData Key Showable)
-          diff b res
+          return $ patch res
       traverse (tell . pure . ((mempty,). FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow )) result
       return result
     Nothing ->  return Nothing
@@ -518,11 +518,15 @@ pageTable method table page size presort fixed = do
                  -- # postFilter fetched results
                  resK = if predNull fixed then resOut else G.filterRows fixed resOut
                  -- # removeAlready fetched results
-                 newRes = filter (\i -> isNothing $ G.lookup (G.getIndex (tableMeta table) i) reso) resK
+                 diffNew i = case G.lookup (G.getIndex (tableMeta table) i) reso of
+                               Just v -> patchRowM' (tableMeta table) v i
+                               Nothing -> Just $ createRow' (tableMeta table) i
+
+                 newRes = catMaybes  $ fmap diffNew resK
              -- Add entry for this query
              putIdx (idxChan dbvar) (fixedU, estLength page pagesize s, pageidx, token)
              -- Only trigger the channel with new entries
-             traverse (\i ->  putPatch (patchVar dbvar) (F.toList $ FetchData table . createRow' (tableMeta table)  <$>  i)) $ nonEmpty newRes
+             traverse (\i ->  putPatch (patchVar dbvar) (F.toList $ FetchData table  <$>  i)) $ nonEmpty newRes
              return $ if L.null newRes then
                 (maybe (estLength page pagesize s,M.singleton pageidx token ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx token v)) hasIndex,reso)
                     else

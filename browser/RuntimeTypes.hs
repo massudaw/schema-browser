@@ -748,6 +748,7 @@ allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L
         k = _keyAtom $ keyType it
     go (Attr _ a) = [a]
 
+patchRowM' m o v =  RowPatch . (G.getIndex m v,) . PatchRow  <$> diff o v
 patchRow' m o v =  RowPatch (G.getIndex m v,PatchRow (diff' o v))
 createRow' m v =  RowPatch (G.getIndex m v,CreateRow v)
 dropRow' m v = RowPatch (G.getIndex m v,DropRow )
