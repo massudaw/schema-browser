@@ -963,12 +963,39 @@ createTableRefs inf re table = do
           liftIO $ atomically $ readCollectionSTM ref
         Nothing -> do
           dbref@(DBRef {..}) <- newDBRef inf table (iv,v)
-          dynFork $ forever $ catchJust notException (do
+          dynFork $ forever $ updateIndex table dbref
+          dynFork $ forever $ updateTable inf table dbref
+          let
+            -- Collect all nested references and add one per relation avoided duplicated refs
+            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS table
+          -- TODO : Add evaluator for functions What to do when one of the function deps change?
+          nestedFKS <- mapM (\((rinf, t),l) -> do
+            liftIO $ putStrLn $ "Load table reference: " <> (T.unpack $ tableName t)
+            t <- createTableRefs   rinf re t
+            return (l,snd t)
+              ) (M.toList childrens)
+          newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
+          mapM_ (\(j,var)-> dynFork $ forever $ updateReference j var table dbref
+              ) newNestedFKS
+          return ((iv,v),dbref)
+updateReference j var table (DBRef {..}) = catchJust notException (do
+              atomically (do
+                  let isPatch (RowPatch (_,PatchRow _ )) = True
+                      isPatch _ = False
+                  ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
+                  when (not $ L.null $ ls ) $ do
+                    state <- readTVar collectionState
+                    let patches =  concat $ (\f ->  f ls state) <$> j
+                    when (not $ L.null $ patches) $
+                      writeTChan  patchVar (FetchData table <$> patches)
+                  )) (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
+
+updateIndex table (DBRef {..}) = catchJust notException (do
               atomically (do
                 ls <- takeMany idxChan
                 modifyTVar' idxVar (\s -> apply   s ls)
                   ))  (\e -> atomically (readTChan idxChan ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-          dynFork $ forever $ catchJust notException (do
+updateTable inf table (DBRef {..}) = catchJust notException (do
             upa <- atomically $ do
                 patches <- fmap concat $ takeMany patchVar
                 e <- readTVar collectionState
@@ -999,32 +1026,7 @@ createTableRefs inf re table = do
                     return ()
                   _ -> return () ))
               ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
-            return ()
-                )  (\e -> atomically ( takeMany patchVar ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
-          let
-            -- Collect all nested references and add one per relation avoided duplicated refs
-            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS table
-          -- TODO : Add evaluator for functions What to do when one of the function deps change?
-          nestedFKS <- mapM (\((rinf, t),l) -> do
-            liftIO $ putStrLn $ "Load table reference: " <> (T.unpack $ tableName t)
-            t <- createTableRefs   rinf re t
-            return (l,snd t)
-              ) (M.toList childrens)
-          newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
-          mapM_ (\(j,var)-> dynFork $ forever $ catchJust notException (do
-              atomically (do
-                  let isPatch (RowPatch (_,PatchRow _ )) = True
-                      isPatch _ = False
-                  ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
-                  when (not $ L.null $ ls ) $ do
-                    state <- readTVar collectionState
-                    let patches =  concat $ (\f ->  f ls state) <$> j
-                    when (not $ L.null $ patches) $
-                      writeTChan  patchVar (FetchData table <$> patches)
-                  )
-              )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-              ) newNestedFKS
-          return ((iv,v),dbref)
+            return ())  (\e -> atomically ( takeMany patchVar ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
 
 loadFKSDisk inf targetTable re = do
   let
