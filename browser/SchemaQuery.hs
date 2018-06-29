@@ -137,7 +137,7 @@ mergeDBRefT  (ref1,j ,i,o) (ref2,m ,l,p) = (ref1 <> ref2 ,liftA2 (\(IndexMetadat
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
-  ref <- lookDBVar inf mmap table
+  ref <-lookDBVar inf mmap table
   (idxTds,dbTds ) <- convertChan inf table mempty ref
   return (DBVar2 ref idxTds  (primary <$> dbTds) (secondary <$>dbTds) )
 
@@ -902,6 +902,10 @@ selectFromTable :: T.Text
 selectFromTable t a b c p = do
   inf  <- askInf
   selectFrom  t a b c (tablePredicate inf t p)
+readCollectionSTM ref = do
+   idx <- readTVar (idxVar ref )
+   TableRep (_,_,st) <- readTVar (collectionState ref)
+   return (( idx,  st) ,ref)
 
 
 createTableRefs :: InformationSchema -> [MutRec [[Rel Key]]] -> Table ->   Dynamic (Collection Key Showable,DBRef Key Showable)
@@ -949,93 +953,91 @@ createTableRefs inf re tableK = do
   case  M.lookup tableK map of
     Just ref -> do
       liftIO$ putStrLn $ "Loading Cached Table: " ++ T.unpack (rawName i)
-      liftIO $ atomically $ do
-        idx <- readTVar (idxVar ref )
-        TableRep (_,_,st) <- readTVar (collectionState ref)
-        return (( idx,  st) ,ref)
+      liftIO $ atomically $ readCollectionSTM ref
     Nothing -> do
       liftIO$ putStrLn $ "Loading New Table: " ++ T.unpack (rawName i)
-      let
-          diffIni :: [TBIdx Key Showable]
-          diffIni = []
-      mdiff <-  liftIO$ atomically $ newBroadcastTChan
-      chanidx <-  liftIO$ atomically $ newBroadcastTChan
-      nchanidx <- liftIO$ atomically $ dupTChan chanidx
-      nmdiff <- liftIO$ atomically $ dupTChan mdiff
       (iv,v) <- readTable inf "dump" i re
-      midx <-  liftIO$ atomically$ newTVar iv
-      refSize <- liftIO $ atomically $  newTVar 1
-      let
-        sidx :: M.Map [Key] (SecondaryIndex Key Showable)
-        sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _rawIndexes table )
+      map2 <- liftIO$ atomically $ readTVar (mvarMap inf)
+      case M.lookup tableK map2 of
+        Just ref ->  do
+          liftIO$ putStrLn $ "Skiping Reference Table: " ++ T.unpack (rawName i)
+          liftIO $ atomically $ readCollectionSTM ref
+        Nothing -> do
+          let
+            sidx :: M.Map [Key] (SecondaryIndex Key Showable)
+            sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _rawIndexes table )
+          mdiff <-  liftIO$ atomically $ newBroadcastTChan
+          chanidx <-  liftIO$ atomically $ newBroadcastTChan
+          nchanidx <- liftIO$ atomically $ dupTChan chanidx
+          nmdiff <- liftIO$ atomically $ dupTChan mdiff
+          midx <-  liftIO$ atomically$ newTVar iv
+          refSize <- liftIO $ atomically $  newTVar 1
+          collectionState <-  liftIO$ atomically $ newTVar  (TableRep (tableMeta table,sidx,v))
+          let dbref = DBRef table 0 refSize nmdiff midx nchanidx collectionState
+          liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)
 
-      collectionState <-  liftIO$ atomically $ newTVar  (TableRep (tableMeta table,sidx,v))
+          dynFork $ forever $ catchJust notException (do
+              atomically (do
+                  ls <- takeMany nchanidx
+                  modifyTVar' midx (\s -> apply   s ls)
+                  )
+              )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
+          dynFork $ forever $ catchJust notException (do
+            upa <- atomically $ do
+                patches <- fmap concat $ takeMany nmdiff
+                e <- readTVar collectionState
+                let cpatches = compact patches
+                let out = applyUndo e (tableDiff <$> cpatches)
+                traverse (writeTVar collectionState . fst) out
+                return  $ zip cpatches . snd <$> out
+            either (putStrLn  .("### Error applying: " ++ ) . show ) (
+              mapM_ (\(m,u) -> (do
+                let mmod =   m
+                mmod2 <- case mmod of
+                  AsyncTableModification  t (RowPatch (pk,PatchRow p))  ->  do
+                    let m = tableMeta t
+                    closeDynamic $ transactionNoLog inf $ do
+                      l <- (patchEd $ schemaOps inf) m  [pk] p
+                      wrapModification m l
 
-      dynFork $ forever $ catchJust notException (do
-          atomically (do
-              ls <- takeMany nchanidx
-              modifyTVar' midx (\s -> apply   s ls)
-              )
-          )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-      dynFork $ forever $ catchJust notException (do
-        upa <- atomically $ do
-            patches <- fmap concat $ takeMany nmdiff
-            e <- readTVar collectionState
-            let cpatches = compact patches
-            let out = applyUndo e (tableDiff <$> cpatches)
-            traverse (writeTVar collectionState . fst) out
-            return  $ zip cpatches . snd <$> out
-        either (putStrLn  .("### Error applying: " ++ ) . show ) (
-          mapM_ (\(m,u) -> (do
-            let mmod =   m
-            mmod2 <- case mmod of
-              AsyncTableModification  t (RowPatch (pk,PatchRow p))  ->  do
-                let m = tableMeta t
-                closeDynamic $ transactionNoLog inf $ do
-                  l <- (patchEd $ schemaOps inf) m  [pk] p
-                  wrapModification m l
-
-              AsyncTableModification  t (BatchPatch pk (PatchRow p))  ->  do
-                let m = tableMeta t
-                closeDynamic $ transactionNoLog inf $ do
-                  l <- (patchEd $ schemaOps inf) m  pk p
-                  wrapModification m l
-              i -> return i
-            val <- logger (schemaOps inf) inf mmod2
-            case val of
-              TableModification (Just v) i j k _ -> do
-                undo (schemaOps inf) inf (RevertModification val ( u))
-                return ()
-              _ -> return () ))
-          ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
-        return ()
-            )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
-      let dbref = DBRef table 0 refSize nmdiff midx nchanidx collectionState
-      liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)
-      depmap <- liftIO $ atomically $ readTVar (mvarMap inf )
-      let
-        childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS i
-      nestedFKS <- mapM (\((rinf, t),l) -> do
-        liftIO $ print  $ "Load reference " <> show (tableName t)
-        t <- createTableRefs   rinf re t
-        return (l,snd t)
-          ) (M.toList childrens)
-      newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan . patchVar)) nestedFKS
-
-      mapM_ (\(j,var)-> dynFork $ forever $ catchJust notException (do
-          atomically (do
-              let isPatch (RowPatch (_,PatchRow _ )) = True
-                  isPatch _ = False
-              ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
-              when (not $ L.null $ ls ) $ do
-                state <- readTVar collectionState
-                let patches =  concat $ (\f ->  f ls state) <$> j
-                when (not $ L.null $ patches) $
-                  writeTChan  nmdiff (FetchData table <$> patches)
-              )
-          )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-          ) newNestedFKS
-      return ((iv,v),dbref)
+                  AsyncTableModification  t (BatchPatch pk (PatchRow p))  ->  do
+                    let m = tableMeta t
+                    closeDynamic $ transactionNoLog inf $ do
+                      l <- (patchEd $ schemaOps inf) m  pk p
+                      wrapModification m l
+                  i -> return i
+                val <- logger (schemaOps inf) inf mmod2
+                case val of
+                  TableModification (Just v) i j k _ -> do
+                    undo (schemaOps inf) inf (RevertModification val ( u))
+                    return ()
+                  _ -> return () ))
+              ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
+            return ()
+                )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
+          let
+            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS i
+          -- TODO : Add evaluator for functions What to do when one of the function deps change?
+          nestedFKS <- mapM (\((rinf, t),l) -> do
+            liftIO $ putStrLn $ "Load table reference: " <> (T.unpack $ tableName t)
+            t <- createTableRefs   rinf re t
+            return (l,snd t)
+              ) (M.toList childrens)
+          newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan . patchVar)) nestedFKS
+          mapM_ (\(j,var)-> dynFork $ forever $ catchJust notException (do
+              atomically (do
+                  let isPatch (RowPatch (_,PatchRow _ )) = True
+                      isPatch _ = False
+                  ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
+                  when (not $ L.null $ ls ) $ do
+                    state <- readTVar collectionState
+                    let patches =  concat $ (\f ->  f ls state) <$> j
+                    when (not $ L.null $ patches) $
+                      writeTChan  nmdiff (FetchData table <$> patches)
+                  )
+              )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
+              ) newNestedFKS
+          return ((iv,v),dbref)
 
 loadFKSDisk inf targetTable re = do
   let
