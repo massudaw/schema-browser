@@ -754,7 +754,7 @@ applyRecordChange (KV v) k =
        v)
   where
     add (v, p) =
-      ( foldr (\p v -> maybe (traceShow p v) (\i -> Map.insert (index p) i v) (createIfChange p) ) v $
+      (foldr (\p v -> maybe v (\i -> Map.insert (index p) i v) (createIfChange p) ) v $
         filter (isNothing . flip Map.lookup v . index) k
       , p)
     edit l (i, tr) = fmap (: tr) <$> applyUndoAttrChange i l
@@ -976,7 +976,7 @@ applyUndoFTBM b (PatchSet l) =
         (\(i, l) ->
            maybe (Left "empty patchset") Right $
            (i, ) . PatchSet <$> Non.nonEmpty l)
-applyUndoFTBM a b = error ("applyFTB: " ++ show (a,let v = createUndoFTBM b  in (v == Right a ,v)))
+applyUndoFTBM a b = error ("applyFTB: " ++ show a ++ "\n ============= \n" ++show (let v = createUndoFTBM b  in (v == Right a ,v)))
 
 checkInterM ::
      (Show a, Ord a)

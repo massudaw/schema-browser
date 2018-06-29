@@ -69,7 +69,6 @@ import qualified Data.Traversable as Tra
 import Environment
 import Expression
 import qualified NonEmpty as Non
-import PStream
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -436,30 +435,32 @@ filterfixedS table fixed (s,v)
 childrenRefsUnique
   :: InformationSchema
   -> (Rel Key -> Rel Key)
+  -> S.Set Key
   -> SqlOperation
   -> [((InformationSchema,Table),[RowPatch Key Showable] -> TableRep  Key Showable  -> [RowPatch Key Showable])]
-childrenRefsUnique  inf pre (RecJoin i j@(FKJoinTable _ _) ) = childrenRefsUnique inf pre j
-childrenRefsUnique  _  _  (RecJoin _ _ ) = []
-childrenRefsUnique  _  _  (FunctionField _ _ _ ) = []
-childrenRefsUnique  inf pre (FKInlineTable rel target)  =    concat $ childrenRefsUnique inf (pre .RelAccess [Inline rel] ) <$> fks
+childrenRefsUnique  inf pre set (RecJoin i j@(FKJoinTable _ _) ) = childrenRefsUnique inf pre set j
+childrenRefsUnique  _  _  _ (RecJoin _ _ ) = []
+childrenRefsUnique  _  _  _ (FunctionField _ _ _ ) = []
+childrenRefsUnique  inf pre set (FKInlineTable rel target)  =    concat $ childrenRefsUnique inf (pre .RelAccess [Inline rel] ) set <$> fks
   where
     fks = rawFKS targetTable
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     targetTable = lookTable rinf $ snd target
-childrenRefsUnique  inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
+childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
    let
     sidx = M.lookup (_relOrigin  <$> rel) sidxs
+    search (BatchPatch ls op ) idxM = concat $ (\i -> search (RowPatch (i ,op)) idxM)  <$> ls
     search (RowPatch p@(G.Idex v,PatchRow pattr)) idxM
       = case idxM of
         Just idx -> concat $ concat .fmap convertPatch  <$> resIndex idx
         Nothing -> concat $ convertPatch <$> resScan base
       where
         pkIndex t = justError "no key" $  t`L.elemIndex` pkTable
-        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre (Inline o) ,  [(o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> rel  )
+        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre (Inline o) ,  [(o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> filter (not . flip S.member set . _relOrigin )rel  )
         predKey =  predK
-        resIndex idx = {- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $ -}
+        resIndex idx =  -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
            fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predKey idx
-        resScan idx = {- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx,predKey ,G.keys idx) $ -}
+        resScan idx =  -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx,predKey ,G.keys idx) $
            catMaybes $ fmap (\(i,t) -> (G.getIndex m i,t)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [ recurseAttr t pattr]) ) <$> ts
         taggedRef :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
@@ -476,8 +477,7 @@ childrenRefsUnique  inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),(\
             nested  (Many i) =  concat $ nested <$> i
             nested  (One i) =  [recurseAttr i p]
         recurseAttr (G.PathAttr _ i ) p = PFK relf [] $ taggedRef i (const p)
-        recurseAttr i p = error (show i)
-   in concat $ (\i -> search  i  sidx) <$>  evs))]
+     in traceShow (target,rel) $ concat $ (\i -> search  i  sidx) <$>  evs))]
   where
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     relf = filterReflexive rel
@@ -967,35 +967,41 @@ createTableRefs inf re table = do
           dynFork $ forever $ updateTable inf table dbref
           let
             -- Collect all nested references and add one per relation avoided duplicated refs
-            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ childrenRefsUnique inf id  . unRecRel <$> rawFKS table
+            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[]) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (rawFKS table)
           -- TODO : Add evaluator for functions What to do when one of the function deps change?
           nestedFKS <- mapM (\((rinf, t),l) -> do
-            liftIO $ putStrLn $ "Load table reference: " <> (T.unpack $ tableName t)
-            t <- createTableRefs   rinf re t
-            return (l,snd t)
-              ) (M.toList childrens)
+            liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
+            o <- prerefTable rinf t
+            return (l,o)) (M.toList childrens)
           newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
-          mapM_ (\(j,var)-> dynFork $ forever $ updateReference j var table dbref
-              ) newNestedFKS
+          mapM_ (\(j,var)-> dynFork $ forever $ updateReference j var table dbref) newNestedFKS
           return ((iv,v),dbref)
-updateReference j var table (DBRef {..}) = catchJust notException (do
-              atomically (do
-                  let isPatch (RowPatch (_,PatchRow _ )) = True
-                      isPatch _ = False
-                  ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
-                  when (not $ L.null $ ls ) $ do
-                    state <- readTVar collectionState
-                    let patches =  concat $ (\f ->  f ls state) <$> j
-                    when (not $ L.null $ patches) $
-                      writeTChan  patchVar (FetchData table <$> patches)
-                  )) (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
 
-updateIndex table (DBRef {..}) = catchJust notException (do
+updateReference j var table (DBRef {..})
+  = catchJust notException (do
+          atomically (do
+              let isPatch (RowPatch (_,PatchRow _ )) = True
+                  isPatch (BatchPatch i (PatchRow _)) = True
+                  isPatch _ =  False
+              ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
+              when (not $ L.null $ traceShow ("pre",tableName table, L.length ls) ls ) $ do
+                state <- readTVar collectionState
+                let patches =  compact $ concat $ (\f ->  f ls state) <$> j
+                when (not $ L.null $ patches) $
+                  writeTChan  patchVar (FetchData table <$> traceShow ("pos",tableName table,L.length patches) patches)
+                  )) (\e -> atomically (readTChan var) >>= printException e)
+
+updateIndex table (DBRef {..})
+  = catchJust notException (do
               atomically (do
                 ls <- takeMany idxChan
                 modifyTVar' idxVar (\s -> apply   s ls)
-                  ))  (\e -> atomically (readTChan idxChan ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
-updateTable inf table (DBRef {..}) = catchJust notException (do
+                         ))  (\e -> atomically (readTChan idxChan ) >>= printException e)
+
+printException e d   = putStrLn $ "Failed applying patch:" <>show d <> "\n =================== \n" <> show (e :: SomeException)
+
+updateTable inf table (DBRef {..})
+  = catchJust notException (do
             upa <- atomically $ do
                 patches <- fmap concat $ takeMany patchVar
                 e <- readTVar collectionState
