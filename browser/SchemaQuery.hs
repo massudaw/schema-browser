@@ -963,8 +963,8 @@ createTableRefs inf re table = do
           liftIO $ atomically $ readCollectionSTM ref
         Nothing -> do
           dbref@(DBRef {..}) <- newDBRef inf table (iv,v)
-          dynFork $ forever $ updateIndex table dbref
-          dynFork $ forever $ updateTable inf table dbref
+          dynFork $ forever $ updateIndex dbref
+          dynFork $ forever $ updateTable inf dbref
           let
             -- Collect all nested references and add one per relation avoided duplicated refs
             childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[]) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (rawFKS table)
@@ -977,30 +977,47 @@ createTableRefs inf re table = do
           mapM_ (\(j,var)-> dynFork $ forever $ updateReference j var table dbref) newNestedFKS
           return ((iv,v),dbref)
 
-updateReference j var table (DBRef {..})
-  = catchJust notException (do
-          atomically (do
-              let isPatch (RowPatch (_,PatchRow _ )) = True
-                  isPatch (BatchPatch i (PatchRow _)) = True
-                  isPatch _ =  False
-              ls <- filter isPatch . fmap tableDiff .  concat  <$> takeMany var
-              when (not $ L.null $ traceShow ("pre",tableName table, L.length ls) ls ) $ do
-                state <- readTVar collectionState
-                let patches =  compact $ concat $ (\f ->  f ls state) <$> j
-                when (not $ L.null $ patches) $
-                  writeTChan  patchVar (FetchData table <$> traceShow ("pos",tableName table,L.length patches) patches)
-                  )) (\e -> atomically (readTChan var) >>= printException e)
+updateReference ::
+     (v ~ Index v, PatchConstr k1 v, Foldable t, Functor t)
+  => t ([RowPatch k1 v] -> TableRep k1 v -> [RowPatch k1 v])
+  -> TChan [TableModificationK (TableK k1) (RowPatch k1 v)]
+  -> TableK k1
+  -> DBRef k1 v
+  -> IO ()
+updateReference j var table (DBRef {..}) =
+  catchJust
+    notException
+    (atomically
+       (do let isPatch (RowPatch (_, PatchRow _)) = True
+               isPatch (BatchPatch i (PatchRow _)) = True
+               isPatch _ = False
+           ls <- filter isPatch . fmap tableDiff . concat <$> takeMany var
+           when (not $ L.null ls) $ do
+             state <- readTVar collectionState
+             let patches = compact . concat $ (\f -> f ls state) <$> j
+             when (not $ L.null patches) $
+               writeTChan patchVar (FetchData table <$> patches)))
+    (\e -> atomically (readTChan var) >>= printException e)
 
-updateIndex table (DBRef {..})
-  = catchJust notException (do
-              atomically (do
-                ls <- takeMany idxChan
-                modifyTVar' idxVar (\s -> apply   s ls)
-                         ))  (\e -> atomically (readTChan idxChan ) >>= printException e)
 
-printException e d   = putStrLn $ "Failed applying patch:" <>show d <> "\n =================== \n" <> show (e :: SomeException)
+updateIndex :: (Ord k, Show k, Show v) => DBRef k v -> IO ()
+updateIndex (DBRef {..}) =
+  catchJust
+    notException
+    (do atomically
+          (do ls <- takeMany idxChan
+              modifyTVar' idxVar (\s -> apply s ls)))
+    (\e -> atomically (readTChan idxChan) >>= printException e)
 
-updateTable inf table (DBRef {..})
+printException :: Show a => SomeException -> a -> IO ()
+printException e d = do
+  putStrLn $ "Failed applying patch:" <> show d
+  putStrLn "========================="
+  putStrLn $ show (e :: SomeException)
+
+updateTable
+  :: InformationSchema -> DBRef Key Showable -> IO ()
+updateTable inf (DBRef {..})
   = catchJust notException (do
             upa <- atomically $ do
                 patches <- fmap concat $ takeMany patchVar

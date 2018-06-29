@@ -139,6 +139,8 @@ data DBRef k v =
   DBRef  { dbRefTable :: TableK k
          , refIndex :: Int
          , refSize :: TVar Int
+         --- TODO:  it would be good to support a Channel type that allows filtering on broadcast
+         --  For example to restrict propagation on for updates on that chan. Filtering on source instead of destination
          , patchVar :: TChan [TableModificationU k v]
          , idxVar :: TVar (IndexMetadata k v)
          , idxChan :: TChan (IndexMetadataPatch k v)
