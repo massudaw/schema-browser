@@ -228,8 +228,8 @@ deleteFrom  m a   = do
   return log
 
 
-paginateTable table pred = do
-  (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll  table  (Just 0) Nothing [] pred Nothing
+paginateTable table pred tbf = do
+  (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll  table  (Just 0) Nothing [] pred (Just tbf)
   let
     check ix (i,tb2) = do
         let
@@ -240,7 +240,7 @@ paginateTable table pred = do
           cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * 400 )  (lookIndexMetadata pred i)
         output <- if cond
             then  do
-              (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll  table  (Just next  ) Nothing []  pred Nothing
+              (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll  table  (Just next  ) Nothing []  pred (Just tbf)
               -- Check if nothing has changed  or no more data to load
               if G.size ndata == G.size tb2
                  then return iempty
@@ -303,7 +303,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
         predm = refs <> predicate i predtop
     tb2 <-  case predm of
       Just pred -> do
-        localInf (const rinf) $ paginateTable table pred
+        localInf (const rinf) $ paginateTable table pred tbf
       Nothing -> return (G.empty)
     let
         tar = S.fromList $ fmap _relOrigin i

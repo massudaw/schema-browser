@@ -1187,7 +1187,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         tdfk = merge <$> tsel <*> tedit
         iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
         iold2 =  fmap (M.mapKeys (justError "no head iold2" . safeHead . F.toList . S.map _relOrigin ). fmap _tbattr . _kvvalues . filterNotReflect . fst.unTBRef) <$> ftdi
-        predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   [(_relTarget rel,Left  (o,Flip $ _relOperator rel))] )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional v) <$> M.toList o
+        predicatefk o = WherePredicate . AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   [(_relTarget rel,Left  (o,Flip $ _relOperator rel))] )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional v) <$> M.toList o
         predicate = fmap predicatefk <$> iold2
         sel = liftA2 diff' oldItems ftdi
         selector False = do

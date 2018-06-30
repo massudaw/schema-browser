@@ -569,12 +569,14 @@ liftPatch inf t  p =  fmap (liftPatchAttr inf t) p
 liftPatchAttr :: a ~ Index a => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
 liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
 liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (liftPatch inf tname2 <$>  e)
-    where (FKInlineTable _ (_,tname2)) = fromJust $ unRecRel Control.Applicative.<$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
-          ta = lookTable inf tname
+  where
+    FKInlineTable _ (_,tname2) = justError"cannot lift patch" $ unRecRel <$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
+    ta = lookTable inf tname
 liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
-    where (FKJoinTable  rel (schname,tname2) )  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
-          ta = lookTable inf tname
-          rinf = fromMaybe inf (HM.lookup schname (depschema inf))
+  where
+    FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
+    ta = lookTable inf tname
+    rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
 liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first ((fst m ) inf tname)))<$> i
@@ -701,37 +703,37 @@ mergeTB1 k  k2
   = (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2
 
 recComplement :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
-recComplement inf m e total =  filterAttrs m e total
+recComplement inf =  filterAttrs
   where
-    filterAttrs m e = fmap KV . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched go) (_kvvalues e)  ._kvvalues
+    filterAttrs m e = fmap KV . notEmpty . M.merge (M.dropMissing ) M.preserveMissing (M.zipWithMaybeMatched (go m)) (_kvvalues e)  ._kvvalues
     notEmpty i = if M.null i then Nothing else Just i
-    go _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
         merged = filterAttrs m2 <$> tb <*> tb1
-        FKJoinTable _ ref = unRecRel $ fromJust $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
-    go _ (IT  it tb) ( IT it1 tb1)= fmap (IT it1)  $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go m _ (IT  it tb) ( IT it1 tb1)= fmap (IT it1)  $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
         merged = filterAttrs ms <$> tb <*> tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go _ _ (Attr k a) = Nothing -- Attr k a
+    go m _ _ v@(Attr k a) = if L.elem k (_kvpk m) then Just v else Nothing
 
 
 recPKDesc :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
-recPKDesc inf m e =  filterAttrs m e
+recPKDesc inf =  filterAttrs
   where
-    filterAttrs m = KV . fmap go . M.filterWithKey (\k _ -> not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)  ._kvvalues
+    filterAttrs m = KV . fmap (go m) . M.filterWithKey (\k _ -> not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)  ._kvvalues
       where pkdesc = S.fromList $ _kvpk m <> _kvdesc m
-    go (FKT l  rel  tb) = FKT l rel $ filterAttrs m2  <$> tb
+    go m (FKT l  rel  tb) = FKT l rel $ filterAttrs m2  <$> tb
       where
-        FKJoinTable _ ref = unRecRel $ fromJust $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec desc: " <> show (rel ,_kvjoins m))$ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
-    go (IT  it tb) = IT it $ filterAttrs ms <$> tb
+    go m (IT  it tb) = IT it $ filterAttrs ms <$> tb
       where
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go (Attr k a) = Attr k a
+    go m (Attr k a) = Attr k a
 
 
 allKVRecL :: InformationSchema -> KVMetadata Key ->  FTB (KV Key Showable) -> [FTB Showable]
@@ -742,7 +744,7 @@ allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L
   where
     go (FKT l  rel  tb) = allKVRecL  inf m2 tb
       where
-        FKJoinTable _ ref = unRecRel $ fromJust $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        FKJoinTable _ ref = unRecRel $ justError "cant find fk kv" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
     go (IT  it tb) = allKVRecL inf ms tb
       where

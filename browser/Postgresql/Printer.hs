@@ -369,7 +369,7 @@ indexFieldL
 indexFieldL inf m e c p@(Inline l) v =
     case findAttr l v of
       Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
-      Nothing -> error "not attr"
+      Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess l nt) v =
   case kvLookup (S.fromList l) v of
     Just a -> case a of
@@ -389,7 +389,7 @@ indexFieldL inf m e c n@(RelAccess l nt) v =
 indexFieldL inf m e c p@(Rel l _ _) v =
     case findAttr l v of
       Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
-      Nothing -> error "not attr"
+      Nothing -> error $ "not attr rel " ++ show (l,v)
 indexFieldL inf m e c i v = error (show (i, v))
 
 indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
