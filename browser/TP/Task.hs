@@ -40,7 +40,7 @@ import Types
 import qualified Types.Index as G
 import Utils
 
-columnName name = irecord $ iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel name Equals "ordinal_position"] (irecord (ifield  "column_name" (ivalue $  readV PText)))
+columnName name = ivalue $ irecord $ iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel name Equals "ordinal_position"] (ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText)))
 
 taskWidgetMeta inf = do
     fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (taskDef inf)()
@@ -63,14 +63,14 @@ taskDef inf
       schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
       schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
       schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
-      fields =  proc t -> do
+      fields =  irecord $ proc t -> do
         SText tname <-
             ifield "table_name" (ivalue (readV PText))  -< ()
-        desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
-        efields <- iinline "event" (irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+        pksM <- iinline "pks" (ivalue $ irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+        efields <- iinline "event" (ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         (color,child) <- iinline "task"  (
-           (,)<$> irecord (ifield "color" (ivalue $  readV PText))
+           (,)<$> ivalue ( irecord (ifield "color" (ivalue $  readV PText)))
               <*> columnName "task") -< ()
         let
           toLocalTime = fmap to

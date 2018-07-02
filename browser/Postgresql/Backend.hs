@@ -3,6 +3,7 @@ module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import Step.Client
+import Control.Exception
 import Data.Time
 import qualified Types.Index as G
 import Control.Arrow hiding(first)
@@ -54,30 +55,30 @@ postgresqlRules  = [dropSchema,createSchema,alterSchema,createTableCatalog, drop
 schema_name
   :: Monad m => Text -> PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable)
 schema_name  s
-  = iforeign [(Rel s Equals "name")] (irecord $ ifield "name" (ivalue (readV PText)))
+  = iforeign [(Rel s Equals "name")] (ivalue . irecord $ ifield "name" (ivalue (readV PText)))
 
 column_type
   :: (Monad m ) =>
-    PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable,Showable)
+    PluginM (G.PathIndex PathTID (Union (G.AttributePath Text  MutationTy))) (Atom (FTB (TBData Text Showable)))   m i (Showable,Showable)
 column_type
-  = isum [iinline "primitive" . iopt . irecord $
+  = ivalue $ isum [iinline "primitive" . iopt . ivalue . irecord $
              iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
-               (irecord ((,) <$> ifield "nspname" (ivalue (readV PText)) <*> ifield "typname" (ivalue (readV PText))))
-         ,iinline "composite" . iopt . irecord $
+               (ivalue $ irecord ((,) <$> ifield "nspname" (ivalue (readV PText)) <*> ifield "typname" (ivalue (readV PText))))
+         ,iinline "composite" . iopt . ivalue . irecord $
              iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
-               (irecord ((,) <$> ifield "schema_name" (ivalue (readV PText)) <*> ifield "table_name" (ivalue (readV PText))))]
+               (ivalue $ irecord ((,) <$> ifield "schema_name" (ivalue (readV PText)) <*> ifield "table_name" (ivalue (readV PText))))]
 
 createColumnCatalog
   :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
 createColumnCatalog  =
   aschema "metadata" $
     atable "catalog_columns" $
-      arow RowCreate $
+      arow RowCreate . irecord $
         proc _ -> do
           c <- ifield "column_name" (ivalue (readV PText)) -< ()
           (s,t) <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
-                      (irecord ((,) <$> schema_name "schema_name"  <*>  ifield "table_name" (ivalue (readV PText)))) -< ()
-          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt .irecord$ column_type -< ()
+                      (ivalue $ irecord ((,) <$> schema_name "schema_name"  <*>  ifield "table_name" (ivalue (readV PText)))) -< ()
+          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt $ column_type -< ()
           act (\(s,t,c,sty,ty) -> do
             inf <- lift askInf
             let sqr = "ALTER TABLE ?.? ADD COLUMN ? ?.? "
@@ -90,14 +91,14 @@ dropColumnCatalog
 dropColumnCatalog  = do
   aschema "metadata" $
     atable "catalog_columns" $
-      arow RowDrop $
+      arow RowDrop . irecord $
         proc _ -> do
           c <- ifield "column_name"
               (ivalue (readV PText)) -< ()
           s <- iforeign [(Rel "table_schema" Equals "name")]
-              (irecord (ifield "name" (ivalue (readV PText) ))) -< ()
+              (ivalue $ irecord (ifield "name" (ivalue (readV PText) ))) -< ()
           t <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
-              (irecord (ifield "table_name" (ivalue (readV PText)))) -< ()
+              (ivalue $ irecord (ifield "table_name" (ivalue (readV PText)))) -< ()
           act (\(t,s,c) -> do
             inf <- lift askInf
             executeLogged (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
@@ -108,7 +109,7 @@ createTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBD
 createTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
-      arow RowCreate $
+      arow RowCreate .irecord$
         proc _ -> do
           t <- ifield "table_name"
              (ivalue (readV PText)) -< ()
@@ -125,7 +126,7 @@ dropTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBDat
 dropTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
-      arow RowDrop $
+      arow RowDrop .irecord$
         proc _ -> do
           t <- ifield "table_name"
               (ivalue (readV PText)) -< ()
@@ -147,12 +148,12 @@ createSchema
 createSchema  = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowCreate $
+      arow RowCreate .irecord$
         proc _ -> do
           s <- ifield "name"
               (ivalue (readV  PText))-< ()
           o <- fmap join $ iforeign [(Rel "owner" Equals "oid")]
-              (iopt $ irecord (ifield "usename" (iopt $ ivalue (readV PText)) )) -< ()
+              (iopt $ ivalue $ irecord (ifield "usename" (iopt $ ivalue (readV PText)) )) -< ()
           oid <- act (\(n,onewm) ->  do
             inf <- lift askInf
             maybe
@@ -169,12 +170,12 @@ alterSchema
 alterSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowUpdate $
+      arow RowUpdate .irecord$
         proc _ -> do
           (n,nnewm) <- ifield "name"
               (ivalue (changeV PText)) -< ()
           Just (o,onewm) <- fmap join $ iforeign [(Rel "owner" Equals "oid")]
-              (iopt $ irecord (ifield "usename" (iopt (ivalue (changeV PText))) )) -< ()
+              (iopt $ ivalue $ irecord (ifield "usename" (iopt (ivalue (changeV PText))) )) -< ()
           act (\(n,o,onewm,nnewm) -> do
             inf <- lift askInf
             when (onewm /= o) . void $
@@ -188,7 +189,7 @@ dropSchema
 dropSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowDrop $
+      arow RowDrop . irecord $
         proc _ -> do
           s <- ifield "name" (ivalue (readV  PText))-< ()
           act (\n->  do
@@ -369,7 +370,7 @@ paginate inf meta t order off size koldpre wherepred = do
   let ((que,attr),name) = selectQuery inf meta t koldpre order wherepred
   let quec = fromString $ T.unpack $ "SELECT row_to_json(q),(case WHEN ROW_NUMBER() over () = 1 then count(*) over () else null end) as count FROM (" <> que <> ") as q " <> offsetQ <> limitQ
   print  =<< formatQuery (conn  inf) quec (fromMaybe [] attr)
-  v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr)
+  v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr) `catch` (\e -> print (t,wherepred ) >> throw (e :: SomeException))
   let estimateSize = maybe 0 (\c-> c - off ) $ join $ safeHead ( fmap snd v :: [Maybe Int])
   print estimateSize
   return (estimateSize, fmap fst v)
@@ -427,12 +428,12 @@ loadDelayed table  values = do
     nonRefV = tableNonRef values
     delayed =  recComplement inf m nonRefV v
   -- liftIO $ print delayed
-  liftIO $ fmap join $ traverse (check inf nonRefV v)  delayed
+  liftIO $ fmap join $ traverse (check inf nonRefV )  delayed
   where
     m = tableMeta table
-    check inf values v delayed = do
+    check inf values delayed = do
            let
-               (str,namemap) = codegen (loadDelayedQuery inf m v delayed)
+               (str,namemap) = codegen (loadDelayedQuery inf m delayed)
                pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m values
                qstr = (fromString $ T.unpack str)
            print  =<< formatQuery (conn  inf) qstr pk

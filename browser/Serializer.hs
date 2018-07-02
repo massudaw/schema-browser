@@ -97,15 +97,13 @@ instance DecodeTB1 FTB where
   isoFTB = SIso [] tell id
 
 instance DecodeTB1 Union where
-  isoFTB = itotal $ isplit3 (IsoArrow build destroy)
-      (compose . compose <$$> isoFTB)  (compose . compose <$$> isoFTB) isoFTB
+  isoFTB = itotal $ isplit (IsoArrow build destroy)
+      (compose <$$> isoFTB)  (compose <$$> isoFTB)
     where
-      build (Left (Left i)) = Many i
-      build (Left (Right i)) = ISum i
-      build (Right i) = One i
-      destroy (Many i) = Left (Left i)
-      destroy (ISum i) = Left (Right i)
-      destroy (One i) = Right i
+      build (Left i) = Many i
+      build (Right i) = ISum i
+      destroy (Many i) = (Left i)
+      destroy (ISum i) = (Right i)
 
 
 data SIso s b  c
@@ -230,7 +228,7 @@ data Reference k
 
 prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
   k -> SIso (Union (Reference k))  (TBData k Showable) (f a)
-prim ix = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
           lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . M.lookup (S.singleton $ Inline ix) . _kvvalues
@@ -238,7 +236,7 @@ prim ix = SIso (Many [One $ AttrRef (Primitive l kp ) ix])  (tell . mk. (execWri
 
 nestJoin :: (Functor f, DecodeTB1 f) =>
   [Rel Text] -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
-nestJoin ix nested = SIso (Many [One $ JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
           lk =  _fkttable . justError ("no attr: " ++ show (S.fromList $ ix)). M.lookup (S.fromList $ ix) . _kvvalues
@@ -247,7 +245,7 @@ nestJoin ix nested = SIso (Many [One $ JoinTable ix kp])  (tell . mk. (execWrite
 
 nestWith :: (Functor f, DecodeTB1 f) =>
   Text -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
-nestWith ix nested = SIso (Many [One $ InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+nestWith ix nested = SIso (Many [InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
           lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). M.lookup (S.singleton $ Inline ix) . _kvvalues
@@ -291,8 +289,8 @@ type IsoTable a = SIso (Union (Reference Text)) (TBData Text Showable)  a
 instance DecodeTable Plugins where
   isoTable = iassoc id (identity <$$> prim "ref") (identity <$$> prim "plugin")
 
-mapField (SIso p  i j ) (SIso (One (AttrRef (Primitive k ki) v)) a b ) = SIso (One (AttrRef (Primitive (k <> p) ki) v)) (tell . (execWriter . a) . (execWriter . i)) (j .  b)
-mapField (SIso p  i j ) (SIso (One (InlineTable (Primitive k ki) v l )) a b ) = SIso (One (InlineTable (Primitive (k <> p) ki) v l )) (tell . (execWriter  .a). (execWriter . i)) (j .  b)
+mapField (SIso p  i j ) (SIso (Many [(AttrRef (Primitive k ki) v)]) a b ) = SIso (Many . pure $ (AttrRef (Primitive (k <> p) ki) v)) (tell . (execWriter . a) . (execWriter . i)) (j .  b)
+mapField (SIso p  i j ) (SIso (Many [(InlineTable (Primitive k ki) v l )]) a b ) = SIso (Many . pure $(InlineTable (Primitive (k <> p) ki) v l )) (tell . (execWriter  .a). (execWriter . i)) (j .  b)
 
 mapIsoArrow (IsoArrow f g ) = IsoArrow (fmap f ) (fmap g)
 

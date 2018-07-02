@@ -93,9 +93,8 @@ textToPrim i = error ("textToPrim : " ++ show i)
 code smvar  = indexSchema smvar "code"
 
 list' :: Union a -> Maybe (NonEmpty a)
-list' (Many inp) = join $  fmap (join  .Non.fromList) . nonEmpty . catMaybes . fmap list'   <$> nonEmpty inp
-list' (ISum inp) = join $  fmap (join  .Non.fromList) . nonEmpty . catMaybes . fmap list'   <$> nonEmpty inp
-list' (One i) = Just $ pure i
+list' (Many inp) = Non.fromList  <$> nonEmpty inp
+list' (ISum inp) = Non.fromList  <$> nonEmpty inp
 
 list :: Union a -> NonEmpty a
 list = justError "empty union list " . list'

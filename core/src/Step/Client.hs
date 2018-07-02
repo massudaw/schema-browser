@@ -34,6 +34,7 @@ import Control.Applicative
 import Control.Arrow
 import Control.Category (Category(..))
 import Control.Monad.Reader
+import qualified NonEmpty as Non
 import Control.Monad.Trans.Maybe
 import qualified Data.Bifunctor as BF
 import Data.Foldable (toList)
@@ -58,12 +59,14 @@ allP = id
 
 anyP ps =
   P
-    (ISum fsum, ISum ssum)
+    (ISum (concat $ fmap unMany fsum), ISum (concat $ fmap unMany ssum))
     (Kleisli
        (\i ->
           fmap (justError "no instance found") . runMaybeT $
           foldr1 ((<|>)) (fmap ($i) asum)))
   where
+    unMany (Many i)=  i
+    unMany (ISum l) = error (show ("ISum" ,l))
     asum = fmap (\(P s (Kleisli j)) -> fmap MaybeT j) ps
     fsum = fmap (\(P s _) -> fst s) ps
     ssum = fmap (\(P s _) -> snd s) ps
@@ -73,13 +76,13 @@ atP k (P (fsum, ssum) (Kleisli a)) =
   where
     nest (Many []) = Many []
     nest (ISum []) = Many []
-    nest ls = Many [One $ Nested (iprodRef <$> ind) ls]
+    nest ls = Many [Nested (iprodRef <$> Non.fromList ind) ls]
     ind = splitIndex (Just $ Not IsNull) k
 
 nest :: [Text] -> Union (Access Text) -> Union (Access Text)
 nest ind (Many []) = Many []
-nest ind (Many [One (Rec ix i)]) = One . Nested ind $ Many [One $ Rec ix i]
-nest ind j = One $ Nested ind j
+nest ind (Many [(Rec ix i)]) = Many [Nested (Non.fromList ind) $ Many [Rec ix i]]
+nest ind j = Many [Nested (Non.fromList ind) j]
 
 atMA ::
      (KeyString t2, Show t2, MonadReader (TBData t2 Showable) m, Ord t2)
@@ -162,17 +165,17 @@ atMR = at notNull
       where
         ind b = splitIndex b i
 
-nameI i (P (l, v) d) = P (Many [One $ Rec i l], v) d
+nameI i (P (l, v) d) = P (Many [Rec i l], v) d
 
-callI i ~(P _ d) = P (Many [One $ Point i], one) d
+callI i ~(P _ d) = P (Many [Point i], one) d
 
-nameO i (P (l, v) d) = P (l, Many [One $ Rec i v]) d
+nameO i (P (l, v) d) = P (l, Many [Rec i v]) d
 
-callO i ~(P _ d) = P (one, Many [One $ Point i]) d
+callO i ~(P _ d) = P (one, Many [Point i]) d
 
 splitIndex b l = fmap (IProd b . T.pack) . unIntercalate (',' ==) $ l
 
-manyU = Many . fmap One
+manyU = Many
   -- Obrigatory value with maybe wrapping
 
 odx p l =

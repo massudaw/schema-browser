@@ -99,19 +99,19 @@ instance (Ring a , Ring b) => Ring (a,b) where
   mult (a,b) (c,d) = (mult  a c, mult b d)
   add (a,b) (c,d) = (add a c, add b d)
 
-instance Ring (Union a) where
+instance Ring [a] where
+  one = []
+  mult i j = i <> j
+
+instance Show a => Ring (Union a) where
   zero = ISum []
   one = Many []
 
   ISum l `add` ISum j = ISum (l <>  j)
-  l `add` ISum j = ISum (l :  j)
-  ISum l `add`j = ISum (l <> pure j)
-  i `add`j = ISum [i,j]
 
   Many i `mult` Many j = Many $  i <> j
-  Many i `mult`j = Many $  i <> pure j
-  i `mult` Many j = Many $  pure i <> j
-  i `mult` j = Many  [i,j]
+  i `mult` j = error $ "unexisting case " ++ show (i,j)
+
 
 
 class KeyString i where
@@ -125,14 +125,11 @@ instance KeyString Text where
 
 instance Eq a => Monoid (Union a ) where
   mempty = Many []
-  mappend (ISum j) (ISum i) = ISum (i <> j)
   mappend (Many j) (Many i) = Many (i <> j)
-  mappend (Many j) i = Many (j <> pure i)
-  mappend i (Many j)  = Many (pure i <> j)
 
 instance Applicative Union where
-  pure i = Many [One i]
-  Many f <*> Many a = Many (zipWith (<*>) f a)
+  pure i = Many [i]
+  Many f <*> Many a = Many (f<*> a)
 
 instance Alternative Union where
   empty = ISum []

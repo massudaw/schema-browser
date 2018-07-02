@@ -95,11 +95,11 @@ agendaDef inf
    where
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
       schemaPredName =  [(keyRef "table_schema",Left (txt (schemaName inf),Equals) )]
-      fields =  proc t -> do
+      fields =  irecord $ proc t -> do
           SText tname <-
               ifield "table_name" (ivalue (readV PText))  -< ()
-          efields <- iinline "event" (irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-          color <- iinline "event" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+          efields <- iinline "event" (ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          color <- iinline "event" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
             table = lookTable inf tname
             toLocalTime = fmap to

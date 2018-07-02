@@ -21,7 +21,6 @@ import qualified Data.Foldable as F
 import Data.Either
 import Utils
 import qualified NonEmpty as Non
-import Query
 import qualified Data.Binary as B
 import Data.Scientific hiding(scientific)
 import Data.Bits
@@ -43,7 +42,7 @@ import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
-import Prelude hiding (takeWhile,head)
+import Prelude hiding (takeWhile)
 import qualified Data.Text as T
 import Data.Text (Text)
 import Database.PostgreSQL.Simple.Time
@@ -225,13 +224,13 @@ parseAttrJSON inf (Fun i rel _ )v = do
   s<- parseShowableJSON parsePrimitiveJSON (keyType  i) v
   return $  (Fun i rel s)
 parseAttrJSON inf (IT na j) v = do
-  mj <- parseShowableJSON  (parseRecordLoad inf) (keyType na) v
+  mj <- parseShowableJSON  (parseRecordLoad inf (head . F.toList $ j)) (keyType na) v
   return $ IT  na mj
 parseAttrJSON inf i v = error (show ("ParserAttrJSON",i,v))
 
-parseRecordLoad :: InformationSchema -> Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB (TBData Key Showable))
-parseRecordLoad inf (RecordPrim r) v=
-  fmap TB1 $ parseRecordJSON inf (tableMeta tb) (tableNonRef $ allRec' (tableMap inf) tb) v
+parseRecordLoad :: InformationSchema -> TBData Key () -> Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB (TBData Key Showable))
+parseRecordLoad inf proj (RecordPrim r) v=
+  fmap TB1 $ parseRecordJSON inf (tableMeta tb) proj v
   where tb = lookSTable inf r
 
 

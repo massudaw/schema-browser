@@ -258,7 +258,7 @@ recAttr
 recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (TB1 i,Equals),TB1 i), G.Idex [TB1 i])]) k
 recAttr un f@(FKT l rel k) = first (PathForeign rel) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
-  in [(TipPath . Many $ One .fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
+  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
 
 recPred
   :: (t -> [(PathIndex PathTID b, d)])
@@ -614,7 +614,7 @@ liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftA
   where
     ref = traverse (lookKeyM inf tname) i
     tb = lookTable inf tname
-    n = join $ (\ ref -> L.find (\i -> S.fromList ref == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)) <$> ref
+    n = join $ (\ ref -> L.find (\i -> S.fromList (F.toList ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)) <$> ref
     proj n = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
@@ -622,9 +622,8 @@ liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftA
 liftAccessM _ _ i = error (show i)
 
 
-liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessMU inf tname)  i
-liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessMU inf tname)  i
-liftAccessMU inf tname (One i) =  One <$> liftAccessM inf tname  i
+liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
+liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
 
 liftAccessF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Access k-> Access Key
 liftAccessF lk inf tname (Point i  ) =  Point i
@@ -635,7 +634,7 @@ liftAccessF lk inf tname (Nested i c) = Nested ref (liftAccessF lk rinf (snd l)<
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref = (fst lk) inf tname <$> i
     tb = lookTable inf tname
-    n = justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (ref)== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    n = justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (F.toList ref)== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
     l = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
@@ -656,7 +655,7 @@ genPredicateFull
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (Inline l,Right i ))  <$> b
-genPredicateFull i (Nested p l) = fmap (\(a,b) -> (RelAccess (fmap (Inline  ) p) a , b )) <$> genPredicateFullU i l
+genPredicateFull i (Nested p l) = fmap (\(a,b) -> (RelAccess (fmap (Inline  ) (F.toList p)) a , b )) <$> genPredicateFullU i l
 genPredicateFull _ i = error (show i)
 
 genPredicateFullU
@@ -664,15 +663,14 @@ genPredicateFullU
      t
      -> Union (Access a)
      -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
-genPredicateFullU i (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
-genPredicateFullU i (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
-genPredicateFullU i (One l) = genPredicateFull i  l
+genPredicateFullU i (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFull i <$> l)
 
-genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
-genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
+genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
+genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
 
 genPredicate o (IProd b l) =  (\i -> PrimColl (Inline l,Right (if o then i else Not i ) )) <$> b
-genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing a) else  Nothing ) <$> p
+genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing a) else  Nothing ) <$> F.toList p
 genPredicate _ i = error (show i)
 
 
@@ -809,7 +807,7 @@ data TableModificationK k p
                       , tableObj :: k
                       , tableDiff :: p
                       }
-  -- | NestedModification  (TableModificationK k p) (M.Map (AttributePath Key (AccessOp Key , FTB Showable)) (TableModificationK k p ))
+  | NestedModification  (TableModificationK k p) (M.Map (AttributePath Key (AccessOp Key , FTB Showable)) (TableModificationK k p ))
   | AsyncTableModification {
                        tableObj :: k
                       , tableDiff :: p

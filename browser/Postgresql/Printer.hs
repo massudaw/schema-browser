@@ -339,7 +339,7 @@ explodeDelayed inf m _ t@(IT  k tb  )
    prim = do
      l <- lkTB t
      let nmeta = tableMeta $ lookSTable inf r
-     selectRow l <$> explodeRecord inf nmeta  (tableNonRef $ allRec' (tableMap inf) (lookSTable inf r))
+     selectRow l <$> explodeRecord inf nmeta  (tableNonRef $head . F.toList $tb)
 
 
 printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Rel Key ,[(Key,AccessOp Showable )]) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
@@ -392,9 +392,8 @@ indexFieldL inf m e c p@(Rel l _ _) v =
       Nothing -> error $ "not attr rel " ++ show (l,v)
 indexFieldL inf m e c i v = error (show (i, v))
 
-indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
-indexFieldLU inf m e c (ISum nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
-indexFieldLU inf m e c (One nt) v = flip (indexFieldL inf m e c) v  nt
+indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldL inf m e c) v ) nt
+indexFieldLU inf m e c (ISum nt) v = concat <$> traverse (flip (indexFieldL inf m e c) v ) nt
 
 utlabel
   :: Either (FTB Showable, BinaryOperator) UnaryOperator
@@ -466,11 +465,10 @@ loadDelayedQuery
   :: InformationSchema
      -> KVMetadata Key
      -> TBData Key ()
-     -> TBData Key ()
      -> RWST [Address Key] String NameMap Identity Text
-loadDelayedQuery inf m v delayed= do
-  tq <- expandBaseTable m v
-  tquery <- expandQuery' inf m False v
+loadDelayedQuery inf m delayed= do
+  tq <- expandBaseTable m delayed
+  tquery <- expandQuery' inf m False delayed
   rq <- explodeRecord inf m delayed
   out <- atTable m $ mapM (\i-> do
     v <- lkTB (Attr i (TB1 ()))

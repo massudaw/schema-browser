@@ -84,15 +84,15 @@ mapDef inf
     schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
     schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
     schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
-    fields =  proc t -> do
+    fields =  irecord $ proc t -> do
       SText tname <-
           ifield "table_name" (ivalue (readV PText))  -< ()
-      evfields <- iinline "event" (iopt $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-      efields <- iinline "geo" (irecord (iinline "features" (imap $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
-      desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
-      features <- iinline "geo" (irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) -< ()
-      color <- iinline "geo" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+      evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+      efields <- iinline "geo" (ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
+      desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+      pksM <- iinline "pks" (ivalue $ irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+      features <- iinline "geo" (ivalue $ irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) -< ()
+      color <- iinline "geo" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
       let
         table = lookTable inf tname
         projf ::  (Showable , (TBData Text Showable)) -> TBData Key Showable -> Maybe A.Object

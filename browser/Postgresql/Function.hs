@@ -5,6 +5,7 @@ import Utils
 import Safe
 import Step.Host
 import Data.Monoid
+import qualified Data.Foldable as F
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -24,12 +25,12 @@ indexLabel p@(IProd b l) v =
       Just i -> i
       Nothing -> error "no fk"
 indexLabel p@(Nested l m) v =
-  case findFK (l) v of
+  case findFK (F.toList l) v of
     Just (IT k (TB1 a)) -> indexLabelU m a
     Just (IT k (LeftTB1 (Just (TB1 a)))) -> indexLabelU m a
     Nothing -> error "no fk"
 
 indexLabel  i v = error (show (i, v))
-indexLabelU  (Many [One nt]) v = indexLabel  nt v
+indexLabelU  (Many [nt]) v = indexLabel  nt v
 
 

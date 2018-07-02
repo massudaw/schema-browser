@@ -66,16 +66,16 @@ chartDef inf
     schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
     schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
     schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
-    fields =  proc t -> do
+    fields =  irecord $ proc t -> do
       SText tname <-
           ifield "table_name" (ivalue (readV PText))  -< ()
-      mfields <- iinline "metric" (irecord $ ifield "metrics" (imap $ ivalue $  readV PText)) -< ()
-      gfields <- iinline "geo" (iopt $ irecord (iinline "features" (imap $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
-      evfields <- iinline "event" (iopt $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-      desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
-      color <- iinline "metric" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
-      chart <- iinline "metric" (irecord (ifield "chart_type" (ivalue $ readV PText))) -< ()
+      mfields <- iinline "metric" (ivalue $ irecord $ ifield "metrics" (imap $ ivalue $  readV PText)) -< ()
+      gfields <- iinline "geo" (iopt $ ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
+      evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+      desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+      pksM <- iinline "pks" (ivalue $ irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+      color <- iinline "metric" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
+      chart <- iinline "metric" (ivalue $ irecord (ifield "chart_type" (ivalue $ readV PText))) -< ()
       let
         proj r = do
           pks <- pksM

@@ -150,18 +150,16 @@ setup smvar bstate plugList w = void $ do
             st <- once (fmap (flip elem . fmap (^._2)) m)
             return $ TrivialWidget st widget),
           ("Metadata" ,do
-                let metaOpts = ["Change","Exception","Poll","Stats"]
+                let metaOpts = ["Change","Exception","Polling","Clients"]
                     displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
                 metanav <- buttonDivSet metaOpts (pure Nothing) displayOpts
                 element metanav # set UI.class_ "col-xs-5 pull-right"
                 metabody <- UI.div
                 metaDiv <- UI.div # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
-                traverseUI (\(nav,tables)-> case nav  of
-                  "Poll" -> do
-                    els <- sequence   [ metaTable inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
-                                        , metaTable inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
-                    element metabody #
-                        set children els
+                els <- traverseUI (maybe (return []) (\(nav,tables) -> case nav  of
+                  "Polling" -> do
+                    els <- sequence   [ metaTable inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]                                        ]
+                    return els
                   "Change" ->
                       case schemaName inf of
                         i -> do
@@ -169,21 +167,21 @@ setup smvar bstate plugList w = void $ do
                           refId <- primEditor (pure Nothing )
                           button <- primEditor (pure (Just ()))
                           traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
-                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
-                          dash <- metaTable inf "modification_table" pred
-                          element metabody # set UI.children [label,getElement refId,getElement button ,dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
-                  "Stats" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
-                      stats_load <- metaTable inf "stat_load_table" pred
-                      stats <- metaTable inf "table_stats" pred
-                      clients <- metaTable inf "clients" [(RelAccess [keyRef "selection"] $ keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
-                      element metabody # set UI.children [stats,stats_load,clients]
+                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                          dash <-  metaTable inf "modification_table"  pred
+                          return  [label,getElement refId,getElement button ,dash]
+                  "Clients" -> do
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                      let pred = [(RelAccess [keyRef "selection"] $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess ([keyRef "selection"] ) $ RelAccess ([keyRef "selection"] ) ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
+                      clients <- metaTable inf "clients" pred
+                      return [clients]
                   "Exception" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
                       dash <- metaTable inf "plugin_exception" pred
-                      element metabody # set UI.children [dash]
+                      return [dash]
                   i -> error (show i)
-                      ) ((,) <$> triding metanav <*> triding bset)
+                           )) ((\i  -> fmap(i ,)) <$> triding metanav <*> fmap (nonEmpty. F.toList) (triding bset))
+                element metabody # sink children (facts els)
                 st <- once (buttonStyle,const True)
                 return  $ TrivialWidget st metaDiv),
           ("Browser" ,do

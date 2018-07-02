@@ -408,7 +408,7 @@ indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(Access
 indexPredIx (n@(RelAccess [Inline key] nt ) ,eq) r
   = case  refLookup (Set.fromList [Inline key]) r of
     Nothing -> Nothing
-    Just i ->  fmap (PathInline key . fmap One) $ recPred $ indexPredIx (nt , eq ) <$> i
+    Just i ->  fmap (PathInline key .fmap (Many . pure) ) $ recPred $ indexPredIx (nt , eq ) <$> i
   where
     recPred (TB1 i ) = TipPath <$> i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
@@ -417,7 +417,7 @@ indexPredIx (n@(RelAccess [Inline key] nt ) ,eq) r
 indexPredIx (n@(RelAccess nk nt ) ,eq) r
   = case  relLookup (Set.fromList nk) r of
     Nothing -> Nothing
-    Just i ->  fmap (PathForeign nk . fmap One ) $ recPred $ allRefs <$> i
+    Just i ->  fmap (PathForeign nk . fmap (Many . pure) ) $ recPred $ allRefs <$> i
   where
     allRefs (TBRef (_,v))= indexPredIx (nt, eq ) v
     recPred (TB1 i ) = TipPath <$> i

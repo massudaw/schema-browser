@@ -164,10 +164,9 @@ updateFrom  m a  pk b = do
   tellPatches m (pure v)
   return v
 
-patchFrom m  (pk,PatchRow a)   = do
-  inf <- askInf
-  let l = (RowPatch (pk,PatchRow a))
-  asyncPatches m (pure l )
+patchFrom m  r   = do
+  let l = RowPatch r
+  asyncPatches m (pure l)
   return l
 
 
@@ -474,8 +473,7 @@ childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable
         recurseAttr (G.PathForeign  _ i ) p = PFK relf [] $ taggedRef i (const p)
         recurseAttr (G.PathInline r i ) p = PInline r $ taggedRef i   nested
           where
-            nested  (Many i) =  concat $ nested <$> i
-            nested  (One i) =  [recurseAttr i p]
+            nested  (Many i) =  flip recurseAttr p <$> i
         recurseAttr (G.PathAttr _ i ) p = PFK relf [] $ taggedRef i (const p)
      in traceShow (target,rel) $ concat $ (\i -> search  i  sidx) <$>  evs))]
   where
@@ -526,7 +524,8 @@ pageTable method table page size presort fixed = do
              -- Add entry for this query
              putIdx (idxChan dbvar) (fixedU, estLength page pagesize s, pageidx, token)
              -- Only trigger the channel with new entries
-             traverse (\i ->  putPatch (patchVar dbvar) (F.toList $ FetchData table  <$>  i)) $ nonEmpty newRes
+             -- TODO: Evaluate if is better to roll the deltas inside the monad instead of applying directly
+             traverse (\i ->  putPatch (patchVar dbvar) (FetchData table  <$> i)) $ nonEmpty newRes
              return $ if L.null newRes then
                 (maybe (estLength page pagesize s,M.singleton pageidx token ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx token v)) hasIndex,reso)
                     else
@@ -736,7 +735,7 @@ transactionNoLog inf log = do
       Nothing -> do
         let rinf = fromMaybe inf $ HM.lookup (rawSchema (fst k)) $  depschema inf
         mmap <- readTVar (mvarMap rinf)
-        return $ justError ("No table found" ++  show k) $ M.lookup (fst k) mmap
+        return $ justError ("No table found" ++ show k) $ M.lookup (fst k) mmap
       Just i -> return i
     putPatchSTM (patchVar ref) v
     ) (M.toList aggr)
@@ -755,10 +754,9 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ trans
 
 fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
 fullDiffEdit k1 old v2 = do
-   inf <- askInf
    edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
-   when (isJust $ diff (tableNonRef old) (tableNonRef edn)) $ void $ do
-     traverse (patchFrom k1 . (G.getIndex k1 edn,) . PatchRow) (diff old edn)
+   when (isJust $ diff (tableNonRef old) (tableNonRef edn)) . void $do
+     traverse (patchFrom k1 . (G.getIndex k1 edn,) . PatchRow)  (diff old edn)
    return edn
 
 tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
@@ -1376,14 +1374,14 @@ leftJoinR (P j k) (P l n) srel alias
 
 
 projectV
-  :: (Monad m, Traversable t2) =>
+  :: (Show k ,Monad m, Traversable t2) =>
      Parser (Kleisli m) (View i k) a1 (t2 (KV (FKey a) c))
      -> Parser
           (Kleisli (RWST (Atom (KV T.Text c), [t]) t1 () m))
-          (Union (G.AttributePath k MutationTy),Union (G.AttributePath k MutationTy))
+          ([Union (G.AttributePath k MutationTy)],[Union (G.AttributePath k MutationTy)])
           ()
           b
      -> Parser (Kleisli m) (View i k) a1 (t2 b)
-projectV  (P i (Kleisli j) )  p@(P (k,_) _ ) = P (ProjectV i  k) (Kleisli $  j  >=> (\a -> traverse (evalEnv p . (,[]) . Atom .  mapKey' keyValue) a))
+projectV  (P i (Kleisli j) )  p@(P (k,_) _ ) = P (ProjectV i  (foldl mult one k)) (Kleisli $  j  >=> (\a -> traverse (evalEnv p . (,[]) . Atom .  mapKey' keyValue) a))
 
 

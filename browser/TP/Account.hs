@@ -70,7 +70,7 @@ accountDef inf
               (fromR "accounts" schemaPred) schemaI "account")
             (fromR "event" schemaPred) schemaI "event")
           (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") (irecord fields)
 
   where
       schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
@@ -81,11 +81,11 @@ accountDef inf
       fields =  proc t -> do
         SText tname <-
             ifield "table_name" (ivalue (readV PText))  -< ()
-        afields <- iinline "account" (irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
-        desc <- iinline "description" (iopt $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pksM <- iinline "pks" (irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
-        efields <- iinline "event" (irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        color <- iinline "account" (irecord (ifield "color" (ivalue $ readV PText))) -< ()
+        afields <- iinline "account" (ivalue $ irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
+        desc <- iinline "description" (iopt . ivalue $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+        pksM <- iinline "pks" (ivalue $ irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+        efields <- iinline "event" (ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        color <- iinline "account" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
         let
           toLocalTime = fmap to
             where

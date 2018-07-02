@@ -312,7 +312,7 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
   let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic v)) Just ) preoldItems  ) ( keyStatic i)
   let tdiv = fmap _tbattr <$> oldItems
   attrUI <- buildUIDiff (buildPrimitive (keyModifier i)) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
-  let insertT = fmap (PAttr i ) <$> triding attrUI
+  let insertT = fmap (PAttr i) <$> triding attrUI
   return $ TrivialWidget insertT  (getElement attrUI)
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
@@ -345,7 +345,7 @@ traRepl  = foldMap repl
   where
     repl :: Ord k =>Access k-> Union (Access k)
     repl (Rec  ix v ) = replaceU ix v v
-    repl v = One v
+    repl v = Many [v]
 
 instance Compact a => Semigroup (Editor a) where
   i <> j = fromMaybe Keep $ safeHead $ compact [i,j]
@@ -412,7 +412,7 @@ buildFKS inf hasLabel el constr table refs plugmods   oldItems =  F.foldl'  run 
             plugattr = indexPluginAttrDiff m plugmods
             oldref = join . fmap ((^?  Le.ix l ) . _kvvalues) <$> oldItems
             aref = M.lookup l refs
-            replaceNonInj = maybe [] (\j -> pure (Many ((One .IProd Nothing. _relOrigin <$> F.toList l)), onDiff  Just  (const Nothing)<$> fst j))  aref
+            replaceNonInj = maybe [] (\j -> pure (Many ((IProd Nothing. _relOrigin <$> F.toList l)), onDiff  Just  (const Nothing)<$> fst j))  aref
         wn <-  tbCaseDiff inf table constr m  (M.fromList $ fmap (first triding) <$> w) (replaceNonInj <> plugattr) oldref
         lab <- if
           hasLabel
@@ -1350,7 +1350,7 @@ fkUITableGen ::
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
   = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj) ) (fmap liftFK <$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
-    replaceNonInj = (\(i,j) -> (\v -> (One ( IProd Nothing (_relOrigin v)),) $ onDiff  ( fmap (\m -> PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v) ) . S.map _relOrigin . index) .  nonRefPatch) (const Nothing)<$> fst j )<$> F.toList i ) <$> M.toList nonInjRefs
+    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ onDiff  ( fmap (\m -> PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v) ) . S.map _relOrigin . index) .  nonRefPatch) (const Nothing)<$> fst j )<$> F.toList i ) <$> M.toList nonInjRefs
       where patchChange (PAttr i k ) = fmap (const []) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j

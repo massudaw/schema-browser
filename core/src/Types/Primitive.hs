@@ -103,9 +103,8 @@ instance (Binary a)  => Binary (TBIndex a)
 instance (NFData a)  => NFData (TBIndex a)
 
 data Union a
-  = Many [Union a]
-  | ISum [Union a]
-  | One a
+  = Many [a]
+  | ISum [a]
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
 
 instance (Binary k) => Binary (Union k)
@@ -113,7 +112,7 @@ instance (Binary k) => Binary (Union k)
 instance (NFData k) => NFData (Union k)
 data Access a
   = IProd (Maybe UnaryOperator) a
-  | Nested [a] (Union (Access a))
+  | Nested (NonEmpty a) (Union (Access a))
   | Rec Int  (Union (Access a))
   | Point Int
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -1143,9 +1142,9 @@ renderUnary i = error (show i)
 accesRelGen' :: Rel k -> Access k
 accesRelGen' (Inline i) = IProd Nothing i
 accesRelGen' (RelAccess l m) =
-  Nested (_relOrigin <$> l) (Many [One (accesRelGen' m)])
+  Nested (_relOrigin <$> Non.fromList l) (Many [(accesRelGen' m)])
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l
-relAccesGen (Nested l (Many [One m])) =
-  RelAccess ((\(i) -> Inline i) <$> l) (relAccesGen m)
+relAccesGen (Nested l (Many [m])) =
+  RelAccess ((\(i) -> Inline i) <$> F.toList l) (relAccesGen m)
