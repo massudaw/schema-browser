@@ -1,49 +1,25 @@
 {-# LANGUAGE Arrows,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,DeriveTraversable,DeriveFoldable,GADTs,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-}
 module Environment where
 
-import Control.Concurrent
 import RuntimeTypes
 import Step.Host
 import Step.Client
-import Query
 import Types
-import Control.Exception
-import Data.Time
-import Step.Common
-import Debug.Trace
-import GHC.Generics
-import Data.Unique
 import Data.Maybe
-import Control.DeepSeq
 import Types.Index as G
-import Control.Concurrent.STM.TQueue
-import Control.Concurrent.STM.TMVar
-import Control.Concurrent.STM
 import Control.Monad.RWS
 import Types.Patch
 import qualified NonEmpty as Non
 import Utils
-import qualified Data.Text as T
 
 import qualified Data.List as L
 import Control.Arrow
 import Data.Text (Text)
 import Control.Applicative
-import Control.Monad.Writer
 
-import qualified Reactive.Threepenny as R
-import Database.PostgreSQL.Simple hiding (Binary)
-import Data.Functor.Identity
-import Data.Map (Map)
-import qualified Control.Lens as Le
 import qualified Data.Map as M
-import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
-import Data.Set (Set)
-import Control.Monad.Reader hiding (withReaderT)
 import qualified Data.Foldable as F
-import Data.Traversable
-import GHC.Stack
 
 type DatabaseM ix i a = Parser (Kleisli TransactionM) ix i  a
 
@@ -173,7 +149,7 @@ irecordU :: (Show k,Monad m ,Show s,Show (Index s)) =>
   (forall a. [a ]-> Union a)
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
   -> PluginM (Union (AttributePath k p))  (Atom ((TBData k s)))  m  i a
-irecordU f (P (tidxi ,tidxo) (Kleisli op) )  = P (pure . f $ tidxi,pure  . f $ tidxo) (Kleisli op )
+irecordU f (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion f $ tidxi,mapUnion f $ tidxo) (Kleisli op )
 
 
 ivalue :: (Monad m ,Show s,Show (Index s)) =>
@@ -232,10 +208,11 @@ iforeign ::
        (Monad m ,Patch s ,Show s ,Show (Index s) ,Show k ,Ord k) => [Rel k]
        -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathForeign s <$> tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(_relOrigin <$> Non.fromList s) (Many []))   ) ). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(_relOrigin <$> Non.fromList s) (Many []))   ) ). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 
+mapNonEmpty f i = join . maybeToList $ fmap f <$>  nonEmpty i
 
 -- Row
 
@@ -248,11 +225,12 @@ isum  lsp = irecordU ISum $ P ( concat $ fmap (fst .staticP) ls, concat $ fmap (
   where unKleisli (Kleisli op) = op
         ls =  lsp
 
-arow :: Monad m =>
+arow :: (Show (Index s),Show s,Show k ,Monad m) =>
   RowModifier
-  -> PluginM (Union (AttributePath k MutationTy)) o m i a
-  -> PluginM (Row RowModifier k ) o m i a
-arow  m (P (tidxi ,tidxo) (Kleisli op) )  = P (fmap (Row m) tidxi ,fmap (Row m) tidxo) (Kleisli op )
+  -> PluginM (AttributePath k MutationTy) (Atom (TBData k s)) m i a
+  -> PluginM (Row RowModifier k ) (Atom (TBData k s)) m i a
+arow  m  p = P (fmap (Row m) tidxi ,fmap (Row m) tidxo) op
+  where P (tidxi ,tidxo) op  = irecord p
 
 
 mapUnion f i = maybeToList $ f <$> nonEmpty i
@@ -323,26 +301,26 @@ matchFTB f i j = error$  show (i,j)
 
 
 translate
-  :: (Show k,Ord k) => PluginM (Namespace Text Text RowModifier k) (Atom (TBData Text Showable)) TransactionM () t1
+  :: (Show k,Ord k)
+  => PluginM (Namespace Text Text RowModifier k) (Atom (TBData Text Showable)) TransactionM () t1
   -> ((Text, Text), [(TBData k Showable -> Bool ,OverloadedRule)])
 translate  r
    = case staticP r  of
-       ([(Namespace i ([(Module m ([(Row RowDrop s )]))]))],_) -> let
-          lift j i = do
+       ([Namespace i [Module m [(Row RowDrop s )]]],_) ->
+         let
+           lift j i = do
              inf <- askInf
              ((dropRow' (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
-          in ((i,m),[(patternMatch s ,DropRule (lift (runEnv r)))])
-       ([(Namespace i ([(Module m ([(Row RowCreate s )]))]))],_) -> let
+         in ((i,m),[(patternMatch s ,DropRule (lift (runEnv r)))])
+       ([Namespace i [Module m [Row RowCreate s ]]],_) ->
+         let
            lift j i = do
              inf <- askInf
              ((createRow' (lookMeta inf m) . F.foldl' apply i ) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i,[])
-        in((i,m),[(patternMatch s ,CreateRule (lift (runEnv r)))])
-       ([(Namespace i ([(Module m ([(Row RowUpdate s )]))]))],_)  -> let
+         in ((i,m),[(patternMatch s ,CreateRule (lift (runEnv r)))])
+       ([Namespace i [Module m [Row RowUpdate s ]]],_)  ->
+         let
            lift j i p = do
              inf <- askInf
              ((\a-> RowPatch . fmap PatchRow . (G.getIndex (lookMeta inf m) i,) . L.head . compact $ (p:a)) . fmap (liftPatch inf  m)) <$> j (Atom $ mapKey' keyValue i, [firstPatch keyValue p])
-        in((i,m),[(patternMatch s ,UpdateRule (lift (runEnv r)))])
-
-checkPlugin inf p
-  = case staticP p of
-      ([(Namespace i ([(Module m ([(Row _ l)]))]))],_) -> (i,m,patternMatch l (mapKey' keyValue $ allRec' (tableMap inf) (lookTable inf m) ))
+         in ((i,m),[(patternMatch s ,UpdateRule (lift (runEnv r)))])

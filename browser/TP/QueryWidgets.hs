@@ -674,7 +674,7 @@ insertCommand lbox inf table inscrudp inscrud  authorize gist = do
         # set children [insertI]
         # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
     cliIns <- UI.click insertB
-    let  crudIns j   =   transaction inf (fullInsert m j)
+    let  crudIns j  =  transaction inf (fullInsert m j)
     diffIns <- ui $ mapEventDyn catchEd $ fmap crudIns <$> facts inscrud <@ unionWith const cliIns (filterKey  (facts insertEnabled) altI )
     return $ (diffIns ,insertB)
 

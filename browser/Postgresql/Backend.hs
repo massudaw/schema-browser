@@ -73,7 +73,7 @@ createColumnCatalog
 createColumnCatalog  =
   aschema "metadata" $
     atable "catalog_columns" $
-      arow RowCreate . irecord $
+      arow RowCreate  $
         proc _ -> do
           c <- ifield "column_name" (ivalue (readV PText)) -< ()
           (s,t) <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
@@ -91,7 +91,7 @@ dropColumnCatalog
 dropColumnCatalog  = do
   aschema "metadata" $
     atable "catalog_columns" $
-      arow RowDrop . irecord $
+      arow RowDrop $
         proc _ -> do
           c <- ifield "column_name"
               (ivalue (readV PText)) -< ()
@@ -109,7 +109,7 @@ createTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBD
 createTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
-      arow RowCreate .irecord$
+      arow RowCreate $
         proc _ -> do
           t <- ifield "table_name"
              (ivalue (readV PText)) -< ()
@@ -126,7 +126,7 @@ dropTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBDat
 dropTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
-      arow RowDrop .irecord$
+      arow RowDrop $
         proc _ -> do
           t <- ifield "table_name"
               (ivalue (readV PText)) -< ()
@@ -148,7 +148,7 @@ createSchema
 createSchema  = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowCreate .irecord$
+      arow RowCreate $
         proc _ -> do
           s <- ifield "name"
               (ivalue (readV  PText))-< ()
@@ -170,7 +170,7 @@ alterSchema
 alterSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowUpdate .irecord$
+      arow RowUpdate $
         proc _ -> do
           (n,nnewm) <- ifield "name"
               (ivalue (changeV PText)) -< ()
@@ -189,7 +189,7 @@ dropSchema
 dropSchema = do
   aschema "metadata" $
     atable "catalog_schema" $
-      arow RowDrop . irecord $
+      arow RowDrop $
         proc _ -> do
           s <- ifield "name" (ivalue (readV  PText))-< ()
           act (\n->  do

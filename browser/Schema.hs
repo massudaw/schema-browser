@@ -16,7 +16,6 @@ import Postgresql.Types
 import Data.Word
 import Data.Int
 import Control.Monad.State
-import Query
 import Step.Host
 import Data.Ord
 import Types

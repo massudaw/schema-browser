@@ -185,7 +185,9 @@ insertFrom  m a   = do
       isCreate (i,CreateRule _ ) = i (mapKey' keyValue a)
       isCreate _ = False
   v <- case L.find isCreate  =<< overloaded of
-    Just (_,CreateRule l) -> l a
+    Just (s,CreateRule l) -> do
+      liftIO . putStrLn $ "Triggered create rule: " ++ show (_kvschema m,_kvname m)
+      l a
     Nothing -> (insertEd $ schemaOps inf)  m a
   tellPatches m (pure v)
   return  v
@@ -698,8 +700,9 @@ recInsert k1  v1 = do
    inf <- askInf
    ret <- KV <$>  Tra.traverse (tbInsertEdit k1 )  (unKV v1)
    let tb  = lookTable inf (_kvname k1)
+       overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty Nothing
-   if  (isNothing $ join $ fmap (flip G.lookup l) $ G.tbpredM k1  ret ) && rawTableType tb == ReadWrite
+   if  (isNothing $ join $ fmap (flip G.lookup l) $ G.tbpredM k1  ret ) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
         tb  <- insertFrom k1 ret
         return $ createRow tb) (\e -> liftIO $ do
