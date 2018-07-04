@@ -269,11 +269,13 @@ labelCaseDiff
 labelCaseDiff inf a wid = do
   let
     dynShow = do
-      patch <- UI.div
-        # sinkDiff text  (show <$> wid)
-      tip <- UI.div
+      lref <- UI.div
         # set text (show $ keyattr  a)
-      UI.div # set children [tip,patch]
+      ltype <- UI.div
+        # set text (show $ keyType . _relOrigin <$> keyattr  a)
+      ldelta <- UI.div
+        # sinkDiff text  (show <$> wid)
+      UI.div # set children [lref,ltype,ldelta]
   hl <- detailsLabel (set UI.text (attributeLabel a) . (>>= flip paintEditDiff (wid ))) dynShow
   return $ TrivialWidget wid hl
 
@@ -534,7 +536,8 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
       return (listBody,sequenceTable fks)
   element listBody
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
-  out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
+  let out = output
+  --out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
 
   reftb <- ui $ refTables inf   table
   (outI ,_)<- processPanelTable listBody inf reftb  out table preOldItems
@@ -582,7 +585,7 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
-  out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
+  let out = output
   return (body, out)
 
 
@@ -592,13 +595,13 @@ loadItems
      -> Table
      -> Tidings (t (TBData CoreKey Showable))
      -> Dynamic (Tidings (t (TBData CoreKey Showable)))
-loadItems inf table preoldItems2
+loadItems inf table preoldItems
   = mapTidingsDyn
     (traverse
       (\i -> do
         v <- transactionNoLog inf . getItem $ i
         return $ maybe i (justError "cant apply" . applyIfChange i) v))
-    preoldItems2
+    preoldItems
   where
     getItem v = getFrom table v
 
@@ -666,7 +669,7 @@ catchEd  m  = (Right <$> sequence m) `catchAll` (\ e -> return (Left (show e)))
 
 insertCommand lbox inf table inscrudp inscrud  authorize gist = do
     altI <- onAltI lbox
-    let insertEnabled = liftA3 (\i j k -> i && j && k ) (isDiff <$> inscrudp ) (maybe False  (isRight .tableCheck m) <$>  inscrud) (liftA2 (\j -> maybe True (not. (flip (containsGist table) j))) gist inscrud)
+    let insertEnabled = liftA3 (\i j k -> i && j && k ) (isDiff <$> inscrudp ) (maybe False  (\i -> (isRight .tableCheck m  $ i) || isJust (matchInsert inf (tableMeta table ) i) ) <$>  inscrud) (liftA2 (\j -> maybe True (not. (flip (containsGist table) j))) gist inscrud)
         m = tableMeta table
     insertI <- UI.span # set UI.class_ "glyphicon glyphicon-plus"
     insertB <- UI.button
@@ -682,7 +685,7 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
     altU <- onAltU lbox
     let
       m = tableMeta table
-      editEnabled = (\i j k  l m -> i && j && k && l && m )<$> (maybe False (isRight . tableCheck  m)<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
+      editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
       crudEdi i j =  transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -694,10 +697,10 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
     diffEdi <- ui $ mapEventDyn catchEd $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
     return (diffEdi,editB)
 
-deleteCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
+deleteCommand lbox inf table oldItemsi authorize gist = do
     let
       m = tableMeta table
-      deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef <$> oldItemsi) (liftA2 (\i j -> maybe False (flip (containsGist table) j) i  ) oldItemsi gist)
+      deleteEnabled = liftA2 (\i j -> (maybe False (isJust .matchDelete inf m) i || (isJust i &&  rawTableType table == ReadWrite))  && j ) ( oldItemsi)  (liftA2 (\i j -> maybe False (flip (containsGist table) j) i  ) oldItemsi gist)
       crudDel :: TBData Key Showable  ->  Dynamic (RowPatch Key Showable)
       crudDel j  = transaction inf (deleteFrom m j)
     deleteI <- UI.span # set UI.class_ "glyphicon glyphicon-trash"
@@ -778,7 +781,7 @@ processPanelTable lbox inf reftb@(res,gist,_,_) inscrudp table oldItemsi = do
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist
   (diffEdit,editB) <-     editCommand lbox inf table oldItemsi inscrudp inscrud authorize gist
   (diffMerge,mergeB) <-   mergeCommand lbox inf table inscrudp inscrud authorize gist
-  (diffDelete,deleteB) <- deleteCommand lbox inf table oldItemsi inscrudp inscrud authorize gist
+  (diffDelete,deleteB) <- deleteCommand lbox inf table oldItemsi authorize gist
 
   transaction <- UI.div
     # set children [insertB,editB,mergeB,deleteB]

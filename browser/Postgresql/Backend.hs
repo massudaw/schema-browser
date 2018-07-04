@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
+{-# LANGUAGE Arrows,GADTs,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
@@ -197,9 +197,6 @@ dropSchema = do
             liftIO$ executeLogged (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted n)
             return ()) -< TB1 s
           returnA -< ()
-
-
-
 
 insertPatch
   :: (MonadIO m ,Functor m )

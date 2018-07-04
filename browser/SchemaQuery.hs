@@ -10,6 +10,9 @@ module SchemaQuery
   -- Create fresh variables
   , createFresh
   -- Database Mutable Operations
+  , matchInsert
+  , matchUpdate
+  , matchDelete
   , fullInsert
   , fullEdit
   , patchFrom
@@ -150,18 +153,24 @@ selectFrom t a b c d = do
   let tb = lookTable inf t
   tableLoader  tb a b c d (allRec' (tableMap inf) tb)
 
-updateFrom  m a  pk b = do
-  inf <- askInf
-  let
-    kv = apply a b
+matchUpdate inf m a =
+ let
     overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
     overloadedRules = (rules $ schemaOps inf)
     isUpdate (i,UpdateRule _ ) =  i (mapKey' keyValue a)
     isUpdate _ = False
-  v <- case L.find isUpdate =<< overloaded of
-    Just (_,UpdateRule i) -> i a b
-    Nothing -> (editEd $ schemaOps inf) m a pk b
-  tellPatches m (pure v)
+ in L.find isUpdate  =<< overloaded
+
+
+updateFrom m a pk b = do
+  inf <- askInf
+  v <- case matchUpdate inf m a  of
+    Just (_,UpdateRule i) -> do
+      liftIO . putStrLn $ "Triggered update rule: " ++ show (_kvschema m,_kvname m)
+      v <- i a b
+      tellPatches m (pure v)
+      return v
+    Nothing -> patchFrom m ((pk ,PatchRow b))
   return v
 
 patchFrom m  r   = do
@@ -178,13 +187,17 @@ fullEdit k1 old v2 = do
   i <- fullDiffEdit k1 old v2
   return $ patchRow' k1 old i
 
+matchInsert inf m a =
+  let
+    overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
+    overloadedRules = (rules $ schemaOps inf)
+    isCreate (i,CreateRule _ ) = i (mapKey' keyValue a)
+    isCreate _ = False
+  in L.find isCreate  =<< overloaded
+
 insertFrom  m a   = do
   inf <- askInf
-  let overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
-      overloadedRules = (rules $ schemaOps inf)
-      isCreate (i,CreateRule _ ) = i (mapKey' keyValue a)
-      isCreate _ = False
-  v <- case L.find isCreate  =<< overloaded of
+  v <- case matchInsert inf m a  of
     Just (s,CreateRule l) -> do
       liftIO . putStrLn $ "Triggered create rule: " ++ show (_kvschema m,_kvname m)
       l a
@@ -215,16 +228,22 @@ getFrom m b = do
       return result
     Nothing ->  return Nothing
 
+matchDelete inf m a =
+ let
+    overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
+    overloadedRules = (rules $ schemaOps inf)
+    isDelete (i,UpdateRule _ ) =  i (mapKey' keyValue a)
+    isDelete _ = False
+ in L.find isDelete =<< overloaded
+
+
 deleteFrom  m a   = do
   inf <- askInf
-  let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
-      overloadedRules = (rules $ schemaOps inf)
-      isRule (i,DropRule _ ) = i (mapKey' keyValue a)
-      isRule _ = False
-      idx = G.getIndex m a
-  log <- case L.find isRule =<< overloaded of
+  log <- case matchDelete inf m a  of
     Nothing -> (deleteEd $ schemaOps inf) m a
-    Just (_,DropRule i) -> i a
+    Just (_,DropRule i) -> do
+      liftIO . putStrLn $ "Triggered drop rule: " ++ show (_kvschema m,_kvname m)
+      i a
   tellPatches m (pure log)
   return log
 
@@ -586,12 +605,13 @@ readState fixed dbvar = do
 tableCheck
   :: (Show t, Show a) =>
      KVMetadata (FKey (KType t))
-     -> KV (FKey (KType t)) a -> Either [Char] (KV (FKey (KType t)) a)
+     -> KV (FKey (KType t)) a
+     -> Either [Char] (KV (FKey (KType t)) a)
 tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
   where
-      checkAllFilled =  need `S.isSubsetOf`  available
-      available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
-      need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
+    checkAllFilled =  need `S.isSubsetOf`  available
+    available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
+    need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
 dynFork a = do
   t <- liftIO $  forkIO a
@@ -645,9 +665,9 @@ convertChanEvent inf table fixed bres chan = do
     let
       meta = tableMeta table
       m =  tableDiff <$> concat  ml
-      newRows =  filter (\d -> checkPatch fixed d && L.any (\i -> isNothing  (G.lookup i  v)) (index d) ) m
+      newRows =  filter (\d -> checkPatch fixed d && L.any (\i -> isNothing  (G.lookup i v)) (index d) ) m
       filterPred = nonEmpty . filter (checkPatch fixed)
-      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i  j) ) (index d) && not (checkPatch fixed d) then Just (rebuild (index d) DropRow )  else Nothing )
+      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (checkPatch fixed d) then Just (rebuild (index d) DropRow )  else Nothing )
       oldRows = filterPredNot v m
       patches = oldRows <> filterPred m
     traverse  h patches
@@ -702,7 +722,7 @@ recInsert k1  v1 = do
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty Nothing
-   if  (isNothing $ join $ fmap (flip G.lookup l) $ G.tbpredM k1  ret ) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
+   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret ) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
         tb  <- insertFrom k1 ret
         return $ createRow tb) (\e -> liftIO $ do
@@ -759,7 +779,7 @@ fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> 
 fullDiffEdit k1 old v2 = do
    edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
    when (isJust $ diff (tableNonRef old) (tableNonRef edn)) . void $do
-     traverse (patchFrom k1 . (G.getIndex k1 edn,) . PatchRow)  (diff old edn)
+     traverse (updateFrom k1 old (G.getIndex k1 edn))  (diff old edn)
    return edn
 
 tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
