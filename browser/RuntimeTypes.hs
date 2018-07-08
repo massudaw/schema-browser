@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE TypeOperators,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 import Types
@@ -199,10 +199,15 @@ instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
 instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v) where
   compact i = foldCompact assoc i
     where
-      assoc (AsyncTableModification o d ) (AsyncTableModification o2 d2 )
+      assoc (BatchedAsyncTableModification k l)  d@(AsyncTableModification _ _)
+        = case assoc (last l) d of
+            Just (BatchedAsyncTableModification _ i)-> Just $ BatchedAsyncTableModification k (init l <> i)
+            Just i@(AsyncTableModification _ _)-> Just $ BatchedAsyncTableModification k (init l <> [i])
+            Nothing -> Just $ BatchedAsyncTableModification k (l <> [d])
+      assoc a@(AsyncTableModification o d ) b@(AsyncTableModification o2 d2 )
           = if L.length new  == 1
             then Just (head new)
-            else Nothing
+            else Just (BatchedAsyncTableModification  o [a,b])
         where new = AsyncTableModification o <$> compact [d ,d2]
       assoc (FetchData o d ) (FetchData o2 d2)
           = if L.length new  == 1
@@ -293,7 +298,7 @@ applyTableRep
   => TableRep k Showable
   -> RowPatch k Showable
   -> Either String (TableRep k Showable,RowPatch k Showable)
-applyTableRep rep (BatchPatch rows op) = fmap (head . compact) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
+applyTableRep rep (BatchPatch rows op) = fmap (head . compact.reverse ) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
 applyTableRep (TableRep (m,sidxs,l)) p = do
   ((m,g),u)<- applyGiSTChange (m,l) p
   return (applySecondary p u (TableRep (m,sidxs, g)), u)
@@ -383,6 +388,9 @@ askInf = fmap fst ask
 
 type TableModificationU k u= TableModificationK (TableK k) (RowPatch k u )
 
+type (|->) a b = IsoArrow  a b
+data IsoArrow a b = IsoArrow { lowerA :: ( a -> b)  , buildA :: (b -> a )}
+
 type TransactionM = RWST (InformationSchema,[TableModification (RowPatch Key Showable)]) [(WherePredicate,TableModification (RowPatch Key Showable))] (M.Map (Table,WherePredicate) (DBRef Key Showable)) R.Dynamic
 
 type PageToken = PageTokenF Showable
@@ -398,6 +406,11 @@ newtype PageTokenF v
   = TableRef (Interval (TBIndex v))
   deriving(Eq,Ord,Show,Generic)
 
+data TBOperation a
+  = TBInsert a
+  | TBUpdate a a
+  | TBNoop a
+  deriving(Functor)
 
 data OverloadedRule
   =  CreateRule  (TBData Key Showable -> TransactionM (RowPatch Key Showable))
@@ -406,11 +419,12 @@ data OverloadedRule
 
 data SchemaEditor
   = SchemaEditor
-  { editEd  :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
-  , patchEd :: KVMetadata Key ->[TBIndex Showable] -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
+  {
+   patchEd :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
   , insertEd :: KVMetadata Key -> TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
-  , listEd :: KVMetadata Key ->TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
+  , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
+  , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
@@ -461,6 +475,7 @@ putPatch m = liftIO. atomically . putPatchSTM m
 mapModification :: (Ord b,Ord a,Ord c ,Ord (Index c))=> (a -> b) ->  TableModificationK (TableK a) (RowPatch a c) -> TableModificationK (TableK b )(RowPatch b c)
 mapModification f (TableModification a b c d e ) = TableModification a b c (fmap f d) (firstPatchRow f e)
 mapModification f (AsyncTableModification d e ) = AsyncTableModification  (fmap f d) (firstPatchRow f e)
+mapModification f (BatchedAsyncTableModification  d e ) = BatchedAsyncTableModification (fmap f d) (mapModification f <$> e)
 mapModification f (FetchData d e) = FetchData (fmap f d) (firstPatchRow f e)
 
 putPatchSTM m =  writeTChan m . force
@@ -704,7 +719,8 @@ mergeTB1 k  k2
 recComplement :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
 recComplement inf =  filterAttrs
   where
-    filterAttrs m e = fmap KV . notEmpty . M.merge (M.dropMissing ) M.preserveMissing (M.zipWithMaybeMatched (go m)) (_kvvalues e)  ._kvvalues
+    filterAttrs m e = fmap KV . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go m)) (_kvvalues e)  ._kvvalues
+      where notPKOnly k =  if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m) then Nothing else Just k
     notEmpty i = if M.null i then Nothing else Just i
     go m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
@@ -719,11 +735,25 @@ recComplement inf =  filterAttrs
     go m _ _ v@(Attr k a) = if L.elem k (_kvpk m) then Just v else Nothing
 
 
-recPKDesc :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
-recPKDesc inf =  filterAttrs
+recPK inf = filterTBData pred inf
   where
-    filterAttrs m = KV . fmap (go m) . M.filterWithKey (\k _ -> not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)  ._kvvalues
-      where pkdesc = S.fromList $ _kvpk m <> _kvdesc m
+    pred = (\m k _ ->
+            let
+                pkdesc = S.fromList $ _kvpk m
+            in not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)
+
+
+recPKDesc inf = filterTBData pred inf
+  where
+    pred = (\m k _ ->
+            let
+                pkdesc = S.fromList $ _kvpk m <> _kvdesc m
+            in not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)
+
+filterTBData :: (KVMetadata Key -> S.Set (Rel Key) -> TB Key a -> Bool) ->  InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
+filterTBData  pred inf =  filterAttrs
+  where
+    filterAttrs m = KV . fmap (go m) . M.filterWithKey   (pred m) ._kvvalues
     go m (FKT l  rel  tb) = FKT l rel $ filterAttrs m2  <$> tb
       where
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec desc: " <> show (rel ,_kvjoins m))$ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
@@ -809,6 +839,7 @@ data TableModificationK k p
                       , tableDiff :: p
                       }
   | NestedModification  (TableModificationK k p) (M.Map (AttributePath Key (AccessOp Key , FTB Showable)) (TableModificationK k p ))
+  | BatchedAsyncTableModification k  [TableModificationK k p]
   | AsyncTableModification {
                        tableObj :: k
                       , tableDiff :: p

@@ -287,6 +287,8 @@ logUndoModification inf (RevertModification id ip) = do
 logTableModification
   :: InformationSchema
      -> TableModification (RowPatch Key Showable)  -> IO (TableModification (RowPatch Key Showable))
+logTableModification inf i@(BatchedAsyncTableModification o l) = do
+  BatchedAsyncTableModification o <$> mapM (logTableModification inf) l
 logTableModification inf i@(FetchData _ ip) = do
   return i
 logTableModification inf (TableModification Nothing ts u table ip) = do

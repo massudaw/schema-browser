@@ -746,11 +746,13 @@ applyRecordChange (KV v) k =
   getCompose
     (Map.traverseWithKey
        (\key vi ->
-          Compose .
+        let
+           edits  = (filter ((key ==) . index) k)
+        in Compose .
           fmap
             swap
-            $(F.foldl' (\i j -> edit j =<< i) (Right (vi, [])))
-            (filter ((key ==) . index) k))
+            $  ( fmap (fmap reverse). F.foldl' (\i j -> edit j =<< i) (Right (vi, [])))
+            edits )
        v)
   where
     add (v, p) =
@@ -781,9 +783,10 @@ applyUndoAttrChange (Fun k rel i) (PFun _ _ p) =
   bimap (Fun k rel) (PFun k rel) <$> applyUndo i p
 applyUndoAttrChange (IT k i) (PInline _ p) =
   bimap (IT k) (PInline k) <$> applyUndo i p
+--applyUndoAttrChange i j | traceShow (i,j) False = undefined
 applyUndoAttrChange (FKT k rel i) (PFK _ p b) = do
   (tv, tp) <- applyUndo i b
-  (refv, refp) <- applyRecordChange k p
+  (refv, refp) <-  applyRecordChange k p
   return (FKT refv rel tv, PFK rel refp tp)
 
 -- diffAValue :: PatchConstr k a  => AValue k a -> AValue k a -> Maybe (PValue k  (Index a))

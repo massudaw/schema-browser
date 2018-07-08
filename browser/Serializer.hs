@@ -139,8 +139,6 @@ encodeT = encodeIso isoTable
 class DecodeTable a where
   isoTable :: SIso (Union (Reference Text)) (TBData Text Showable) a
 
-type (|->) a b = IsoArrow  a b
-data IsoArrow a b = IsoArrow ( a -> b)  (b -> a )
 
 class IsoProfunctor f => IsoApplicative f where
   ipure :: f a

@@ -241,8 +241,46 @@ value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
 attrValueName ::  TB (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = keyValue i
+{-
+instance Functor (BackendCommand m ) where
+  fmap f g = pure f <*> g
 
 
+
+instance Applicative (BackendCommand m ) where
+  pure = PureBackend
+  (<*>) = AppBackend
+
+instance Monad (BackendCommand m ) where
+   return = pure
+   m >>= k  = BindBackend m k
+
+runBackendCommand :: forall m  b. (Monad m ) => Connection -> BackendCommand m b -> m (IO b)
+runBackendCommand  conn = go
+  where
+    go :: forall a . BackendCommand m a -> m (IO a)
+    go (PureBackend i) = return (return i)
+    go (EffectBackend i) = fmap return i
+    go (RunBackend i j ) = do
+      a <- go i
+      return (a >>= executeLogged conn j >> return ())
+    go (QueryBackend i j ) = do
+      a <- go i
+      return (a >>= queryLogged conn j )
+    go (AppBackend i j ) = do
+      a <- go i
+      b <- go j
+      return $ a <*>  b
+
+
+data BackendCommand m b where
+  PureBackend :: a -> BackendCommand m a
+  EffectBackend :: m a -> BackendCommand m a
+  RunBackend :: ToRow a =>  BackendCommand m a -> Query -> BackendCommand m ()
+  QueryBackend :: (ToRow a,FromRow b) => BackendCommand m a -> Query -> BackendCommand m [b]
+  BindBackend :: BackendCommand m a -> (a -> BackendCommand m b) -> BackendCommand m b
+  AppBackend :: BackendCommand m (a -> b)  -> (BackendCommand m a) -> BackendCommand m b
+-}
 deleteIdx
   ::
      Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
@@ -260,9 +298,13 @@ deleteIdx conn m ix@(G.Idex kold) t = do
 applyPatch
   ::
      Connection -> KVMetadata PGKey ->([TBIndex Showable] ,TBIdx PGKey Showable) -> IO ()
-applyPatch conn m patch@(pks,skv)  = do
+applyPatch conn m patch  = do
     executeLogged conn qstr qargs
     return ()
+  where
+    (qstr,qargs,_) = updateQuery m patch
+
+updateQuery m (pks,skv) = (qstr,qargs,Nothing)
   where
     qstr = fromString $ T.unpack up
     qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat ( fmap koldPk pks)
@@ -330,26 +372,6 @@ sqlPatchFTB f k call (Primitive l c ) s = go k call l s
     go  k ca ty i@(PAtom _) = f k ca (Primitive ty c) i
     go  k  _ ty i = error $ show (k,ty,i)
 
-updatePatch
-  ::
-     Connection -> KVMetadata PGKey -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO ()
-updatePatch conn m kv old  t = do
-    executeLogged conn qstr qargs
-    return ()
-  where
-    qstr = fromString $ T.unpack up
-    qargs = skv <> koldPk
-    kold = M.toList $ getPKM m old
-    equality  k =escapeReserved  (keyValue k) <> "="  <> value k
-    koldPk = uncurry Attr <$> kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality  . fst <$> kold)
-    setter = " SET " <> T.intercalate "," (equality  . _tbattrkey <$> skv   )
-    up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = F.toList  (_kvvalues $ tbskv)
-    tbskv = isM
-    isM :: TBData PGKey  Showable
-    isM =  justError ("cant diff befor update: " <> show (tableNonRef kv) <> "\n" <> show (tableNonRef old) <> "\n"  <> show kv) $ diffUpdateAttr kv old
-
 diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
 diffUpdateAttr  kv kold  =  fmap KV  .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . tableNonRef  $ kv ) (unKV . tableNonRef $ kold )
 
@@ -376,7 +398,28 @@ paginate inf meta t order off size koldpre wherepred = do
     limitQ = " LIMIT " <> T.pack (show size)
 
 
-insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))
+batchEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
+batchEd m i =  do
+  inf <- askInf
+  let
+    codeGen (RowPatch (i,PatchRow dff)) = addRet $ updateQuery mpg ([i] ,dff)
+    codeGen (BatchPatch i (PatchRow dff)) = addRet $ updateQuery mpg (i ,dff)
+    addRet (q,i,j) = (q <> " RETURNING null",i,j)
+    mpg = (recoverFields inf <$> m)
+    with = "WITH "
+    as i j = i <> " AS (" <> j <> ")"
+    many l = T.intercalate "," l
+    select l  = "SELECT * FROM " <> l <> ""
+    union = T.intercalate " UNION ALL "
+    query = with <> many (uncurry as <$> tables) <> select ("("<>union (select  .fst <$> tables)<> ")")  <> " as t"
+      where names ix = "r" <> T.pack (show ix)
+            tables = zip (names <$> [0..]) ((\(i,_,_) -> i ) <$> l)
+    l = codeGen  . firstPatchRow (recoverFields inf) <$> F.toList i
+  l <- queryLogged (rootconn inf) (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
+  liftIO $ print (l :: [Only(Maybe Int)])
+  return i
+
+insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (RowPatch Key Showable)
 insertMod m j  = do
   inf <- askInf
   liftIO $ do
@@ -398,17 +441,6 @@ deleteMod m t = do
       l <- liftIO getCurrentTime
       return $  RowPatch (idx,DropRow )
 
-updateMod :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (((RowPatch Key Showable)))
-updateMod m old pk p = do
-  inf <- askInf
-  liftIO$ do
-      let table = lookTable inf (_kvname m)
-          ini = either (error . unlines ) id (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) $ create $ defaultTableData inf table kv ++  patch kv)
-          kv = apply old  p
-      updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) ini )(mapKey' (recoverFields inf) old ) table
-      l <- liftIO getCurrentTime
-      let mod =   RowPatch (G.notOptional pk  ,PatchRow p)
-      return $ mod
 
 patchMod :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable-> TransactionM (((RowPatch Key Showable)))
 patchMod m pk patch = do
@@ -464,4 +496,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 tSize = 400
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod   selectAll loadDelayed mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules
+postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll loadDelayed mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules

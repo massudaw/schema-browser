@@ -110,7 +110,7 @@ viewerMode
   ::
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
-  reftb@(_,vpt,_,_) <- ui $ refTablesPorj inf table Nothing mempty (recPKDesc inf (tableMeta table) (allRec' (tableMap inf) table))
+  reftb@(_,vpt,_,_) <- ui $ refTablesProj inf table Nothing mempty (recPKDesc inf (tableMeta table) (allRec' (tableMap inf) table))
   let
     tdip = listRows inf table <$> cliTid
     tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> facts vpt <#> fmap activeRows tdip

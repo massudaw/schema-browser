@@ -1200,7 +1200,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
               when (oldsel /= vv ) $ do
                 liftIO $ helsel vv
                 pred <- currentValue (facts predicate)
-                reftb@(_,gist,sgist,_) <- refTables' inf targetTable  Nothing  (fromMaybe mempty pred)
+                reftb@(_,gist,sgist,_) <- refTablesDesc inf targetTable  Nothing  (fromMaybe mempty pred)
                 g <- currentValue (facts gist)
                 s <- currentValue (facts sgist)
                 let search  i
@@ -1228,7 +1228,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           return [nav,pan,hidden]
         selector True = do
           pred <- ui $ currentValue (facts predicate)
-          reftb@(_,gist,sgist,_) <- ui $ refTables' inf targetTable Nothing (fromMaybe mempty pred)
+          reftb@(_,gist,sgist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems)<*>(fmap fst <$> sel)
           tdi <- ui $ cacheTidings ((\g s v -> searchGist relTable targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           cv <- currentValue (facts tdi)

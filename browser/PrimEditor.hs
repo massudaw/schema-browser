@@ -7,6 +7,7 @@ module PrimEditor where
 import PStream
 import Types.Patch
 import Safe
+import RuntimeTypes
 import Control.Monad
 import Control.Applicative
 import Data.Time.Format
