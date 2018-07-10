@@ -407,7 +407,7 @@ utlabel (Right  e) c idx = result e idx
 
     result (Not (Not l)) v=  result l v
     result (Not l) v= first (fmap (\i -> "not (" <> i <> ")"))  $ result l v
-    result (BinaryConstant b i) v =  utlabel (Left (generateConstant i ,b)) c v
+    -- result (BinaryConstant b i) v =  utlabel (Left (generateConstant i ,b)) c v
     result (Range  b l) (ty,v) = result l (unKInterval ty,(((if b then "upper" else "lower") <> "(" <> T.intercalate "." (c ++ [v])   <> ")" ) ) )
     result i v =  (Just $  opvalue (snd v) i   ,Nothing )
     unKInterval =alterKeyType (\(Primitive (KInterval :xs) i) -> Primitive xs i)

@@ -154,10 +154,8 @@ instance NFData DiffShowable
 data UnaryOperator
   = IsNull
   | Not UnaryOperator
-  | Range Bool
-          UnaryOperator
-  | BinaryConstant BinaryOperator
-                   Constant
+  | Range Bool UnaryOperator
+  | BinaryConstant BinaryOperator Constant
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData UnaryOperator
@@ -178,15 +176,10 @@ showableDef i = Nothing
 type SqlOperationK = SqlOperationTK (Text, Text)
 
 data SqlOperationTK t k
-  = FKJoinTable [Rel k]
-                t
-  | RecJoin (MutRec [[Rel k]])
-            (SqlOperationTK t k)
-  | FKInlineTable k
-                  t
-  | FunctionField k
-                  Expr
-                  [Rel k]
+  = FKJoinTable [Rel k] t
+  | RecJoin (MutRec [[Rel k]]) (SqlOperationTK t k)
+  | FKInlineTable k t
+  | FunctionField k Expr [Rel k]
   deriving (Eq, Ord, Show, Functor, Foldable, Generic)
 
 newtype MutRec a = MutRec
@@ -608,12 +601,7 @@ instance Fractional Showable where
 type PathQuery = SqlOperation
 
 tableAttr :: Ord k => KV k a -> [TB k a]
-tableAttr n = concat (nonRef <$> unkvlist n)
-  where
-    nonRef i@(Fun _ _ _) = [i]
-    nonRef i@(Attr _ _) = [i]
-    nonRef (FKT i _ _) = concat (nonRef <$> unkvlist i)
-    nonRef j@(IT k v) = [j]
+tableAttr  = unkvlist . tableNonRef
 
 addDefault :: Ord d => TB d a -> TB d b
 addDefault = def
@@ -693,59 +681,6 @@ makeLenses ''TableK
 --
 --- Attr Cons/Uncons
 --
-unIndexItens ::
-     (Show k, Show a)
-  => Int
-  -> Int
-  -> TB (FKey (KType k)) a
-  -> (Maybe (TB (FKey (KType k)) a))
-unIndexItens ix o = unIndex (ix + o)
-
-unIndex ::
-     (Show k, Show a)
-  => Int
-  -> TB (FKey (KType k)) a
-  -> Maybe (TB (FKey (KType k)) a)
-unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> Non.atMay v o
-unIndex o (IT na (ArrayTB1 j)) = IT na <$> Non.atMay j o
-unIndex o (FKT els rel (ArrayTB1 m)) =
-  (\li mi ->
-     FKT
-       (kvlist $ nonl <> fmap ((firstTB unKArray)) li)
-       (Le.over
-          relOri
-          (\i ->
-             if isArray (keyType i)
-               then unKArray i
-               else i) <$>
-        rel)
-       mi) <$>
-  (maybe (Just []) (Just . pure) (join ((traFAttr (indexArray o)) <$> l))) <*>
-  (Non.atMay m o)
-  where
-    l =
-      L.find
-        (all (isArray . keyType) . fmap _relOrigin . keyattr)
-        (unkvlist els)
-    nonl =
-      L.filter
-        (not . all (isArray . keyType) . fmap _relOrigin . keyattr)
-        (unkvlist els)
-    indexArray ix s = Non.atMay (unArray s) ix
-unIndex o i = error (show (o, i))
-
-unLeftKey ::
-     (Show k, Ord b, Show b) => TB (FKey (KType k)) b -> TB (FKey (KType k)) b
-unLeftKey (Attr k v) = (Attr (unKOptional k) v)
-unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
-unLeftKey i@(IT na (TB1 _)) = i
-unLeftKey (FKT ilk rel (LeftTB1 (Just tb1))) =
-  (FKT
-     (kvlist $ (firstTB unKOptional) <$> unkvlist ilk)
-     (Le.over relOri unKOptional <$> rel)
-     tb1)
-unLeftKey i@(FKT ilk rel (TB1 _)) = i
-unLeftKey i = error (show i)
 
 unLeftItens ::
      (Show k, Show a) => TB (FKey (KType k)) a -> Maybe (TB (FKey (KType k)) a)
@@ -761,57 +696,6 @@ unLeftItens = unLeftTB
       tb
     unLeftTB i@(FKT ifk rel (TB1 _)) = Just i
     unLeftTB i = error (show i)
-
-attrOptional :: TB (FKey (KType k)) a -> TB (FKey (KType k)) a
-attrOptional (Attr k v) = Attr (kOptional k) (LeftTB1 . Just $ v)
-attrOptional (Fun k rel v) = Fun (kOptional k) rel (LeftTB1 . Just $ v)
-attrOptional (FKT ifk rel tb) =
-  FKT (tbOptional ifk) (Le.over relOri kOptional <$> rel) (LeftTB1 (Just tb))
-  where
-    tbOptional = mapKey' kOptional . mapFValue (LeftTB1 . Just)
-attrOptional (IT na j) = IT (kOptional na) (LeftTB1 (Just j))
-
-leftItens ::
-     TB (FKey (KType k)) a
-  -> Maybe (TB (FKey (KType k)) a)
-  -> Maybe (TB (FKey (KType k)) a)
-leftItens tb@(Fun k rel _) = maybe emptyAttr (Just . attrOptional)
-  where
-    emptyAttr = Fun k rel <$> (showableDef (keyType k))
-leftItens tb@(Attr k _) = maybe emptyAttr (Just . attrOptional)
-  where
-    emptyAttr = Attr k <$> (showableDef (keyType k))
-leftItens tb@(IT na _) = Just . maybe emptyIT attrOptional
-  where
-    emptyIT = IT na (LeftTB1 Nothing)
-leftItens tb@(FKT ilk rel _) = Just . maybe emptyFKT attrOptional
-  where
-    emptyFKT =
-      FKT (mapFValue (const (LeftTB1 Nothing)) ilk) rel (LeftTB1 Nothing)
-
-attrArray :: TB Key b -> NonEmpty (TB Key Showable) -> TB Key Showable
-attrArray back@(Attr k _) oldItems =
-  (\tb -> Attr k (ArrayTB1 tb)) $ (\(Attr _ v) -> v) <$> oldItems
-attrArray back@(FKT _ _ _) oldItems =
-  (\(lc, tb) ->
-     FKT
-       (kvlist
-          [ Attr
-              (kArray $
-               _relOrigin $
-               justError "no head1" $ headMay $ keyattr (Non.head lc))
-              (ArrayTB1 $ join $ Non.fromList . kattr <$> lc)
-          ])
-       (_fkrelation back)
-       (ArrayTB1 tb)) $
-  Non.unzip $
-  (\(FKT lc rel tb) ->
-     ( justError ("no head1" ++ show (lc, rel, tb)) $
-       headMay $ F.toList $ unkvlist lc
-     , tb)) <$>
-  oldItems
-attrArray back@(IT _ _) oldItems =
-  (\tb -> IT (_tbattrkey back) (ArrayTB1 tb)) $ (\(IT _ tb) -> tb) <$> oldItems
 
 unFin (Interval.Finite i) = Just i
 unFin i = Nothing
@@ -877,22 +761,8 @@ replaceRecRel ::
   -> Map (Set (Rel Key)) (TB Key b)
 replaceRecRel = foldr (\(MutRec l) v -> foldr (\a -> recOverMAttr' a l) v l)
 
-unKOptionalAttr (Attr k i) = Attr (unKOptional k) i
-unKOptionalAttr (Fun k rel i) = Fun (unKOptional k) rel i
-unKOptionalAttr (IT r (LeftTB1 (Just j))) = (\j -> IT r j) j
-unKOptionalAttr (FKT i l (LeftTB1 (Just j))) =
-  FKT (fmap ((first unKOptional)) i) l j
 
-unOptionalAttr (Attr k i) = Attr (unKOptional k) <$> unSOptional i
-unOptionalAttr (Fun k rel i) = Fun (unKOptional k) rel <$> unSOptional i
-unOptionalAttr (IT r (LeftTB1 j)) = (\j -> IT r j) <$> j
-unOptionalAttr (FKT i l (LeftTB1 j)) =
-  liftA2
-    (\i j -> FKT i l j)
-    (traverseKV ((traFAttr unSOptional) . ((firstTB unKOptional))) i)
-    j
 
--- unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverseKV ( (traFAValue unSOptional) . ((firstATB unKOptional)) ) i)  j
 data RelSort k =
   RelSort [Rel k]
   deriving (Eq, Ord)
@@ -973,11 +843,9 @@ instance P.Poset (FKey i) where
       GT -> P.GT
 
 tbUn :: Ord k => Set k -> KV k a -> KV k a
-tbUn un item =
-  (\kv -> (\(KV item) -> KV $ Map.filterWithKey (\k _ -> pred kv k) $ item) item)
-    un
+tbUn un (KV item) = KV $ Map.filterWithKey (\k _ -> pred k) item
   where
-    pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv)
+    pred k = S.isSubsetOf (S.map _relOrigin k) un
 
 generateUn :: Ord k => KVMetadata k -> [k] -> [Set (Rel k)]
 generateUn m un = inline <> rels
@@ -1002,17 +870,7 @@ getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(k, FTB a)]
 getPKL m = getUn (S.fromList $ _kvpk m)
 
 getUn :: (Show k, Ord k) => Set k -> KV k a -> [(k, FTB a)]
-getUn  un k =
-  concat $
-  F.toList
-    ((\ix ->
-        justError ("no unique : " ++ show (ix, un, Map.keys (_kvvalues k))) $
-        (fmap aattr $ kvLookup ix k)) <$>
-     pks)
-  where
-    pks =
-      L.filter (\i -> S.isSubsetOf (S.map _relOrigin i) un) $
-      Map.keys (_kvvalues k)
+getUn un = fmap (\(Attr k v) -> (k,v)) . unkvlist . tableNonRef . tbUn un
 
 inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
 
@@ -1080,23 +938,8 @@ array f = ArrayTB1 . fmap f
 
 opt i = LeftTB1 . fmap i
 
-class ConstantGen v where
-  generate :: Constant -> v
-
-instance ConstantGen (FTB Showable) where
-  generate = generateConstant
-
 keyattrs :: Ord k => TB k b -> Set (Rel k)
 keyattrs = S.fromList . keyattr
-
-generateConstant CurrentDate =
-  unsafePerformIO $ do
-    i <- getCurrentTime
-    return (TB1 $ STime $ SDate (utctDay i))
-generateConstant CurrentTime =
-  unsafePerformIO $ do
-    i <- getCurrentTime
-    return (TB1 $ STime $ STimestamp i)
 
 replaceRel rel (Attr k v) =
   (justError "no replaceRel" $ L.find ((== k) . _relOrigin) rel, v)

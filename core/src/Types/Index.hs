@@ -273,7 +273,7 @@ instance Positive DiffShowable where
   notneg = notNeg
 
 
-instance (Show v,Affine v ,Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord v, Ord (Tangent v),Predicates (FTB v)) => Predicates (TBIndex v ) where
+instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),Ord v, Ord (Tangent v),Predicates (FTB v)) => Predicates (TBIndex v ) where
   type (Penalty (TBIndex v)) = ER.Extended [Tangent v]
   type Query (TBIndex v) = (TBPredicate Int v)
   data Node (TBIndex v) = TBIndexNode {unTBIndexNode :: Interval [v] } deriving (Eq,Ord,Show)
@@ -353,7 +353,7 @@ indexParam = (4,8)
 checkPredId
   :: (Ord k, Ord a, Ord (Tangent a), Show a, Show k,
       Semigroup (Tangent a), Positive (Tangent a), Affine a,
-      ConstantGen (FTB a), Range a, Fractional a) =>
+       Range a, Fractional a) =>
      KV k a
      -> TBPredicate k a -> Maybe [AttributePath k (AccessOp a, FTB a)]
 checkPredId v (WherePredicate l) = checkPredIdx  v l
@@ -365,7 +365,7 @@ checkPredId v (WherePredicate l) = checkPredIdx  v l
 checkPred
   :: (Ord k, Ord a, Ord (Tangent a), Show a, Show k,
       Semigroup (Tangent a), Positive (Tangent a), Affine a,
-      ConstantGen (FTB a), Range a, Fractional a) =>
+       Range a, Fractional a) =>
      KV k a -> TBPredicate k a -> Bool
 checkPred v (WherePredicate l) = checkPred' v l
   where
@@ -373,7 +373,7 @@ checkPred v (WherePredicate l) = checkPred' v l
     checkPred' v (OrColl i ) = F.any (checkPred' v) i
     checkPred' v (PrimColl i) = indexPred i v
 
-type ShowableConstr  a = (Fractional a ,Range a,ConstantGen (FTB a),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
+type ShowableConstr  a = (Fractional a ,Range a,Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
 
 
 data PathIndex  a b
@@ -548,7 +548,6 @@ appendRI i j =
 {-# INLINE appendRI #-}
 
 instance ( Range v
-         , ConstantGen (FTB v)
          , Positive (Tangent v)
          , Semigroup (Tangent v)
          , Ord (Tangent v)
@@ -606,7 +605,6 @@ instance ( Range v
         where
           ma (Not i) j = not $ ma i j
           ma IsNull j = False
-          ma (BinaryConstant op e) v = mal (Left (generate e, op)) v
           ma (Range b pred) j =
             match (Right pred) $
             Right $
@@ -664,7 +662,6 @@ instance ( Range v
           ma (Not i) j = not $ ma i j
           ma IsNull (LeftTB1 j) = maybe True (ma IsNull) j
           ma IsNull j = False
-          ma (BinaryConstant op e) v = mar (Left (generate e, op)) v
           ma (Range b pred) (IntervalTB1 j) =
             ma pred $
             LeftTB1 $

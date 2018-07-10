@@ -116,12 +116,6 @@ instance Applicative PathFTB where
 
 
 
-
-data AtomicChange a
- = Change a
- | Skip
-  deriving (Eq, Ord, Functor, Show)
-
 data Editor a
   = Diff a
   | Delete

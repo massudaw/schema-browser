@@ -368,7 +368,7 @@ anyColumns
 anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       let
         fks2 = M.fromList $ run <$> cols
-        initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unOptionalAttr  <$> F.toList (_kvvalues j))  <$>oldItems
+        initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unLeftItens <$> F.toList (_kvvalues j))  <$>oldItems
         sumButtom itb =  do
           el <- UI.div
           element =<< labelCaseDiff inf (fromJust $ M.lookup itb (unKV k)) ( (\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
