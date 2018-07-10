@@ -18,6 +18,7 @@ module Types.Patch
   -- Class Patch Interface
   ( Compact(..)
   , foldCompact
+  , foldUndo
   , Patch(..)
   -- Patch Data Types and to be moved methods
   , patchSet
@@ -182,6 +183,13 @@ isDelete i = False
 joinEditor (Diff i) = i
 joinEditor Keep = Keep
 joinEditor Delete = Delete
+
+foldUndo
+  :: (Foldable t, Patch a) =>
+     a -> t (Index a) -> Either String (a, [Index a])
+foldUndo vi =  fmap (fmap reverse) . F.foldl' (\i j -> edit j =<< i) (Right (vi, []))
+  where
+    edit l (i, tr) = fmap (:tr) <$> applyUndo i l
 
 
 foldCompact :: (a -> a -> Maybe a) -> [a] -> [a]
@@ -751,7 +759,7 @@ applyRecordChange (KV v) k =
         in Compose .
           fmap
             swap
-            $  ( fmap (fmap reverse). F.foldl' (\i j -> edit j =<< i) (Right (vi, [])))
+            $ foldUndo vi
             edits )
        v)
   where
@@ -971,9 +979,8 @@ applyUndoFTBM (IntervalTB1 i) (PInter b (p, l)) =
       return ((Interval.NegInf, l), PInter b (fmap patch f, co))
 applyUndoFTBM (TB1 i) (PAtom p) = bimap TB1 PAtom <$> applyUndo i p
 applyUndoFTBM b (PatchSet l) =
-  join . patchSet $ F.foldl' (\i l -> consMod l =<< i) (Right (b, [])) l
+  join . patchSet $ foldUndo b l
   where
-    consMod l (i, tr) = fmap (fmap (: tr)) $ applyUndoFTBM i l
     patchSet =
       fmap
         (\(i, l) ->

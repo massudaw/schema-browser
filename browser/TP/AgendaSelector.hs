@@ -83,15 +83,15 @@ eventWidgetMeta inf =  do
        ["fullcalendar-3.5.0/fullcalendar.min.css"
        ,"fullcalendar-scheduler-1.7.0/scheduler.min.css"
        ]
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (agendaDef inf)()
+    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (agendaDef inf) ()
 
 
 
 agendaDef inf
   = projectV
     (innerJoinR
-      (fromR "tables" schemaPred2)
-      (fromR "event" schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event") fields
+      (fromR "tables" `whereR` schemaPred2)
+      (fromR "event" `whereR` schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event") fields
    where
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
       schemaPredName =  [(keyRef "table_schema",Left (txt (schemaName inf),Equals) )]

@@ -188,8 +188,8 @@ currentState db = R.currentValue (R.facts $ collectionTid db)
 currentIndex db = R.currentValue (R.facts $ idxTid db)
 
 instance (NFData k,  PatchConstr k Showable) => Patch (TableRep k Showable) where
-  type Index (TableRep k Showable) = [RowPatch k Showable]
-  applyUndo i j = fmap reverse <$> F.foldl' (\i j -> (\(v,l) -> fmap (:l) <$> applyTableRep v j) =<< i ) (Right (i,[]))  j
+  type Index (TableRep k Showable) = RowPatch k Showable
+  applyUndo = applyTableRep
 
 instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
   type Index (IndexMetadata k v) =  [(WherePredicateK k ,Int,Int,PageTokenF v)]
@@ -255,12 +255,17 @@ applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow (elp))) =
       el = fmap create elp
       ix = create <$> idx
 
+-- TODO: Allow composite types unique indexes with pg_get_expr
 recAttr
   :: (Show k, Ord k)
     => [k]
     -> TB k a
     -> [(AttributePath k (Either (FTB a, BinaryOperator) b, FTB a),TBIndex a)]
 recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (TB1 i,Equals),TB1 i), G.Idex [TB1 i])]) k
+{-recAttr un (IT i j )  = first (PathInline i) <$> recPred (\i ->
+  let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
+  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( j)
+-}
 recAttr un f@(FKT l rel k) = first (PathForeign rel) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
@@ -741,6 +746,14 @@ recPK inf = filterTBData pred inf
             let
                 pkdesc = S.fromList $ _kvpk m
             in not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)
+
+recPKDescIndex inf = filterTBData pred inf
+  where
+    pred = (\m k _ ->
+            let
+                pkdesc = S.fromList $ _kvpk m <> _kvdesc m <> concat (_kvuniques m)
+            in not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)
+
 
 
 recPKDesc inf = filterTBData pred inf

@@ -54,12 +54,12 @@ chartDef inf
           (leftJoinR
             (leftJoinR
               (innerJoinR
-                (fromR "tables" schemaPred)
-                (fromR "metrics" schemaPred) schemaI "metric")
-              (fromR "geo" schemaPred ) schemaI "geo")
-            (fromR "event" schemaPred) schemaI "event")
-          (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+                (fromR "tables" `whereR` schemaPred)
+                (fromR "metrics" `whereR` schemaPred) schemaI "metric")
+              (fromR "geo" `whereR` schemaPred ) schemaI "geo")
+            (fromR "event" `whereR` schemaPred) schemaI "event")
+          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
   where
     schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
@@ -96,7 +96,7 @@ chartWidgetMetadata inf =  do
         ,css "leaflet.css"
         ,js "leaflet-svg-markers.min.js"
         ]
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (chartDef inf)()
+    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (chartDef inf) ()
 
 
 chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do

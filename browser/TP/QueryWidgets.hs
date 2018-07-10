@@ -539,7 +539,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
   let out = output
   --out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
 
-  reftb <- ui $ refTables inf   table
+  reftb <- ui $ refTables inf table
   (outI ,_)<- processPanelTable listBody inf reftb  out table preOldItems
   element operation #  set children (fmap fst res <> [outI])
   return (listBody , out)

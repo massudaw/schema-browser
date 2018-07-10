@@ -58,7 +58,7 @@ import qualified Data.Map as M
 
 
 accountWidgetMeta inf = do
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (accountDef inf)()
+  fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (accountDef inf) ()
 
 accountDef inf
   = projectV
@@ -66,11 +66,11 @@ accountDef inf
         (leftJoinR
           (innerJoinR
             (innerJoinR
-              (fromR "tables" schemaPred)
-              (fromR "accounts" schemaPred) schemaI "account")
-            (fromR "event" schemaPred) schemaI "event")
-          (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") (irecord fields)
+              (fromR "tables" `whereR` schemaPred)
+              (fromR "accounts" `whereR` schemaPred) schemaI "account")
+            (fromR "event" `whereR` schemaPred) schemaI "event")
+          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") (irecord fields)
 
   where
       schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]

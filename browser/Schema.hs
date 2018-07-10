@@ -268,7 +268,7 @@ catchPluginException :: InformationSchema -> Int -> Int -> Map Key ( FTB Showabl
 catchPluginException inf pname tname  idx i =
   (Right <$> i) `catch` (\e  -> do
               t <- getCurrentTime
-              print (t,e :: SomeException)
+              print (t,idx,e :: SomeException)
               id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (fmap (TBRecord2  . second (Binary . B.encode) . first keyValue) (M.toList idx)) , t )
               return (Left ((\(Only i) -> i)$ head $id)))
 

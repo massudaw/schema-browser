@@ -39,11 +39,11 @@ module SchemaQuery
   , tableCheck
   -- SQL Arrow API
   , fromR
+  , whereR
   , innerJoinR
   , leftJoinR
   , projectV
   ) where
-import Control.Arrow (first)
 import Control.Arrow
 import Control.Concurrent
 import Serializer
@@ -52,7 +52,7 @@ import Control.DeepSeq
 import Control.Exception (throw)
 import qualified Control.Lens as Le
 import Control.Monad.Catch
-import Debug.Trace
+-- import Debug.Trace
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
 import qualified Data.Binary as B
@@ -238,7 +238,7 @@ matchDelete inf m a =
  let
     overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
     overloadedRules = (rules $ schemaOps inf)
-    isDelete (i,UpdateRule _ ) =  i (mapKey' keyValue a)
+    isDelete (i,DropRule _ ) =  i (mapKey' keyValue a)
     isDelete _ = False
  in L.find isDelete =<< overloaded
 
@@ -467,28 +467,27 @@ childrenRefsUnique
 childrenRefsUnique  inf pre set (RecJoin i j@(FKJoinTable _ _) ) = childrenRefsUnique inf pre set j
 childrenRefsUnique  _  _  _ (RecJoin _ _ ) = []
 childrenRefsUnique  _  _  _ (FunctionField _ _ _ ) = []
-childrenRefsUnique  inf pre set (FKInlineTable rel target)  =    concat $ childrenRefsUnique inf (pre .RelAccess [Inline rel] ) set <$> fks
+childrenRefsUnique  inf pre set (FKInlineTable rel target) = concat $ childrenRefsUnique inf (pre .RelAccess [Inline rel] ) set <$> fks
   where
     fks = rawFKS targetTable
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     targetTable = lookTable rinf $ snd target
 childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
    let
-    sidx = M.lookup (_relOrigin  <$> rel) sidxs
-    search (BatchPatch ls op ) idxM = concat $ (\i -> search (RowPatch (i ,op)) idxM)  <$> ls
+    sidx = M.lookup (_relOrigin <$> rel) sidxs
+    search (BatchPatch ls op ) idxM = concat $ (\i -> search (RowPatch (i ,op)) idxM) <$> ls
     search (RowPatch p@(G.Idex v,PatchRow pattr)) idxM
       = case idxM of
         Just idx -> concat $ concat .fmap convertPatch  <$> resIndex idx
         Nothing -> concat $ convertPatch <$> resScan base
       where
-        pkIndex t = justError "no key" $  t`L.elemIndex` pkTable
+        pkIndex t = justError "no key" $  t `L.elemIndex` pkTable
         predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre (Inline o) ,  [(o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> filter (not . flip S.member set . _relOrigin )rel  )
-        predKey =  predK
-        resIndex idx =  -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
-           fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predKey idx
+        resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
+           fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
         resScan idx =  -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx,predKey ,G.keys idx) $
-           catMaybes $ fmap (\(i,t) -> (G.getIndex m i,t)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
-        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [ recurseAttr t pattr]) ) <$> ts
+          catMaybes $  (\i->  (G.getIndex m i,) <$> G.checkPredId i predK) <$> G.toList idx
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [recurseAttr t pattr]) ) <$> ts
         taggedRef :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
         taggedRef i p =  go i
           where
@@ -498,7 +497,7 @@ childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable
             matcher (PIdIdx ix )  = PIdx ix . Just
             matcher PIdOpt   = POpt . Just
         recurseAttr (G.PathForeign  _ i ) p = PFK rel [] $ taggedRef i (const p)
-        recurseAttr (G.PathInline r i ) p = PInline r $ taggedRef i   nested
+        recurseAttr (G.PathInline r i ) p = PInline r $ taggedRef i  nested
           where
             nested  (Many i) =  flip recurseAttr p <$> i
         recurseAttr (G.PathAttr _ i ) p = PFK rel [] $ taggedRef i (const p)
@@ -543,7 +542,7 @@ pageTable method table page size presort fixed = do
                  -- # postFilter fetched results
                  resK = if predNull fixed then resOut else G.filterRows fixed resOut
                  -- # removeAlready fetched results
-                 diffNew i = traceShowId $ case G.lookup (G.getIndex (tableMeta table) i) reso of
+                 diffNew i = case G.lookup (G.getIndex (tableMeta table) i) reso of
                              Just v -> patchRowM' (tableMeta table) v i
                              Nothing -> Just $ createRow' (tableMeta table) i
 
@@ -604,7 +603,7 @@ readState fixed dbvar = do
   let
     filterPred = filter (checkPatch  fixed)
     fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result=justError "no apply readState" $ applyIfChange (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
+    result=either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
   return (result,chan)
 
 
@@ -695,7 +694,7 @@ convertChanTidings0
   -> Dynamic (Tidings (TableRep Key Showable))
 convertChanTidings0 inf table fixed ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed (facts t) nchan
-    t <- accumT ini (flip apply <$> evdiff)
+    t <- accumT ini (flip (\i -> either error fst. foldUndo i)<$> evdiff)
     return  t
 
 tryTakeMany :: TChan a -> STM [a]
@@ -1062,7 +1061,7 @@ updateTable inf (DBRef {..})
                 patches <- fmap concat $ takeMany patchVar
                 e <- readTVar collectionState
                 let cpatches = compact patches
-                let out = applyUndo e (concat $ tableDiffs <$> cpatches)
+                let out = foldUndo e (concat $ tableDiffs <$> cpatches)
                 traverse (\v -> writeTVar collectionState . fst$  v) out
                 return  $ zip cpatches . snd <$> out
             either (putStrLn  .("### Error applying: " ++ ) . show ) (
@@ -1328,15 +1327,14 @@ wrapModification m a = do
 
 fromR
   :: T.Text
-  -> [(Rel T.Text , AccessOp Showable)]
-  -> DatabaseM (View T.Text T.Text)  a   (G.GiST (TBIndex Showable) (TBData Key Showable))
-fromR m f = P (WhereV (FromV m) f ) (Kleisli (\_-> fmap (\(_,_,i) -> i) $ fromTable m f))
+  -> DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)]   (G.GiST (TBIndex Showable) (TBData Key Showable))
+fromR m  = P (FromV m ) (Kleisli (\f-> fmap (\(_,_,i) -> i) $ fromTable m f))
 
 whereR
-  :: [(Rel T.Text , AccessOp Showable)]
-  -> DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)]  (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
-whereR m (P i k) = P (WhereV i m) (proc _ -> k -< m)
+  :: DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)]  (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> [(Rel T.Text , AccessOp Showable)]
+  -> DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)] (G.GiST (TBIndex Showable) (TBData Key Showable))
+whereR (P i k) m  = P (WhereV i m) (proc i -> k -< (i ++ m))
 
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (tableAttrs table)
 
@@ -1361,16 +1359,16 @@ sourceTable inf (WhereV i j) = sourceTable inf i
 
 
 innerJoinR
-  :: DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
+  :: DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
   -> [Rel T.Text]
   -> T.Text
-  -> DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
 innerJoinR (P j k) (P l n) srel alias
   = P (JoinV j l InnerJoin srel alias)
-    (proc _ -> do
-      kv <- k -< ()
-      nv <- n -< ()
+    (proc i -> do
+      kv <- k -< i
+      nv <- n -< i
       Kleisli (\(emap,amap) -> do
         inf <- askInf
         let origin = sourceTable inf (JoinV j l InnerJoin srel alias)
@@ -1390,16 +1388,16 @@ innerJoinR (P j k) (P l n) srel alias
         return (G.fromList' $ catMaybes $ (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap)) -< (kv,nv))
 
 leftJoinR
-  :: DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
+  :: DatabaseM (View T.Text T.Text)  a (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text)  a (G.GiST (TBIndex Showable) (TBData Key Showable))
   -> [Rel T.Text]
   -> T.Text
-  -> DatabaseM (View T.Text T.Text)  () (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text)  a (G.GiST (TBIndex Showable) (TBData Key Showable))
 leftJoinR (P j k) (P l n) srel alias
   = P (JoinV j l LeftJoin srel alias)
-    (proc _ -> do
-      kv <- k -< ()
-      nv <- n -< ()
+    (proc p -> do
+      kv <- k -< p
+      nv <- n -< p
       Kleisli (\(emap,amap) -> do
         inf <- askInf
         let
@@ -1421,14 +1419,10 @@ leftJoinR (P j k) (P l n) srel alias
 
 
 projectV
-  :: (Show k ,Monad m, Traversable t2) =>
-     Parser (Kleisli m) (View i k) a1 (t2 (KV (FKey a) c))
-     -> Parser
-          (Kleisli (RWST (Atom (KV T.Text c), [t]) t1 () m))
-          ([Union (G.AttributePath k MutationTy)],[Union (G.AttributePath k MutationTy)])
-          ()
-          b
-     -> Parser (Kleisli m) (View i k) a1 (t2 b)
-projectV  (P i (Kleisli j) )  p@(P (k,_) _ ) = P (ProjectV i  (foldl mult one k)) (Kleisli $  j  >=> (\a -> traverse (evalEnv p . (,[]) . Atom .  mapKey' keyValue) a))
+  :: (Show k , Traversable t2) =>
+    DatabaseM  (View i k) [(Rel T.Text , AccessOp Showable)] (t2 (KV Key c))
+     -> PluginM (Union (G.AttributePath k MutationTy))  (Atom ((TBData T.Text c)))  TransactionM () b
+     -> DatabaseM (View i k) () (t2 b)
+projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P (ProjectV i (foldl mult one k)) (Kleisli $  \_ -> (j [])  >>=  (\a -> traverse (evalEnv p . (,[]) . Atom .  mapKey' keyValue) a))
 
 

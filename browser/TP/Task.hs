@@ -43,7 +43,7 @@ import Utils
 columnName name = ivalue $ irecord $ iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel name Equals "ordinal_position"] (ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText)))
 
 taskWidgetMeta inf = do
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (taskDef inf)()
+  fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (taskDef inf) ()
 
 taskDef inf
   = projectV
@@ -51,11 +51,11 @@ taskDef inf
         (leftJoinR
           (innerJoinR
             (innerJoinR
-              (fromR "tables" schemaPred)
-              (fromR "planner" schemaPred) schemaI "task")
-            (fromR "event" schemaPred) schemaI "event")
-          (fromR "table_description" schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+              (fromR "tables" `whereR` schemaPred)
+              (fromR "planner" `whereR` schemaPred) schemaI "task")
+            (fromR "event" `whereR` schemaPred) schemaI "event")
+          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
 
   where
       schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]

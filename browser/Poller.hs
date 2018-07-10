@@ -159,7 +159,7 @@ poller schmRef authmap db plugs is_test = do
 
                       transactionNoLog metas  $ do
                           fktable2 <- loadFKS ( lookTable metas "polling") (liftTable' metas "polling"  table2)
-                          fullEdit ( lookMeta metas "polling")curr fktable2
+                          fullEdit ( lookMeta metas "polling") curr fktable2
                       return ()
 
           pid <- forkIO (void $ do

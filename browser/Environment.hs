@@ -142,7 +142,7 @@ type Operation k p = Either (Union (AttributePath k p)) MutationTy
 -- Primitive Value
 irecord :: (Show k,Monad m ,Show s,Show (Index s)) =>
    PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-  -> PluginM ( (Union (AttributePath k p)))  (Atom ((TBData k s)))  m  i a
+  -> PluginM ((Union (AttributePath k p)))  (Atom ((TBData k s)))  m  i a
 irecord = irecordU Many
 
 irecordU :: (Show k,Monad m ,Show s,Show (Index s)) =>

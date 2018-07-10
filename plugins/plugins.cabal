@@ -20,7 +20,7 @@ executable schema-browser
   ld-options:  -fuse-ld=gold
   main-is:  Main.hs
 
-  ghc-options: -O2   -threaded -rtsopts
+  ghc-options: -O   -threaded -rtsopts
 
   other-modules:
     CnpjReceita
