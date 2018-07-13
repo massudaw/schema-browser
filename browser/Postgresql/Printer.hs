@@ -130,7 +130,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 createTable :: TableK (FKey (KType Text)) -> Text
 createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
-    commands = (renderAttr <$>  (rawAttrs r) ) <> [renderPK] <> fmap renderFK ( rawFKS r)
+    commands = (renderAttr <$>  rawAttrs r ) <> [renderPK] <> fmap renderFK ( rawFKS r)
     renderAttr k = keyValue k <> " " <> render (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
     renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
     render (Primitive l ty ) = ty <> renderTy l
@@ -150,6 +150,8 @@ reservedNames = ["column","table","schema"]
 
 escapeReserved :: T.Text -> T.Text
 escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
+
+tableAttr = unkvlist .tableNonRef
 
 expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
 expandInlineTable meta tb@( _) pre = asNewTable meta $ (\t->  do

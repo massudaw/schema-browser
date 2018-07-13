@@ -95,7 +95,7 @@ nonFKS :: Table -> [Key]
 nonFKS table =  nonFKAttrs
     where
     fks' =  rawFKS table
-    items = tableAttrs table
+    items = rawAttrs table
     fkSet,funSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) fks'
     funSet = S.unions $ pathRelOri <$> filter isFunction fks'

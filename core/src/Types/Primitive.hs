@@ -433,9 +433,11 @@ data Showable
 
 type SqlOperation = SqlOperationK Key
 
-fkTargetTable (FKJoinTable r tn) = snd tn
+fkTargetTable :: SqlOperationK k -> Text
+fkTargetTable (FKJoinTable _ tn) = snd tn
 fkTargetTable (FKInlineTable _ tn) = snd tn
-fkTargetTable (RecJoin t tn) = fkTargetTable tn
+fkTargetTable (RecJoin _ tn) = fkTargetTable tn
+fkTargetTable i = error "not fk"
 
 data FieldModifier
   = FRead
@@ -462,12 +464,6 @@ instance Eq (TableK k) where
 instance Ord (TableK k) where
   compare i j = compare (tableUnique i) (tableUnique j)
 
-rawIsSum (Project i _) = __rawIsSum i
-rawIsSum i = __rawIsSum i
-
-rawTableType (Project i _) = rawTableType i
-rawTableType i = _rawTableTypeL i
-
 data TableK k
   = Raw { tableUniqueR :: Int
         , _rawSchemaL :: Text
@@ -480,6 +476,8 @@ data TableK k
         , _rawScope :: [k]
         , _rawPKL :: [k]
         , _rawDescriptionL :: [k]
+        , __inlineFKS :: [SqlOperationK k]
+        , __functionRefs :: [SqlOperationK k]
         , _rawFKSL :: [SqlOperationK k]
         , _rawAttrsR :: [k] }
   | Project (TableK k)
@@ -511,33 +509,41 @@ instance NFData a => NFData (BoolCollection a)
 
 instance Binary a => Binary (BoolCollection a)
 
-tableUnique (Project i _) = tableUniqueR i
-tableUnique i = tableUniqueR i
-
-rawFKS (Project i _) = _rawFKSL i
-rawFKS i = _rawFKSL i
 
 rawUnion (Project i (Union l)) = l
 rawUnion _ = []
 
-rawPK (Project i _) = _rawPKL i
-rawPK i = _rawPKL i
 
-rawDescription (Project i _) = _rawDescriptionL i
-rawDescription i = _rawDescriptionL i
+rawFKS  = tableProp  _rawFKSL  <> tableProp __inlineFKS
 
-rawName (Project i _) = _rawNameL i
-rawName i = _rawNameL i
+rawPK = tableProp _rawPKL
 
-rawSchema (Project i _) = _rawSchemaL i
-rawSchema i = _rawSchemaL i
+rawDescription  = tableProp _rawDescriptionL
 
-rawAttrs (Project i _) = _rawAttrsR i
-rawAttrs i = _rawAttrsR i
+rawName  = tableProp _rawNameL
+
+rawSchema = tableProp _rawSchemaL
+
+rawAttrs = tableProp _rawAttrsR
+
+tableUnique  = tableProp tableUniqueR
 
 tableName = rawName
 
+tableProp f (Project i _ ) = f i
+tableProp f i = f i
+
+inlineFKS = tableProp __inlineFKS
+
+functionRefs = tableProp __functionRefs
+
+rawIsSum = tableProp __rawIsSum
+
+rawTableType  = tableProp _rawTableTypeL
+
 translatedName tb = maybe (rawName tb) id (rawTranslation tb)
+
+rawFullName t  = rawSchema t <> "." <> rawName t
 
 -- Literals Instances
 instance IsString Showable where
@@ -600,17 +606,6 @@ instance Fractional Showable where
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
 type PathQuery = SqlOperation
 
-tableAttr :: Ord k => KV k a -> [TB k a]
-tableAttr  = unkvlist . tableNonRef
-
-addDefault :: Ord d => TB d a -> TB d b
-addDefault = def
-  where
-    def (Attr k i) = Attr k (LeftTB1 Nothing)
-    def (Fun k i _) = Fun k i (LeftTB1 Nothing)
-    def (IT rel j) = IT rel (LeftTB1 Nothing)
-    def (FKT at rel j) =
-      FKT (kvlist $ addDefault <$> unkvlist at) rel (LeftTB1 Nothing)
 
 instance Eq (KVMetadata k) where
   i == j = _kvschema i == _kvschema j && _kvname i == _kvname j
@@ -621,9 +616,10 @@ instance Eq k => Ord (KVMetadata k) where
 instance Show k => Show (KVMetadata k) where
   show k = T.unpack (_kvname k)
 
+inlineFullName (Primitive _ (RecordPrim (s, i))) = s <> "." <> i
+
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
 
-kvAttrs m = L.nub $ _kvattrs m <> _kvpk m <> _kvdesc m
 
 data KVMetadata k = KVMetadata
   { _kvname :: Text
@@ -653,7 +649,7 @@ tableMeta t =
     (rawPK t)
     (rawDescription t)
     (fmap F.toList $ uniqueConstraint t)
-    (F.toList $ rawAttrs t)
+    (rawAttrs t)
     (rawFKS t)
     (paths' <> paths)
   where
@@ -668,8 +664,6 @@ tableMeta t =
            else [MutRec i]) $
       concat $ fmap ((unMutRec) . fmap (fmap F.toList) . pathRelRel') same
 
-isInline (Primitive _ (RecordPrim _)) = True
-isInline _ = False
 
 -- Intersections and relations
 makeLenses ''Rel
@@ -714,9 +708,6 @@ unKOptional (Key a v c m n d (Primitive [] e)) =
 unKOptional i = i -- error ("unKOptional" <> show i)
 
 
-unKArray (Key a v c d m n (Primitive (KArray:xs) e)) =
-  Key a v c d m n (Primitive xs e)
-unKArray (Key a v c d m n e) = Key a v c d m n e
 
 recOverAttr ::
      Ord k
@@ -874,7 +865,6 @@ getUn un = fmap (\(Attr k v) -> (k,v)) . unkvlist . tableNonRef . tbUn un
 
 inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
 
-inlineFullName (Primitive _ (RecordPrim (s, i))) = s <> "." <> i
 
 attrT :: (a, FTB b) -> TB a b
 attrT (i, j) = Attr i j
@@ -968,6 +958,7 @@ atTBValue l f g h v = traTable (Le.at (Set.fromList l) (traverse modify)) v
           ti -> case recoverAttr (F.toList key,ti) of
                  t@(FKT l i j) ->   valueattr . recoverFK  (concat $ fmap _relOrigin . keyattr <$> (unkvlist l )) i <$> h (liftFK t)
 -}
+
 keyRef k = Inline k
 
 iprodRef (IProd _ l) = l

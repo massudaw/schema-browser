@@ -465,7 +465,7 @@ batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems2 
   let arraySize = 30
       index = flip atMay
       constraints = tableConstraints (m,sgist,gist) preoldItems ftb
-  let unIndexEl ix =  index ix <$> preoldItems
+      unIndexEl ix =  index ix <$> preoldItems
       dyn = dynHandlerPatch  (\ix valix plix ->do
         (listBody,tablebdiff) <- rowTableDiff inf table constraints refs pmods ftb ix valix
         return $ TrivialWidget tablebdiff listBody ) unIndexEl (\ix -> [])
@@ -518,15 +518,13 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) plugins )
 
   let
-      resdiff =   snd <$> res
-      srefs :: [(Set (Rel Key),TB Key ())]
-      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
-      plugmods = first traRepl <$> (resdiff <> plmods)
-  let
-      sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
-      sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
-
-  let isSum = rawIsSum table
+    resdiff =   snd <$> res
+    srefs :: [(Set (Rel Key),TB Key ())]
+    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    plugmods = first traRepl <$> (resdiff <> plmods)
+    sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
+    sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+    isSum = rawIsSum table
   (listBody,output) <- if isSum
     then
       anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
@@ -563,7 +561,7 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   let
     resdiff =   snd <$> res
     srefs :: [(Set (Rel Key),TB Key ())]
-    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ (_kvvalues ftb) -- replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> (resdiff <> plmods)
 
   let isSum = rawIsSum table
@@ -875,7 +873,7 @@ buildUIDiff f (Primitive l prim) = go l
             let arraySize = 8
                 tdi2  = fmap unArray <$> ctdi
                 index o ix v = flip Non.atMay (o + ix) <$> v
-            let unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
+                unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
                 unplugix ix = fmap ((\o -> ((indexPatchSet (o + ix) )=<<)) <$> offsetT <*>) <$> cplug
                 dyn = dynHandlerPatch  (\ix valix plix ->do
                   wid <- go ti  plix valix

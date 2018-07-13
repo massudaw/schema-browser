@@ -43,7 +43,6 @@ module Types.Patch
   , patchfkt
   , patchvalue
   , unAtom
-  , unIndexItensP
   , unLeftItensP
   --
   , recoverPFK
@@ -296,6 +295,8 @@ checkPatch fixed@(WherePredicate b, pk) d =
 
 indexFilterR ::
      (Show k, Ord k) => [k] -> WherePredicateK k -> RowPatch k Showable -> Bool
+indexFilterR table j (BatchPatch i l) =  F.any (\ix -> indexFilterR table j (RowPatch (ix ,l) )) i
+
 indexFilterR table j (RowPatch (ix, i)) = case  i of
   DropRow -> G.checkPred (makePK table ix) j
   CreateRow i -> G.checkPred i j
@@ -344,44 +345,6 @@ indexFilterPatchU ::
   -> TBIdx k Showable
   -> Bool
 indexFilterPatchU (n, op) o = indexFilterPatch (n, op) o
-
-unIndexItensP ::
-     (Show (KType k), Show a)
-  => Int
-  -> Int
-  -> PathAttr (FKey (KType k)) a
-  -> Maybe (PathAttr (FKey (KType k)) a)
-unIndexItensP ix o = unIndexP (ix + o)
-  where
-    unIndexF o (PIdx ix v) =
-      if o == ix
-        then v
-        else Nothing
-    unIndexF o (PatchSet l) =
-      PatchSet <$> Non.nonEmpty (catMaybes (unIndexF o <$> F.toList l))
-    unIndexF o i = error ("unIndexF error" ++ show (o, i))
-    unIndexP ::
-         (Show (KType k), Show a)
-      => Int
-      -> PathAttr (FKey (KType k)) a
-      -> Maybe (PathAttr (FKey (KType k)) a)
-    unIndexP o (PAttr k v) = PAttr k <$> unIndexF o v
-    unIndexP o (PInline k v) = PInline k <$> unIndexF o v
-    unIndexP o (PFK rel els v) =
-      (\mi li ->
-         PFK
-           (Le.over
-              relOri
-              (\i ->
-                 if isArray (keyType i)
-                   then unKArray i
-                   else i) <$>
-            rel)
-           mi
-           li) <$>
-      (traverse (unIndexP o) els) <*>
-      unIndexF o v
-    unIndexP o i = error ("unIndexP error" ++ show (o, i))
 
 unSOptionalP (PatchSet l) =
   PatchSet <$> Non.nonEmpty (catMaybes (unSOptionalP <$> F.toList l))

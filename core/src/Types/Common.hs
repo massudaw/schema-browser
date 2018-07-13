@@ -38,6 +38,7 @@ module Types.Common
   , unSOptional
   , unSSerial
   , unSDelayed
+  , addDefault
   , unArray
   , KV(..)
   , TBData
@@ -52,7 +53,6 @@ module Types.Common
   , kvmap
   , kattr
   , aattr
-  , tableKeys
   , nonRefTB
   , tableNonRef
   , Rel(..)
@@ -270,6 +270,7 @@ type AValue k a = TB k a
 
 recoverAttr' = id
 
+
 {-
 
 valueattr :: TB k a -> AValue k a
@@ -452,6 +453,16 @@ liftRel l rel f =
   where
     rels = catMaybes $ findRel l <$> rel
 
+addDefault :: Ord d => TB d a -> TB d b
+addDefault = def
+  where
+    def (Attr k i) = Attr k (LeftTB1 Nothing)
+    def (Fun k i _) = Fun k i (LeftTB1 Nothing)
+    def (IT rel j) = IT rel (LeftTB1 Nothing)
+    def (FKT at rel j) =
+      FKT (kvlist $ addDefault <$> unkvlist at) rel (LeftTB1 Nothing)
+
+
 recoverFK :: Ord k => [k] -> [Rel k] -> FTB (TBRef k s) -> Column k s
 recoverFK ori rel i
   -- FKT (kvlist . catMaybes $ (\k -> Attr k <$> (fmap join . traverse (fmap _aprim . Map.lookup (S.singleton $ Inline k). _kvvalues . fst ) $ i)) <$> ori )rel   (fmap snd i)
@@ -487,7 +498,6 @@ findRel l (Rel k op j) = do
   Attr k v <- L.find (\(Attr i v) -> i == k) l
   return $ fmap (Attr k . TB1) v
 
-tableKeys k = concat $ fmap (fmap _relOrigin . keyattr) (unkvlist k)
 
 tableNonRef :: Ord k => KV k a -> KV k a
 tableNonRef n = (rebuildTable . unkvlist) n

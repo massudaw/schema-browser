@@ -46,6 +46,7 @@ module SchemaQuery
   ) where
 import Control.Arrow
 import Control.Concurrent
+import Debug.Trace
 import Serializer
 import Control.Concurrent.STM
 import Control.DeepSeq
@@ -108,7 +109,7 @@ projunion inf table = res
     res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
     transformTable (KV v) =  KV (transformAttr <$> M.filterWithKey (\k _ -> S.isSubsetOf (S.map (keyValue._relOrigin) k) attrs) v)
       where
-        attrs = S.fromList $ keyValue <$> tableAttrs table
+        attrs = S.fromList $ keyValue <$> rawAttrs table
         transformAttr (Fun k l i) = Fun  k l (transformKey (keyType k) (keyType nk) i)
           where nk = lkKey table (keyValue k)
         transformAttr (Attr k i ) = Attr k (transformKey (keyType k) (keyType nk) i)
@@ -124,7 +125,7 @@ mapIndex inf table (IndexMetadata i)  = IndexMetadata $ M.mapKeys (liftPredicate
   where
     filterPredicate  = M.filterWithKey (\k _ -> isJust $ traPredicate  check  $ k)
     check i = if S.member (keyValue i) attrs  then Just i else Nothing
-    attrs = S.fromList $ keyValue <$> tableAttrs table
+    attrs = S.fromList $ keyValue <$> rawAttrs table
 
 lookIndexMetadata pred (IndexMetadata i ) = M.lookup pred i
 mapIndexMetadata f (IndexMetadata v ) = IndexMetadata $ M.mapKeys (mapPredicate f )  v
@@ -616,7 +617,7 @@ tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non null
   where
     checkAllFilled =  need `S.isSubsetOf`  available
     available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
-    need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
+    need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (_kvattrs m)
 
 dynFork a = do
   t <- liftIO $  forkIO a
@@ -726,10 +727,13 @@ recInsert k1  v1 = do
    ret <- KV <$> Tra.traverse (tbInsertEdit k1) (unKV v1)
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
-   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf k1 (allRec' (tableMap inf) tb)))
-   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
+   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (traceShowId $ recPK inf k1 (allRec' (tableMap inf) tb)))
+   liftIO $ print "loaded"
+   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) -- && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
+        liftIO $ print "inserting"
         tb  <- insertFrom k1 ret
+        liftIO $ print "inserted"
         return $ createRow tb) (\e -> liftIO $ do
           throw e
           putStrLn $ "Failed insertion: "  ++ (show (e :: SomeException))
@@ -877,7 +881,7 @@ loadFKS targetTable table = do
     fkSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $  (rawFKS targetTable)
     items = unKV $ table
-  fks <- catMaybes <$> mapM (loadFK ( table )) (F.toList $ rawFKS targetTable)
+  fks <- catMaybes <$> mapM (loadFK ( table )) (rawFKS targetTable)
   let
     nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]
     nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
@@ -974,7 +978,7 @@ createTableRefs inf re (Project table (Union l)) = do
               new <- look table
               old <- look t
               return (old,new)
-          tableRel t = M.fromList $ catMaybes $ keyRel t<$> tableAttrs t
+          tableRel t = M.fromList $ catMaybes $ keyRel t<$> rawAttrs t
       res <- mapM (\t -> do
         ((IndexMetadata idx,sdata),ref) <- createTableRefs inf re t
         return ((IndexMetadata $ M.mapKeys ( mapPredicate (\k -> fromMaybe k (M.lookup k (tableRel t)))) $ idx, (mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
@@ -1096,7 +1100,7 @@ updateTable inf (DBRef {..})
 
 loadFKSDisk inf targetTable re = do
   let
-    psort = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ F.toList (rawFKS targetTable)
+    psort = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ rawFKS targetTable
     (fkSet2,pre) = F.foldl' (\(s,l) i -> ( (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )))  (S.empty , return []) psort
   prefks <- pre
   return (\table ->
@@ -1263,10 +1267,10 @@ createFresh  tname inf i ty@(Primitive l  atom)  =
           path =  FKInlineTable k $ inlineName ty
           alterTable (Project r i) = r
                     Le.& rawAttrsR Le.%~  (k:)
-                    Le.& rawFKSL Le.%~  (path:)
+                    Le.& _inlineFKS Le.%~  (path:)
           alterTable r  = r
                     Le.& rawAttrsR Le.%~  (k:)
-                    Le.& rawFKSL Le.%~  (path:)
+                    Le.& _inlineFKS Le.%~  (path:)
       let newinf =  inf
             Le.& tableMapL . Le.ix tname Le.%~ alterTable
             Le.& keyUnique Le.%~ M.insert (keyFastUnique k) k
@@ -1307,7 +1311,7 @@ revertModification idx = do
   return ()
 
 newKey table name ty =
-  let un = maximum (keyPosition <$> tableAttrs table) + 1
+  let un = maximum (keyPosition <$> rawAttrs table) + 1
   in  Key name Nothing [FRead,FWrite] un Nothing (tableUnique table) ty
 
 asyncModification m a = do
@@ -1336,7 +1340,7 @@ whereR
   -> DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)] (G.GiST (TBIndex Showable) (TBData Key Showable))
 whereR (P i k) m  = P (WhereV i m) (proc i -> k -< (i ++ m))
 
-lkKey table key = justError "no key" $ L.find ((key==).keyValue) (tableAttrs table)
+lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
 sourceTable inf (JoinV t  j jty _ l ) = alterTable nt
   where path =  FKInlineTable k $ inlineName  ty
@@ -1348,11 +1352,11 @@ sourceTable inf (JoinV t  j jty _ l ) = alterTable nt
         nt = sourceTable inf t
         k = newKey nt  l ty
         alterTable (Project r i) = r
-                    Le.& rawAttrsR Le.%~  (k:)
-                    Le.& rawFKSL Le.%~  (path:)
+                    Le.& rawAttrsR Le.%~ (k:)
+                    Le.& _inlineFKS Le.%~ (path:)
         alterTable r  = r
-                    Le.& rawAttrsR Le.%~  (k:)
-                    Le.& rawFKSL Le.%~  (path:)
+                    Le.& rawAttrsR Le.%~ (k:)
+                    Le.& _inlineFKS Le.%~ (path:)
 
 sourceTable inf (FromV i) = lookTable inf i
 sourceTable inf (WhereV i j) = sourceTable inf i

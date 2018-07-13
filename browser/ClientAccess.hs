@@ -56,7 +56,9 @@ addClientLogin inf =  transactionNoLog inf $ do
       obj = liftTable' inf "clients" (encodeT row)
       m = lookMeta inf  "clients"
     lift $ prerefTable inf (lookTable inf "clients")
+    liftIO $ print obj
     i <-  fullInsert m obj
+    liftIO $ print "inserted"
     lift . registerDynamic . closeDynamic $ do
       now <- liftIO getCurrentTime
       let

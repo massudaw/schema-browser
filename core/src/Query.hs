@@ -9,7 +9,6 @@
 module Query
   (
    tbPK
-  ,tableAttrs
   ,RelSort(..)
   ,TableMap
   ,joinRel2
@@ -106,17 +105,9 @@ isKOptional _ = False
 --
 
 
-rawFullName t  = rawSchema t <> "." <> rawName t
-
-
-tableAttrs :: Table -> [Key]
-tableAttrs r = L.nub (rawPK r <> rawDescription r  <>rawAttrs r)
-
-
 
 labelTable :: Table ->  TBData Key ()
-labelTable i = kvlist $ kname <$> tableAttrs i
-
+labelTable i = kvlist $ kname <$> rawAttrs i
 
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
 
@@ -246,8 +237,8 @@ recurseTB invSchema isRec table =
     kv = labelTable table
     items = _kvvalues kv
     fkSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction) $ fks'
-    funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ filter isFunction fks'
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ fks'
+    funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ functionRefs table
     nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
     fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) fks'
     pt  = F.foldl (\acc  fk ->

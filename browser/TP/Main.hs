@@ -70,7 +70,9 @@ setup smvar bstate plugList w = void $ do
       iniSchema = safeHead url
       iniTable = safeHead (tail url)
   return w # set title (host bstate <> " - " <>  dbn bstate)
+  liftIO $ print "loading Cli"
   cliTid <- fmap (fmap schema_selection) <$>  (ui $ lookClient (fromIntegral $ wId w) metainf)
+  liftIO $ print "loaded Cli"
   (evDB,chooserItens) <- databaseChooser  (rqCookies $request w) smvar metainf bstate plugList (pure (fmap T.pack $ maybeToList iniSchema))
   cliZone <- jsTimeZone
   cliTidIni <- currentValue (facts cliTid)
@@ -354,6 +356,7 @@ withTable s m w =
         table = lookTable inf m
     db <- transactionNoLog  inf $ selectFrom m Nothing Nothing [] pred
     i2 <- currentValue (facts $ collectionTid db)
+    addClientLogin inf
     let
       debug i = show <$> G.toList i
       -- debug2 i = show <$> G.projectIndex w i

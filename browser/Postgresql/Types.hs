@@ -288,7 +288,10 @@ textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
                Just ty -> case HM.lookup i postgresPrimTyp of
                             Just i -> AtomicPrim $ i ty
                             Nothing -> error $ "no conversion for type " <> (show i)
-               Nothing -> error $ "no conversion for type " <> (show i)
+               Nothing -> case HM.lookup i postgresPrimTyp of
+                            Just i -> AtomicPrim $ i 1
+                            Nothing -> error $ "no conversion for type " <> (show i)
+
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
 

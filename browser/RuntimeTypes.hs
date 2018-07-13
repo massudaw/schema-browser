@@ -602,29 +602,28 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
 
 liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first ((fst m ) inf tname)))<$> i
 
-liftASch :: TableMap  -> Text -> Text -> Rel Text  -> Rel Key
+liftASch :: (Text -> Text -> Maybe Table ) -> Text -> Text -> Rel Text  -> Rel Key
 liftASch inf s tname (Inline l) = Inline $  lookKey  l
   where
-    tb = lookup tname =<<  lookup s inf
-    lookup i m = HM.lookup i m
-    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (tableAttrs <$>tb)
+    tb = inf s tname
+    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
 liftASch inf s tname (RelAccess i c) = RelAccess (F.toList $ pathRelRel rel) (liftASch inf sch st c)
   where
     ref = liftASch inf s tname <$> i
-    lookup i m = justError ("no look " <> show i) $ HM.lookup i m
-    tb = lookup tname $  lookup s inf
-    rel  = justError "no fk" $ L.find (\i -> S.fromList (_relOrigin <$> ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    tb = inf s tname
+    rel  = justError "no fk" $ L.find (\i -> S.fromList (_relOrigin <$> ref) == S.map _relOrigin (pathRelRel i) ) =<< (rawFKS <$> tb)
     (sch,st) = case unRecRel rel of
           FKJoinTable  _ l -> l
           FKInlineTable  _ l -> l
 
+lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 
 
 recLookupInf inf tname rel = recLookup (liftRel inf tname rel)
 
 liftRel :: InformationSchema -> Text -> Rel Text -> Rel Key
-liftRel inf = liftASch (tableMap inf ) (schemaName inf)
+liftRel inf = liftASch (lookKeyNested ( tableMap inf)) (schemaName inf)
 liftRelM inf t r = Just $ liftRel  inf t r
 
 liftAccessM ::  InformationSchema -> Text -> Access Text  -> Maybe (Access Key)

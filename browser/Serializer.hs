@@ -1,5 +1,5 @@
 {-# LANGUAGE DefaultSignatures,TypeFamilies, ScopedTypeVariables, DeriveFunctor,
-  DeriveGeneric,FlexibleContexts,FlexibleInstances,TypeOperators #-}
+DeriveGeneric,FlexibleContexts,FlexibleInstances,TypeOperators #-}
 
 module Serializer where
 
