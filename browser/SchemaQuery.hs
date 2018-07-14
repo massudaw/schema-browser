@@ -728,12 +728,9 @@ recInsert k1  v1 = do
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (traceShowId $ recPK inf k1 (allRec' (tableMap inf) tb)))
-   liftIO $ print "loaded"
-   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) -- && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
+   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
-        liftIO $ print "inserting"
         tb  <- insertFrom k1 ret
-        liftIO $ print "inserted"
         return $ createRow tb) (\e -> liftIO $ do
           throw e
           putStrLn $ "Failed insertion: "  ++ (show (e :: SomeException))

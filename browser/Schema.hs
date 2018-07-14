@@ -124,7 +124,6 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        res2 <- liftIO$ fmap (\i@(t,c,j,k,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,d,z,b,typ)) ) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
-          backendkeyMap = M.fromList keyList
           keyMap = typeTransform ops <$> HM.fromList keyList
 
           lookupKey' map t c = justError ("nokey" <> show (t,c)) $ HM.lookup (t,c) map
@@ -153,7 +152,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        let
         schemaForeign :: Query
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
-       rslist <- liftIO$query conn  schemaForeign (Only schema)
+       rslist <- liftIO $ query conn  schemaForeign (Only schema)
        rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaRef (s,user) authMap pluglist) rslist
        let
            sKeyMap s
@@ -216,8 +215,8 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTVar  M.empty
-       let colMap =  fmap IM.fromList $ HM.fromListWith mappend $ (\((t,_),k) -> (t,[(keyPosition k,k)])) <$>  HM.toList keyMap
-       let inf = InformationSchema schemaId schema ((\(Only i ) -> i)<$> listToMaybe color) (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ (\i -> (keyFastUnique i,i)) <$> F.toList keyMap) (M.filterWithKey (\k v -> notElem (tableName v ) convert) i2u )  i3u mvar  conn metaschema  rsch ops pluglist schemaRef
+       let inf = InformationSchema schemaId schema ((\(Only i ) -> i)<$> listToMaybe color) (uid,user) oauth keyMap backendKeys  (M.fromList $ (\i -> (keyFastUnique i,i)) <$> F.toList keyMap) (M.filterWithKey (\k v -> notElem (tableName v ) convert) i2u )  i3u mvar  conn metaschema  rsch ops pluglist schemaRef
+           backendKeys = M.fromList $ (\k -> (keyFastUnique k ,k)) . snd   <$>  keyList
            convert = concatMap (\(_,_,_,n) -> deps  n) ures
            deps (SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _ )  (SQLRSelect _ (Just (SQLRReference _ j)) _ ) ) =  [i,j]
            deps SQLRSelect{} = []
@@ -350,7 +349,7 @@ addStats schema = do
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map
-  where map = justError ("notype" <> T.unpack (showKey v)) $ M.lookup (keyFastUnique v)  (backendsKey inf )
+  where map = justError ("notype" <> T.unpack (showKey v)) $  backendsKey inf (keyFastUnique v)
 
 
 

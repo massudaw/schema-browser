@@ -74,23 +74,35 @@ data DatabaseSchema
 
 data InformationSchemaKV k v
   = InformationSchema
+  -- Pure schema properties
   { schemaId :: Int
   , schemaName :: Text
   , schemaColor :: Maybe Text
+  -- User that created the schema and auth state
   , username :: UserTable
   , authtoken :: Auth
+  -- Key by name and table
   , _keyMapL :: HM.HashMap (Text,Text) k
-  , colMap ::  HM.HashMap Text (IM.IntMap k)
+  -- Mapping from keys to backend key
   , _backendKey :: Map KeyUnique PGKey
+  -- Full Key from unique id
   , _keyUnique :: Map KeyUnique k
+  -- all top level tables
   , _pkMapL :: Map (Set k) Table
+  -- all tables by name
   , _tableMapL :: HM.HashMap Text Table
+  -- Cache storage DB references
   , mvarMap :: TVar (Map (TableK k) (DBRef Key v ))
+  -- Backend state
   , rootconn :: Connection
+  -- Imported schema information
   , metaschema :: Maybe (InformationSchemaKV k v)
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
+  -- Backend Operations
   , schemaOps :: SchemaEditor
+  -- Schema plugins
   , plugins :: [Plugins]
+  -- Global database references
   , rootRef :: TVar DatabaseSchema
   }
 
@@ -100,10 +112,11 @@ instance Eq InformationSchema where
 instance Ord InformationSchema where
   compare i j = compare (schemaId i) (schemaId j)
 
-recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf) <|> deps
-  where deps = join $ L.find isJust $ (M.lookup  un . _keyUnique) <$> F.toList (depschema inf)
+recurseLookup :: (k -> InformationSchema -> Maybe b) -> InformationSchema -> k -> Maybe b
+recurseLookup l inf un = l un  inf <|> F.foldl' (<|>) Nothing (flip (recurseLookup l) un <$> F.toList (depschema inf))
 
-backendsKey s = _backendKey s <> F.foldl' mappend mempty (fmap (backendsKey .snd)$ HM.toList $ depschema s)
+recoverKey = recurseLookup (\un inf -> M.lookup un (_keyUnique inf))
+backendsKey = recurseLookup (\un inf -> M.lookup un (_backendKey inf))
 
 data Auth
   = PostAuth Connection
@@ -467,9 +480,6 @@ lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
-lookKeyPosition :: InformationSchema -> Text -> Int -> Key
-lookKeyPosition inf t k = justError ("table " <> T.unpack t <> " has no key " <> show k  <> show (HM.lookup t (colMap inf))) $  IM.lookup k =<< HM.lookup t (colMap inf)
-
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
@@ -536,8 +546,6 @@ typeCheckTable c  l
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
-lookupKeyPosition= (lookKeyPosition,keyPosition )
--- lookupKey = (lookKeyPosition,keyFastUnique)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
