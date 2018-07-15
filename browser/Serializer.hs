@@ -12,6 +12,7 @@ import Control.Arrow
 import Data.Interval (intersection)
 import Data.Functor.Contravariant.Divisible
 import Control.Applicative
+import Query
 import Data.Maybe
 import Control.Monad.Reader
 import Control.Monad.Writer  hiding((<>))
@@ -237,8 +238,10 @@ nestJoin :: (Functor f, DecodeTB1 f) =>
 nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          lk v =  _fkttable . justError ("no attr: " ++ show (S.fromList ix,v)). M.lookup (S.fromList $ ix) . _kvvalues $ v
-          mk = KV. M.singleton (S.fromList $ ix) . FKT mempty ix
+          keyset = S.fromList ix
+          lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). M.lookup keyset  . _kvvalues $ v
+          mk = KV. M.singleton keyset . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
+          reflectOp a (Rel i op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (Rel i op l,a)). M.lookup (S.singleton (Inline l)) . _kvvalues <$> a)
 
 
 nestWith :: (Functor f, DecodeTB1 f) =>
