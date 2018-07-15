@@ -112,7 +112,7 @@ tableChooser
 tableChooser  inf tables legendStyle tableFilter iniTables = do
   let
     tablePred =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-    authPred = [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> tablePred
+    authPred = [(keyRef "grantee",Left ( int $ usernameId inf ,Equals))] <> tablePred
   (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
       (,,) <$> selectFromTable "ordering" Nothing Nothing [] tablePred
            <*> selectFromTable "authorization" Nothing Nothing [] authPred
@@ -128,7 +128,7 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
     -- Table Description
     lookDescT =  flip (lookDesc inf) <$> collectionTid translation
     -- Authorization
-    autho_pk t = idex (meta inf) "authorization" [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ fst $ username inf)]
+    autho_pk t = idex (meta inf) "authorization" [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ usernameId inf)]
     authorize =  (\autho t -> isJust $ G.lookup (autho_pk t) autho) <$> collectionTid authorization
     -- Text Filter
     filterLabel = (\j d i -> T.isInfixOf (T.toLower (T.pack j)) (T.toLower  $ d i)) <$> triding filterInp <*> lookDescT

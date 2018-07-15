@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs #-}
+{-# LANGUAGE FlexibleInstances,GADTs #-}
 module ClientAccess where
 
 import Control.Monad.Reader
@@ -136,19 +136,17 @@ instance DecodeTable ClientState where
   isoTable = iassoc3  (isoArrow arr) (prim"id") (prim "up_time") (nest "selection")
     where arr = (\(i,j,k) -> ClientState i j k  , \(ClientState i j k ) -> (i,j,k) )
 
-instance DecodeTable AuthCookies where
-  isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> prim "username") (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
-    where arr = (\(i,j,k) -> AuthCookies i j k,\(AuthCookies i j k) -> (i,j,k))
+instance DecodeTable (AuthCookie Int) where
+  isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> prim "logged_user") (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
+    where arr = (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k))
+
+instance DecodeTable User where
+  isoTable  = iassoc (isoArrow arr)  ( identity  <$$> prim "oid") (IsoArrow fromJust Just <$$> prim "usename")
+    where arr = (\(i,j) -> User i j ,\(User i j ) -> (i,j))
 
 time = TB1  . STime . STimestamp
 num = TB1 . SNumeric
 
-data AuthCookies
-  = AuthCookies
-  { client :: Text
-  , cookie :: Int
-  , creation_date :: UTCTime
-  } deriving(Eq,Show)
 
 data ClientState
   = ClientState

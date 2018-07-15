@@ -8,7 +8,10 @@ module TP.Main where
 
 import TP.Selector
 import TP.Extensions
+import Serializer
 import ClientAccess
+import Safe
+import GHC.IO.Unsafe
 import PrimEditor
 import TP.Task
 import TP.QueryWidgets
@@ -70,9 +73,7 @@ setup smvar bstate plugList w = void $ do
       iniSchema = safeHead url
       iniTable = safeHead (tail url)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  liftIO $ print "loading Cli"
   cliTid <- fmap (fmap schema_selection) <$>  (ui $ lookClient (fromIntegral $ wId w) metainf)
-  liftIO $ print "loaded Cli"
   (evDB,chooserItens) <- databaseChooser  (rqCookies $request w) smvar metainf bstate plugList (pure (fmap T.pack $ maybeToList iniSchema))
   cliZone <- jsTimeZone
   cliTidIni <- currentValue (facts cliTid)
@@ -169,7 +170,7 @@ setup smvar bstate plugList w = void $ do
                           refId <- primEditor (pure Nothing )
                           button <- primEditor (pure (Just ()))
                           traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
-                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                          let pred = [(keyRef "user_name",Left (txt (username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
                           dash <-  metaTable inf "modification_table"  pred
                           return  [label,getElement refId,getElement button ,dash]
                   "Clients" -> do
@@ -253,26 +254,31 @@ loginWidget userI passI =  do
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
-authMap smvar sargs (user,pass) schemaN =
+authMap schemaN =
       case schemaN of
-          "code" -> return (NoAuth , codeOps)
-          i ->  do
-            conn <- connectPostgreSQL ("host=" <> BS.pack (host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user<> " password=" <> BS.pack pass <> " dbname=" <> BS.pack (dbn sargs) <> " " )
-            execute_ conn "set bytea_output='hex'"
-            return (PostAuth conn, postgresOps)
+          "code" -> codeOps
+          i ->
+            -- conn <- connectPostgreSQL ("host=" <> BS.pack (host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user<> " password=" <> BS.pack pass <> " dbname=" <> BS.pack (dbn sargs) <> " " )
+            -- execute_ conn "set bytea_output='hex'"
+            postgresOps
 
-loadSchema smvar schemaN user authMap  plugList =
-    keyTables smvar (schemaN,T.pack user) authMap plugList
+loadSchema smvar schemaN user auth plugList =
+  keyTables smvar (schemaN,user) auth plugList
 
 databaseChooser cookies smvar metainf sargs plugList init = do
-  let rCookie = fmap (T.pack . BS.unpack . cookieValue) $ L.find ((=="auth_cookie"). cookieName ) cookies
+  let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
   cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
-  let loginCookie =  (\m -> maybe Nothing (\ck -> G.lookup (G.Idex [TB1 $ SText ck]) m) rCookie )  <$> collectionTid cookiesMap
+  let loginCookie =  (\m -> (\ck -> decodeT .mapKey' keyValue . tableNonRef <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
+  userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
+  cookieUser <- currentValue . facts $  (\l m -> traverse (\ck -> decodeT . mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< l )  <$> loginCookie <*> collectionTid userMap
+  liftIO $ print ("@@@@@@cookies",rCookie,cookieUser)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+  logOut <- UI.button # set UI.text "Log Out" # set UI.class_ "row"
+  logOutE <- UI.click logOut
   load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
   loadE <- UI.click load
   login <- UI.div # set children widE # set UI.class_ "row"
-  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2" # sink UI.style (noneShow . isJust <$> facts loginCookie)
+  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2"
   orddb  <- ui $ transactionNoLog metainf ((selectFromTable "schema_ordering"  Nothing Nothing []  mempty ))
   let
     ordRow map orderMap inf =  field
@@ -304,23 +310,37 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   w <- askWindow
   metainf <- liftIO $ metaInf smvar
   let
-    genSchema e@(db,(schemaN,(sid,ty))) (user,pass) = case ty of
-      "sql" -> do
-          let auth = authMap smvar sargs (user,pass)
-          gen <- liftIO randomIO
-          now <- liftIO getCurrentTime
-          let cli = AuthCookies (T.pack user) gen now
-          inf <- loadSchema smvar schemaN  user auth plugList
-          runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" gen
-          transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
-          return inf
-      "code" -> do
-          let auth = authMap smvar sargs (user,pass)
-          loadSchema smvar schemaN  user auth plugList
+    logIn (user,pass)= do
+      -- liftIO  $ putStrLn "log in user " ++ T.unpack user
+        [Only uid] <- liftIO $ query (rootconn metainf) "select oid from metadata.\"user\" where usename = ?" (Only user)
+        cli <- liftIO   $ AuthCookie uid <$> randomIO <*> getCurrentTime
+        runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" (cookie cli)
+        transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
+        return (Just (flip User (T.pack user )<$> cli))
+    invalidateCookie cli = do
+        liftIO  $ putStrLn "Log out user"
+        transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT (fmap userId cli))
+        return Nothing
+    createSchema loggedUser e@(db,(schemaN,(sid,ty))) = do
+        let auth = authMap
+        liftIO  $ putStrLn "Creating new schema"
+        case ty of
+          "sql" -> do
+            loadSchema smvar schemaN   loggedUser auth plugList
+          "code" -> do
+            loadSchema smvar schemaN  loggedUser auth plugList
+    tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
 
-  chooserT <- traverseUI ui $ (\i -> mapM (flip genSchema (justError "no pass" i))  ) <$>  formLogin <*>dbsWT
-  schemaSel <- UI.div  # set children [getElement dbsW]
-  return (chooserT,[schemaSel ,authBox] )
+  loggedUser <- mdo
+    newLogIn <- mapEventUI (\i -> ui $ join <$> traverse logIn i) (rumors formLogin)
+    newLogOut <- mapEventUI (\i -> ui $ join <$> traverse invalidateCookie i) (facts loggedUser <@ logOutE)
+    loggedUser <- ui $ accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
+    return loggedUser
+  element authBox # sink UI.style (noneShow . isNothing <$> facts loggedUser)
+  element logOut # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  chooserT <- traverseUI ui $ tryCreate  <$> loggedUser   <*>dbsWT
+  schemaSel <- UI.div  # set children [getElement dbsW] # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  return (chooserT,[schemaSel ,authBox,logOut ] )
 
 createVar :: IO (TVar DatabaseSchema)
 createVar = do
@@ -331,20 +351,6 @@ createVar = do
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
   atomically $ newTVar  (DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
-
-testSync  = do
-  args <- getArgs
-  let db = argsToState args
-  smvar <- createVar
-  let
-    amap = authMap smvar db ("postgres", "queijo")
-  (meta,fin) <- runDynamic $ keyTables smvar  ("metadata","postgres") amap []
-  let
-    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  ("gmail","wesley.massuda@gmail.com") amap []
-  let start = "7629481"
-  -- runDynamic $ transaction inf $ historyLoad
-  return ()
 
 
 
@@ -372,8 +378,8 @@ withInf plugs s v  = do
   let db = argsToState args
   smvar <- createVar
   let
-    amap = authMap smvar db ("postgres", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap plugs
+    amap = authMap
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap plugs
   v inf
 
 
@@ -382,11 +388,16 @@ testPlugin s t p  = do
   let db = argsToState args
   smvar <- createVar
   let
-    amap = authMap smvar db ("postgres", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
+    amap = authMap
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser ) amap []
   let (i,o) = pluginStatic p
   print $ liftAccessU inf t i
   print $ liftAccessU inf t o
+
+postgresUser = unsafePerformIO $ do
+    rnd <- randomIO
+    now <-getCurrentTime
+    return $ AuthCookie (User 10 "postgres")  rnd now
 
 testCalls = testWidget (do
   setCallBufferMode BufferAll

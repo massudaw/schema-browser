@@ -77,7 +77,7 @@ checkTime meta curr = do
     current <- getCurrentTime
     return (start,end,curr,current)
 
-poller schmRef authmap db plugs is_test = do
+poller schmRef authmap user db plugs is_test = do
   metas <- metaInf schmRef
 
   let conn = rootconn metas
@@ -101,7 +101,7 @@ poller schmRef authmap db plugs is_test = do
           tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
       schm <- atomically $ readTVar schmRef
-      (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
+      (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , user ) authmap plugs
       (startP,_,_,current) <- checkTime metas (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p

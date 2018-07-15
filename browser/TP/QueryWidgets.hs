@@ -772,9 +772,9 @@ processPanelTable lbox inf reftb@(res,gist,_,_) inscrudp table oldItemsi = do
   let
     inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
     m = tableMeta table
-    authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
+    authPred =  [(keyRef "grantee",Left ( int $ usernameId inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
-  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
+  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ usernameId inf)]))  <$> collectionTid auth
 
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist
   (diffEdit,editB) <-     editCommand lbox inf table oldItemsi inscrudp inscrud authorize gist

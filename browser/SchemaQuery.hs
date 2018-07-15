@@ -1319,12 +1319,12 @@ asyncModification m a = do
 
 tableModification inf m a = do
   now <- getCurrentTime
-  TableModification Nothing now (snd $username inf) m<$>  return a
+  TableModification Nothing now (username inf) m<$>  return a
 
 wrapModification m a = do
   inf <- askInf
   now <- liftIO getCurrentTime
-  TableModification Nothing now (snd $username inf) (lookTable inf (_kvname m) )<$>  return a
+  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return a
 
 fromR
   :: T.Text

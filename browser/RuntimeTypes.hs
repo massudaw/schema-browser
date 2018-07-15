@@ -71,16 +71,39 @@ data DatabaseSchema
     }
 
 
+data SchemaProperties
+  = SchemaProperties
+  { schId :: Int
+  , schName :: Text
+  , schColor:: Maybe Text
+  }
+
+data User
+ = User
+ { userId :: Int
+ , userName :: Text
+ }deriving(Eq,Show)
+
+schemaId = schId . schemaProperties
+schemaName = schName. schemaProperties
+schemaColor = schColor . schemaProperties
+
+username = userName .client . loggedUser
+usernameId = userId . client . loggedUser
+
+data AuthCookie a
+  = AuthCookie
+  { client :: a
+  , cookie :: Int
+  , creation_date :: UTCTime
+  } deriving(Eq,Show,Functor,Foldable,Traversable)
 
 data InformationSchemaKV k v
   = InformationSchema
   -- Pure schema properties
-  { schemaId :: Int
-  , schemaName :: Text
-  , schemaColor :: Maybe Text
+  { schemaProperties :: SchemaProperties
   -- User that created the schema and auth state
-  , username :: UserTable
-  , authtoken :: Auth
+  , loggedUser :: AuthCookie User
   -- Key by name and table
   , _keyMapL :: HM.HashMap (Text,Text) k
   -- Mapping from keys to backend key
@@ -118,12 +141,7 @@ recurseLookup l inf un = l un  inf <|> F.foldl' (<|>) Nothing (flip (recurseLook
 recoverKey = recurseLookup (\un inf -> M.lookup un (_keyUnique inf))
 backendsKey = recurseLookup (\un inf -> M.lookup un (_backendKey inf))
 
-data Auth
-  = PostAuth Connection
-  | NoAuth
-
-conn s = case authtoken s of
-      PostAuth i -> i
+conn  = rootconn
 
 data BrowserState
   = BrowserState
@@ -631,7 +649,7 @@ lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 recLookupInf inf tname rel = recLookup (liftRel inf tname rel)
 
 liftRel :: InformationSchema -> Text -> Rel Text -> Rel Key
-liftRel inf = liftASch (lookKeyNested ( tableMap inf)) (schemaName inf)
+liftRel inf = liftASch (lookKeyNested (tableMap inf)) (schemaName inf)
 liftRelM inf t r = Just $ liftRel  inf t r
 
 liftAccessM ::  InformationSchema -> Text -> Access Text  -> Maybe (Access Key)

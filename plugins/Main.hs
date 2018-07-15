@@ -30,16 +30,16 @@ main = do
   db <- argsToState <$> getArgs
   smvar <- createVar
   let
-      amap = authMap smvar db (user db, pass db)
+      amap = authMap
   print "Dyn Load Plugins"
   print "Load Metadata"
   (metas, lm) <-
-    runDynamic $keyTablesInit smvar ("metadata", T.pack $ user db) amap []
+    runDynamic $keyTablesInit smvar ("metadata", postgresUser ) amap []
   print "Start Server"
   print "Load Plugins"
   (plugListLoad, pfin) <-
     runDynamic $ do
-      keyTablesInit smvar ("code", T.pack $ user db) amap []
+      keyTablesInit smvar ("code", postgresUser) amap []
       addPlugins plugList smvar
   print "Register Plugins"
   regplugs <- plugs smvar amap db plugListLoad
@@ -84,16 +84,16 @@ withSelector s m  = do
   db <- getState
   smvar <- createVar
   let
-    amap = authMap smvar db (user db, pass db)
+    amap = authMap
 
   (metas, lm) <-
-    runDynamic $ keyTablesInit smvar ("metadata", T.pack $ user db) amap []
+    runDynamic $ keyTablesInit smvar ("metadata", postgresUser) amap []
   (plugListLoad, pfin) <-
     runDynamic $ do
-      keyTablesInit smvar ("code", T.pack $ user db) amap []
+      keyTablesInit smvar ("code", postgresUser) amap []
       addPlugins plugList smvar
   regplugs <- plugs smvar amap db plugListLoad
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap regplugs
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap regplugs
   startGUI defaultConfig {jsStatic = Just "static", jsCustomHTML = Just "index.html"} (\w -> do
     let
       table = lookTable inf m
