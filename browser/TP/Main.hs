@@ -268,9 +268,9 @@ loadSchema smvar schemaN user auth plugList =
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
   cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
-  let loginCookie =  (\m -> (\ck -> decodeT .mapKey' keyValue . tableNonRef <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
-  userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
-  cookieUser <- currentValue . facts $  (\l m -> traverse (\ck -> decodeT . mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< l )  <$> loginCookie <*> collectionTid userMap
+  let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
+      -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
+  cookieUser <- currentValue . facts $  (loginCookie)
   liftIO $ print ("@@@@@@cookies",rCookie,cookieUser)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   logOut <- UI.button # set UI.text "Log Out" # set UI.class_ "row"
@@ -319,7 +319,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
         return (Just (flip User (T.pack user )<$> cli))
     invalidateCookie cli = do
         liftIO  $ putStrLn "Log out user"
-        transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT (fmap userId cli))
+        transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
         return Nothing
     createSchema loggedUser e@(db,(schemaN,(sid,ty))) = do
         let auth = authMap

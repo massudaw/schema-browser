@@ -237,7 +237,7 @@ nestJoin :: (Functor f, DecodeTB1 f) =>
 nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          lk =  _fkttable . justError ("no attr: " ++ show (S.fromList $ ix)). M.lookup (S.fromList $ ix) . _kvvalues
+          lk v =  _fkttable . justError ("no attr: " ++ show (S.fromList ix,v)). M.lookup (S.fromList $ ix) . _kvvalues $ v
           mk = KV. M.singleton (S.fromList $ ix) . FKT mempty ix
 
 

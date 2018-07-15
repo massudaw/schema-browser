@@ -136,6 +136,10 @@ instance DecodeTable ClientState where
   isoTable = iassoc3  (isoArrow arr) (prim"id") (prim "up_time") (nest "selection")
     where arr = (\(i,j,k) -> ClientState i j k  , \(ClientState i j k ) -> (i,j,k) )
 
+instance DecodeTable (AuthCookie User) where
+  isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> nestJoin [Rel "logged_user" Equals "oid"] isoTable ) (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
+    where arr = (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k))
+
 instance DecodeTable (AuthCookie Int) where
   isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> prim "logged_user") (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
     where arr = (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k))
@@ -145,6 +149,7 @@ instance DecodeTable User where
     where arr = (\(i,j) -> User i j ,\(User i j ) -> (i,j))
 
 time = TB1  . STime . STimestamp
+
 num = TB1 . SNumeric
 
 
