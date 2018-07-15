@@ -239,7 +239,7 @@ nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
           keyset = S.fromList ix
-          lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). M.lookup keyset  . _kvvalues $ v
+          lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). M.lookup keyset . _kvvalues $ v
           mk = KV. M.singleton keyset . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
           reflectOp a (Rel i op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (Rel i op l,a)). M.lookup (S.singleton (Inline l)) . _kvvalues <$> a)
 

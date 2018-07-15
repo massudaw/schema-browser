@@ -8,7 +8,6 @@ module TP.Main where
 
 import TP.Selector
 import TP.Extensions
-import Serializer
 import ClientAccess
 import Safe
 import GHC.IO.Unsafe
@@ -153,40 +152,41 @@ setup smvar bstate plugList w = void $ do
             st <- once (fmap (flip elem . fmap (^._2)) m)
             return $ TrivialWidget st widget),
           ("Metadata" ,do
-                let metaOpts = ["Change","Exception","Polling","Clients"]
-                    displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
-                metanav <- buttonDivSet metaOpts (pure Nothing) displayOpts
-                element metanav # set UI.class_ "col-xs-5 pull-right"
-                metabody <- UI.div
-                metaDiv <- UI.div # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
-                els <- traverseUI (maybe (return []) (\(nav,tables) -> case nav  of
-                  "Polling" -> do
-                    els <- sequence   [ metaTable inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]                                        ]
-                    return els
-                  "Change" ->
-                      case schemaName inf of
-                        i -> do
-                          label <- flabel # set UI.text "Revert"
-                          refId <- primEditor (pure Nothing )
-                          button <- primEditor (pure (Just ()))
-                          traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
-                          let pred = [(keyRef "user_name",Left (txt (username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
-                          dash <-  metaTable inf "modification_table"  pred
-                          return  [label,getElement refId,getElement button ,dash]
-                  "Clients" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
-                      let pred = [(RelAccess [keyRef "selection"] $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess ([keyRef "selection"] ) $ RelAccess ([keyRef "selection"] ) ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
-                      clients <- metaTable inf "clients" pred
-                      return [clients]
-                  "Exception" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
-                      dash <- metaTable inf "plugin_exception" pred
-                      return [dash]
-                  i -> error (show i)
-                           )) ((\i  -> fmap(i ,)) <$> triding metanav <*> fmap (nonEmpty. F.toList) (triding bset))
-                element metabody # sink children (facts els)
-                st <- once (buttonStyle,const True)
-                return  $ TrivialWidget st metaDiv),
+            let
+              metaOpts = ["Change","Exception","Polling","Clients"]
+              displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
+            metanav <- buttonDivSet metaOpts (pure Nothing) displayOpts
+            element metanav # set UI.class_ "col-xs-5 pull-right"
+            metabody <- UI.div
+            metaDiv <- UI.div # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
+            els <- traverseUI (maybe (return []) (\(nav,tables) -> case nav  of
+              "Polling" -> do
+                els <- sequence   [ metaTable inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]                                        ]
+                return els
+              "Change" ->
+                case schemaName inf of
+                  i -> do
+                    label <- flabel # set UI.text "Revert"
+                    refId <- primEditor (pure Nothing )
+                    button <- primEditor (pure (Just ()))
+                    traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
+                    let pred = [(keyRef "user_name",Left (txt (username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                    dash <-  metaTable inf "modification_table"  pred
+                    return  [label,getElement refId,getElement button ,dash]
+              "Clients" -> do
+                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                let pred = [(RelAccess [keyRef "selection"] $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess ([keyRef "selection"] ) $ RelAccess ([keyRef "selection"] ) ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
+                clients <- metaTable inf "clients" pred
+                return [clients]
+              "Exception" -> do
+                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                dash <- metaTable inf "plugin_exception" pred
+                return [dash]
+              i -> error (show i)
+                       )) ((\i  -> fmap(i ,)) <$> triding metanav <*> fmap (nonEmpty. F.toList) (triding bset))
+            element metabody # sink children (facts els)
+            st <- once (buttonStyle,const True)
+            return  $ TrivialWidget st metaDiv),
           ("Browser" ,do
             subels <- chooserTable  six  inf  bset cliTables (wId w)
             el <- UI.div # set children  (pure subels)
@@ -271,14 +271,11 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  (loginCookie)
-  liftIO $ print ("@@@@@@cookies",rCookie,cookieUser)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-  logOut <- UI.button # set UI.text "Log Out" # set UI.class_ "row"
-  logOutE <- UI.click logOut
-  load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
-  loadE <- UI.click load
+  logInB <- UI.button # set UI.text "Log In" # set UI.class_ "row"
+  loadE <- UI.click logInB
   login <- UI.div # set children widE # set UI.class_ "row"
-  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2"
+  authBox <- UI.div # set children [login ,logInB]
   orddb  <- ui $ transactionNoLog metainf ((selectFromTable "schema_ordering"  Nothing Nothing []  mempty ))
   let
     ordRow map orderMap inf =  field
@@ -312,34 +309,37 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   let
     logIn (user,pass)= do
         [Only uid] <- liftIO $ query (rootconn metainf) "select oid from metadata.\"user\" where usename = ?" (Only user)
-        cli <- liftIO   $ AuthCookie (User uid (T.pack user)) <$> randomIO <*> getCurrentTime
+        cli <- liftIO $ AuthCookie (User uid (T.pack user)) <$> randomIO <*> getCurrentTime
         runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" (cookie cli)
         transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
         return (Just cli)
     invalidateCookie cli = do
-        liftIO  $ putStrLn "Log out user"
         transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
         return Nothing
     createSchema user e@(db,(schemaN,(sid,ty))) = do
-        let auth = authMap
-        liftIO  $ putStrLn "Creating new schema"
         case ty of
           "sql" -> do
-            loadSchema smvar schemaN   user auth plugList
+            loadSchema smvar schemaN   user authMap plugList
           "code" -> do
-            loadSchema smvar schemaN  user auth plugList
+            loadSchema smvar schemaN  user authMap plugList
     tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
+
+  logOutB <- UI.button # set UI.text "Log Out" # set UI.class_ "row"
+  logOutE <- UI.click logOutB
 
   loggedUser <- ui $ mdo
     newLogIn <- mapEventDyn (fmap join . traverse logIn) (rumors formLogin)
     newLogOut <- mapEventDyn (fmap join . traverse invalidateCookie) (facts user <@ logOutE)
     user <- accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
     return user
+  loggedUserD <- UI.div # sink text (maybe "" (T.unpack . userName . client) <$> facts loggedUser )
+  loggedBox <- UI.div #  set children [loggedUserD,logOutB]
   element authBox # sink UI.style (noneShow . isNothing <$> facts loggedUser)
-  element logOut # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  element loggedBox # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  userLogg <- UI.div # set children [authBox , loggedBox] # set UI.class_ "col-xs-2 pull-right"
   chooserT <- traverseUI ui $ tryCreate  <$> loggedUser   <*>dbsWT
-  schemaSel <- UI.div  # set children [getElement dbsW] # sink UI.style (noneShow . isJust <$> facts loggedUser)
-  return (chooserT,[schemaSel ,authBox,logOut ] )
+  schemaSel <- UI.div  # set children [getElement dbsW] # set UI.class_ "col-xs-10" # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  return (chooserT,[schemaSel ,userLogg])
 
 createVar :: IO (TVar DatabaseSchema)
 createVar = do

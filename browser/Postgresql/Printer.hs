@@ -369,9 +369,9 @@ indexFieldL
     -> TBData Key ()
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 indexFieldL inf m e c p@(Inline l) v =
-    case findAttr l v of
-      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
-      Nothing -> error $ "not attr inline" ++ show (l,v)
+  case findAttr l (tableNonRef v) of
+    Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
+    Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess l nt) v =
   case kvLookup (S.fromList l) v of
     Just a -> case a of
