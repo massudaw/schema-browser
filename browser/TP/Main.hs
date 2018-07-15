@@ -115,14 +115,14 @@ setup smvar bstate plugList w = void $ do
         buttonStyle lookDesc k e = Just <$> do
           label <- UI.div # set UI.text (T.unpack $ lookDesc ) # set UI.class_ "fixed-label col-xs-11"
           element e # set UI.class_ "col-xs-1"
-          UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+          UI.label # set children [e , label] # set UI.class_ "btn btn-default table-list-item" # set UI.style [("padding","1px"),("display","-webkit-box")]
 
       bset <- tableChooser inf  kitems (fst <$> triding tfilter ) (snd <$> triding tfilter) initKey
       posSel <- positionSel
       (sidebar,calendarT) <- calendarSelector
       tbChooser <- UI.div
           # set UI.class_ "col-xs-2"
-          # set UI.style ([("height","80vh"),("overflow","hidden")] ++ borderSchema inf)
+          # set UI.style ([("height","85vh"),("overflow-y","hidden")] ++ borderSchema inf)
           # set children [sidebar,posSel ^._1,getElement bset]
           # sink0 UI.style (facts $ noneShow <$> triding menu)
       let cliTables = (fmap (!!six) <$> cliTid)
@@ -192,7 +192,7 @@ setup smvar bstate plugList w = void $ do
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
-      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","80vh"),("overflow","auto")] ++ borderSchema inf)
+      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","85vh"),("overflow-y","auto")] ++ borderSchema inf)
                        # sink0 UI.class_ (facts $ expand <$> triding menu)
       element body # set children [tbChooser,bd]
       return tfilter
@@ -211,14 +211,14 @@ setup smvar bstate plugList w = void $ do
     displayH =  (||) <$> hoverT <*> (L.null <$> evDB)
     style True = UI.span # set UI.class_ "glyphicon glyphicon-collapse-up"
     style False = UI.span # set UI.class_ "glyphicon glyphicon-expand"
-  header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-10"
+  header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-12"
   merged <- ui $ accumDiffMapCounter (\ix (k,(i,j)) -> runUI w $ UI.div # set children [i,j])   (M.intersectionWith (,) <$>  headers <*>  selschemas)
   (layouth,top) <- layoutSel' onShiftAlt  merged
   element header # sink UI.style (noneShow <$> facts displayH)
   element layouth
     # set UI.class_ "col-xs-1"
     # sink UI.style (noneShow <$> facts displayH)
-  element schemaH # set children [layouth,header] # set UI.class_ "row"
+  element schemaH # set children [header,layouth] # set UI.class_ "row"
   addBody [schemaH,top]
 
 
@@ -239,14 +239,22 @@ listDBS metainf db = do
 
 loginWidget userI passI =  do
     usernamel <- flabel # set UI.text "Usuário"
-    username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (Data.Maybe.fromMaybe "" userI)
+    username <- UI.input
+        # set UI.name "username"
+        # set UI.class_ "form-control"
+        # set UI.style [("width","142px")]
+        # set UI.value (Data.Maybe.fromMaybe "" userI)
     passwordl <- flabel # set UI.text "Senha"
-    password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
+    password <- UI.input
+        # set UI.name "password"
+        # set UI.class_ "form-control"
+        # set UI.style [("width","142px")]
+        # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
     usernameE <- fmap nonEmpty  <$> UI.valueChange username
     passwordE <- fmap nonEmpty <$> UI.valueChange password
 
-    userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
-    passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
+    userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-12"
+    passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-12"
     usernameT <- ui $ stepperT userI usernameE
     passwordT <- ui $stepperT passI passwordE
     return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
@@ -272,7 +280,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  (loginCookie)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-  logInB <- UI.button # set UI.text "Log In" # set UI.class_ "row"
+  logInB <- UI.button # set UI.text "Log In" # set  UI.class_ "btn btn-primary"
   loadE <- UI.click logInB
   login <- UI.div # set children widE # set UI.class_ "row"
   authBox <- UI.div # set children [login ,logInB]
@@ -297,8 +305,9 @@ databaseChooser cookies smvar metainf sargs plugList init = do
               (S.fromList <$> init )
               buttonString
               (pure (\i o -> Just $ do
-                l <- UI.span # set text (T.unpack  i)
-                UI.label  # set children [l,o] # set UI.style [("padding","2px")]  ))
+                check <- element o # set UI.style [("margin-top","5px")]
+                l <- UI.span # set text (T.unpack  i) # set UI.class_ "btn btn-default"
+                UI.label  # set children [check,l] # set UI.class_ "btn btn-warning" # set UI.style [("padding","1px"),("display","flex"),("flex-flow","row")]))
   let dbsW = TrivialWidget ((\i j ->  (\k -> justError (" no schema" <> show (k,j)) $ (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> (S.toList <$> triding dbsWPre) <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
@@ -319,12 +328,12 @@ databaseChooser cookies smvar metainf sargs plugList init = do
     createSchema user e@(db,(schemaN,(sid,ty))) = do
         case ty of
           "sql" -> do
-            loadSchema smvar schemaN   user authMap plugList
+            loadSchema smvar schemaN user authMap plugList
           "code" -> do
-            loadSchema smvar schemaN  user authMap plugList
+            loadSchema smvar schemaN user authMap plugList
     tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
 
-  logOutB <- UI.button # set UI.text "Log Out" # set UI.class_ "row"
+  logOutB <- UI.button # set UI.text "Log Out" # set UI.class_ "btn btn-primary"
   logOutE <- UI.click logOutB
 
   loggedUser <- ui $ mdo
@@ -333,13 +342,14 @@ databaseChooser cookies smvar metainf sargs plugList init = do
     user <- accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
     return user
   loggedUserD <- UI.div # sink text (maybe "" (T.unpack . userName . client) <$> facts loggedUser )
-  loggedBox <- UI.div #  set children [loggedUserD,logOutB]
+  loggedBox <- UI.div #  set children [loggedUserD,logOutB] # set UI.class_ "col-xs-2"
   element authBox # sink UI.style (noneShow . isNothing <$> facts loggedUser)
   element loggedBox # sink UI.style (noneShow . isJust <$> facts loggedUser)
-  userLogg <- UI.div # set children [authBox , loggedBox] # set UI.class_ "col-xs-2 pull-right"
+  userLogg <- UI.div # set children [authBox ] # set UI.class_ "col-xs-122 pull-right"
   chooserT <- traverseUI ui $ tryCreate  <$> loggedUser   <*>dbsWT
-  schemaSel <- UI.div  # set children [getElement dbsW] # set UI.class_ "col-xs-10" # sink UI.style (noneShow . isJust <$> facts loggedUser)
-  return (chooserT,[schemaSel ,userLogg])
+  element dbsW # set UI.class_ "col-xs-10"# set UI.style [("display","flex"),("flex-flow","row wrap")]
+  schemaSel <- UI.div  # set children [getElement dbsW, loggedBox] # set UI.class_ "col-xs-12" # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  return (chooserT,[schemaSel ,authBox])
 
 createVar :: IO (TVar DatabaseSchema)
 createVar = do
