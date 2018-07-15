@@ -137,16 +137,17 @@ instance DecodeTable ClientState where
     where arr = (\(i,j,k) -> ClientState i j k  , \(ClientState i j k ) -> (i,j,k) )
 
 instance DecodeTable (AuthCookie User) where
-  isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> nestJoin [Rel "logged_user" Equals "oid"] isoTable ) (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
-    where arr = (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k))
-
-instance DecodeTable (AuthCookie Int) where
-  isoTable  = iassoc3 (isoArrow arr)  (identity  <$$> prim "logged_user") (identity  <$$> prim "cookie") (identity  <$$> prim "creation_date")
-    where arr = (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k))
+  isoTable = iassoc3
+    (isoArrow (\(i,j,k) -> AuthCookie i j k,\(AuthCookie i j k) -> (i,j,k)))
+    (identity  <$$> nestJoin [Rel "logged_user" Equals "oid"] isoTable )
+    (identity  <$$> prim "cookie")
+    (identity  <$$> prim "creation_date")
 
 instance DecodeTable User where
-  isoTable  = iassoc (isoArrow arr)  ( identity  <$$> prim "oid") (IsoArrow fromJust Just <$$> prim "usename")
-    where arr = (\(i,j) -> User i j ,\(User i j ) -> (i,j))
+  isoTable = iassoc
+    (isoArrow (\(i,j) -> User i j ,\(User i j ) -> (i,j)))
+    (identity  <$$> prim "oid")
+    (IsoArrow fromJust Just <$$> prim "usename")
 
 time = TB1  . STime . STimestamp
 

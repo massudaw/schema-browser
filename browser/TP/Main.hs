@@ -311,31 +311,30 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   metainf <- liftIO $ metaInf smvar
   let
     logIn (user,pass)= do
-      -- liftIO  $ putStrLn "log in user " ++ T.unpack user
         [Only uid] <- liftIO $ query (rootconn metainf) "select oid from metadata.\"user\" where usename = ?" (Only user)
-        cli <- liftIO   $ AuthCookie uid <$> randomIO <*> getCurrentTime
+        cli <- liftIO   $ AuthCookie (User uid (T.pack user)) <$> randomIO <*> getCurrentTime
         runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" (cookie cli)
         transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
-        return (Just (flip User (T.pack user )<$> cli))
+        return (Just cli)
     invalidateCookie cli = do
         liftIO  $ putStrLn "Log out user"
         transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
         return Nothing
-    createSchema loggedUser e@(db,(schemaN,(sid,ty))) = do
+    createSchema user e@(db,(schemaN,(sid,ty))) = do
         let auth = authMap
         liftIO  $ putStrLn "Creating new schema"
         case ty of
           "sql" -> do
-            loadSchema smvar schemaN   loggedUser auth plugList
+            loadSchema smvar schemaN   user auth plugList
           "code" -> do
-            loadSchema smvar schemaN  loggedUser auth plugList
+            loadSchema smvar schemaN  user auth plugList
     tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
 
-  loggedUser <- mdo
-    newLogIn <- mapEventUI (\i -> ui $ join <$> traverse logIn i) (rumors formLogin)
-    newLogOut <- mapEventUI (\i -> ui $ join <$> traverse invalidateCookie i) (facts loggedUser <@ logOutE)
-    loggedUser <- ui $ accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
-    return loggedUser
+  loggedUser <- ui $ mdo
+    newLogIn <- mapEventDyn (fmap join . traverse logIn) (rumors formLogin)
+    newLogOut <- mapEventDyn (fmap join . traverse invalidateCookie) (facts user <@ logOutE)
+    user <- accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
+    return user
   element authBox # sink UI.style (noneShow . isNothing <$> facts loggedUser)
   element logOut # sink UI.style (noneShow . isJust <$> facts loggedUser)
   chooserT <- traverseUI ui $ tryCreate  <$> loggedUser   <*>dbsWT
