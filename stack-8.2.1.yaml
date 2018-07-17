@@ -1,0 +1,30 @@
+flags:
+  snap-server:
+    openssl: true
+
+packages:
+- plugins
+- browser
+- core
+
+allow-newer: true
+extra-deps:
+  - diagrams-1.4
+  - diagrams-lib-1.4.2.3
+  - diagrams-svg-1.4.2
+  - diagrams-contrib-1.4.3
+  - diagrams-core-1.4.1
+  - diagrams-solve-0.1.1
+  - dual-tree-0.2.2
+  - cubicbezier-0.6.0.5
+  - mfsolve-0.3.2.0
+  - fast-math-1.0.2
+  - deps/master-plan
+  - deps/postgresql-simple
+  - deps/ordered
+  - deps/GiST
+  - deps/extended-reals
+  - deps/data-interval
+  - deps/threepenny-gui
+
+resolver: lts-11.14
