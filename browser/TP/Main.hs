@@ -211,14 +211,12 @@ setup smvar bstate plugList w = void $ do
     displayH =  (||) <$> hoverT <*> (L.null <$> evDB)
     style True = UI.span # set UI.class_ "glyphicon glyphicon-collapse-up"
     style False = UI.span # set UI.class_ "glyphicon glyphicon-expand"
-  header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-12"
+  header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-11"
   merged <- ui $ accumDiffMapCounter (\ix (k,(i,j)) -> runUI w $ UI.div # set children [i,j])   (M.intersectionWith (,) <$>  headers <*>  selschemas)
   (layouth,top) <- layoutSel' onShiftAlt  merged
-  element header # sink UI.style (noneShow <$> facts displayH)
   element layouth
     # set UI.class_ "col-xs-1"
-    # sink UI.style (noneShow <$> facts displayH)
-  element schemaH # set children [header,layouth] # set UI.class_ "row"
+  element schemaH # set children [layouth,header] # set UI.class_ "row"
   addBody [schemaH,top]
 
 

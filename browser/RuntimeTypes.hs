@@ -747,22 +747,22 @@ mergeTB1 k  k2
   = (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2
 
 recComplement :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
-recComplement inf =  filterAttrs
+recComplement inf =  filterAttrs []
   where
-    filterAttrs m e = fmap KV . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go m)) (_kvvalues e)  ._kvvalues
-      where notPKOnly k =  if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m) then Nothing else Just k
+    filterAttrs r m e = fmap KV . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (_kvvalues e)  ._kvvalues
+      where notPKOnly k =  if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null i then Nothing else Just i
-    go m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go r m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = if L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) then Just (FKT l1 rel1 tb1) else  (fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged))
       where
-        merged = filterAttrs m2 <$> tb <*> tb1
+        merged = filterAttrs (_relTarget <$> rel) m2 <$> tb <*> tb1
         FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
-    go m _ (IT  it tb) ( IT it1 tb1)= fmap (IT it1)  $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go _ m _ (IT  it tb) ( IT it1 tb1)= fmap (IT it1)  $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
-        merged = filterAttrs ms <$> tb <*> tb1
+        merged = filterAttrs [] ms <$> tb <*> tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go m _ _ v@(Attr k a) = if L.elem k (_kvpk m) then Just v else Nothing
+    go r m _ _ v@(Attr k a) = if L.elem k (_kvpk m <> r) then Just v else Nothing
 
 
 recPK inf = filterTBData pred inf
@@ -789,14 +789,14 @@ recPKDesc inf = filterTBData pred inf
             in not . S.null $ S.map _relOrigin k `S.intersection` pkdesc)
 
 filterTBData :: (KVMetadata Key -> S.Set (Rel Key) -> TB Key a -> Bool) ->  InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
-filterTBData  pred inf =  filterAttrs
+filterTBData  pred inf =  filterAttrs S.empty
   where
-    filterAttrs m = KV . fmap (go m) . M.filterWithKey   (pred m) ._kvvalues
-    go m (FKT l  rel  tb) = FKT l rel $ filterAttrs m2  <$> tb
+    filterAttrs l m = KV . fmap (go m) . M.filterWithKey   (\i v -> pred m i v || not  (S.null $ (S.map _relOrigin i `S.intersection` l) )) ._kvvalues
+    go m (FKT l  rel  tb) = FKT l rel $ filterAttrs (S.fromList $ _relTarget <$> rel) m2  <$> tb
       where
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec desc: " <> show (rel ,_kvjoins m))$ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
-    go m (IT  it tb) = IT it $ filterAttrs ms <$> tb
+    go m (IT  it tb) = IT it $ filterAttrs S.empty ms <$> tb
       where
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it

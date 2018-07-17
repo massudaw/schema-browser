@@ -186,9 +186,10 @@ checkDivSetTGen' ks sort binit   el st = do
   (ce,ch) <- ui newEvent
   w <- askWindow
   buttonsT <- ui $ accumDiff (\b -> runUI w $ do
-    (i,(e,ev)) <- (\k -> (k,) <$> el k) b
-    let evs =  (\ab -> if not ab then S.delete i else S.insert i)  <$> ev
+    (e,ev) <-  el b
+    let evs =  (\ab -> if not ab then S.delete b else S.insert b)  <$> ev
     ui$ onEventIO evs ch
+    element e # sinkDiff UI.checked (S.member b <$> binit)
     UI.div # sink items ((\f -> pure <$> f b e) <$> facts st)
     ) (S.fromList <$> ks)
   vini <- currentValue (facts binit)
