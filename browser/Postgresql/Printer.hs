@@ -204,7 +204,7 @@ expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
      aliasKeys (at@(IT n _ )) = do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
-     name =  tableAttr tb
+     name =  L.nubBy (\i j -> let f = fmap _relOrigin . keyattr  in f i  == f j)$ tableAttr tb <> ((flip Attr (TB1 ()) ) <$> _kvattrs meta)
   cols <- mapM (aliasKeys  )  (sortPosition name)
   return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing
   )

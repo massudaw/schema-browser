@@ -262,12 +262,9 @@ form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
 authMap schemaN =
-      case schemaN of
-          "code" -> codeOps
-          i ->
-            -- conn <- connectPostgreSQL ("host=" <> BS.pack (host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user<> " password=" <> BS.pack pass <> " dbname=" <> BS.pack (dbn sargs) <> " " )
-            -- execute_ conn "set bytea_output='hex'"
-            postgresOps
+  case schemaN of
+      "code" -> codeOps
+      i -> postgresOps
 
 loadSchema smvar schemaN user auth plugList =
   keyTables smvar (schemaN,user) auth plugList
