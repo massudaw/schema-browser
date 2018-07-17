@@ -223,9 +223,10 @@ setup smvar bstate plugList w = void $ do
 
 
 
-listDBS ::  InformationSchema -> Text -> Dynamic (Tidings (M.Map Text (Int,Text)))
-listDBS metainf db = do
+listDBS ::  InformationSchema -> Tidings (Maybe Int) -> Text -> Dynamic (Tidings (M.Map Text (Int,Text)))
+listDBS metainf userId db = do
   dbvar <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
+  privileges <- transactionNoLog metainf (selectFrom "catalog_schema_privileges"  Nothing Nothing []  mempty)
   let
     schemas schemasTB =  M.fromList $  liftA2 (,) sname  (liftA2 (,) sid stype) <$> F.toList  schemasTB
       where
@@ -235,7 +236,7 @@ listDBS metainf db = do
         unint (TB1 (SNumeric s))= s
         untxt (TB1 (SText s))= s
         untxt (LeftTB1 (Just (TB1 (SText s))))= s
-  return (schemas  <$> collectionTid dbvar)
+  return ((\i j u-> maybe M.empty (\u -> M.filterWithKey (\k v -> isJust $ G.lookup (G.Idex [int u,int (fst v)]) j) (schemas i) ) u )  <$> collectionTid dbvar <*> collectionTid privileges <*> userId)
 
 loginWidget userI passI =  do
     usernamel <- flabel # set UI.text "Usuário"
@@ -278,18 +279,20 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
   let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
-  cookieUser <- currentValue . facts $  (loginCookie)
+  cookieUser <- currentValue . facts $  loginCookie
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   logInB <- UI.button # set UI.text "Log In" # set  UI.class_ "btn btn-primary"
   loadE <- UI.click logInB
   login <- UI.div # set children widE # set UI.class_ "row"
   authBox <- UI.div # set children [login ,logInB]
-  orddb  <- ui $ transactionNoLog metainf ((selectFromTable "schema_ordering"  Nothing Nothing []  mempty ))
+  orddb  <- ui $ transactionNoLog metainf (selectFromTable "schema_ordering"  Nothing Nothing []  mempty )
   let
-    ordRow map orderMap inf =  field
-      where
-        field =  lookAttr' "usage" <$> G.lookup pk orderMap
-        pk = idex metainf "schema_ordering" [ ("schema",int $ fst $ fromJust $ M.lookup inf map )]
+    ordRow map orderMap inf =  do
+        schId <- M.lookup inf map
+        let pk = idex metainf "schema_ordering" [("schema",int $ fst schId  )]
+        row <- G.lookup pk orderMap
+        return $ lookAttr' "usage" row
+
     formLogin = form widT loadE
     db = T.pack $ dbn sargs
     buttonString k = do
@@ -297,22 +300,18 @@ databaseChooser cookies smvar metainf sargs plugList init = do
       chkE <- UI.checkedChange b
       return (b,chkE)
 
-  dbs <- ui $ listDBS  metainf  db
-  dbsInit <- currentValue (M.keys <$> facts dbs)
-  dbsWPre <- checkDivSetTGen
-              dbsInit
-              (ordRow <$> dbs <*> collectionTid orddb)
-              (S.fromList <$> init )
-              buttonString
-              (pure (\i o -> Just $ do
-                check <- element o # set UI.style [("margin-top","5px")]
-                l <- UI.span # set text (T.unpack  i) # set UI.class_ "btn btn-default"
-                UI.label  # set children [check,l] # set UI.class_ "btn btn-warning" # set UI.style [("padding","1px"),("display","flex"),("flex-flow","row")]))
-  let dbsW = TrivialWidget ((\i j ->  (\k -> justError (" no schema" <> show (k,j)) $ (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> (S.toList <$> triding dbsWPre) <*> dbs) (getElement dbsWPre)
-  cc <- currentValue (facts $ triding dbsW)
-  let dbsWE = rumors $ triding dbsW
-  dbsWT <-  ui $stepperT cc dbsWE
-  (schemaE,schemaH) <- ui newEvent
+  let
+    schemaStyle i o = do
+      check <- element o # set UI.style [("margin-top","2px")]
+      l <- UI.span
+        # set text (T.unpack  i)
+        # set UI.class_ "btn btn-default"
+        # set UI.style [("padding","2px")]
+      UI.label
+        # set children [check,l]
+        # set UI.class_ "btn btn-warning"
+        # set UI.style [("padding","1px"),("display","flex"),("flex-flow","row")]
+
   w <- askWindow
   metainf <- liftIO $ metaInf smvar
   let
@@ -333,7 +332,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
             loadSchema smvar schemaN user authMap plugList
     tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
 
-  logOutB <- UI.button # set UI.text "Log Out" # set UI.class_ "btn btn-primary"
+  logOutB <- UI.button # set UI.class_ "col-xs-6" # set UI.text "Log Out" # set UI.class_ "btn btn-primary"
   logOutE <- UI.click logOutB
 
   loggedUser <- ui $ mdo
@@ -341,14 +340,30 @@ databaseChooser cookies smvar metainf sargs plugList init = do
     newLogOut <- mapEventDyn (fmap join . traverse invalidateCookie) (facts user <@ logOutE)
     user <- accumT cookieUser  (unionWith (.) (const <$> newLogIn) (const <$> newLogOut) )
     return user
-  loggedUserD <- UI.div # sink text (maybe "" (T.unpack . userName . client) <$> facts loggedUser )
+
+  dbs <- ui $ listDBS metainf  (fmap (userId .client) <$>  loggedUser) db
+  dbsWPre <- checkDivSetTGen'
+              (M.keys <$> dbs)
+              (ordRow <$> dbs <*> collectionTid orddb)
+              (S.fromList <$> init )
+              buttonString
+              (pure (schemaStyle))
+  let dbsW = TrivialWidget ((\i j ->  catMaybes $(\k ->  (db, ) . (k,)<$> M.lookup k j )<$> i ) <$> (S.toList <$> triding dbsWPre) <*> dbs) (getElement dbsWPre)
+  cc <- currentValue (facts $ triding dbsW)
+  let dbsWE = rumors $ triding dbsW
+  dbsWT <-  ui $stepperT cc dbsWE
+
+  loggedUserD <- UI.div # set UI.class_ "col-xs-6" # sink text (maybe "" (T.unpack . userName . client) <$> facts loggedUser )
   loggedBox <- UI.div #  set children [loggedUserD,logOutB] # set UI.class_ "col-xs-2"
   element authBox # sink UI.style (noneShow . isNothing <$> facts loggedUser)
-  element loggedBox # sink UI.style (noneShow . isJust <$> facts loggedUser)
-  userLogg <- UI.div # set children [authBox ] # set UI.class_ "col-xs-122 pull-right"
   chooserT <- traverseUI ui $ tryCreate  <$> loggedUser   <*>dbsWT
-  element dbsW # set UI.class_ "col-xs-10"# set UI.style [("display","flex"),("flex-flow","row wrap")]
-  schemaSel <- UI.div  # set children [getElement dbsW, loggedBox] # set UI.class_ "col-xs-12" # sink UI.style (noneShow . isJust <$> facts loggedUser)
+  element dbsW
+      # set UI.class_ "col-xs-10"
+      # set UI.style [("display","flex"),("flex-flow","row wrap")]
+  schemaSel <- UI.div
+      # set children [getElement dbsW, loggedBox]
+      # set UI.class_ "col-xs-12"
+      # sink UI.style (noneShow . isJust <$> facts loggedUser)
   return (chooserT,[schemaSel ,authBox])
 
 createVar :: IO (TVar DatabaseSchema)

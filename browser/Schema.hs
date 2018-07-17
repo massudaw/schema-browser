@@ -98,11 +98,12 @@ keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit sche
 keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        schemaVar <- liftIO$ readTVarIO schemaRef
        let conn = schemaConn schemaVar
-           schemaId = justLookH schema (schemaNameMap schemaVar)
+           -- schemaId = justLookH schema (schemaNameMap schemaVar)
        let ops  = authMap schema
-       color <- liftIO$ query conn "SELECT color FROM metadata.schema_style where schema = ? " (Only schemaId )
-       uniqueMap <- liftIO$ fmap (\(toid,t,c,op,mod,tr) -> ((t,c), (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def (toid) )) ) <$>  query conn "select t.oid ,o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o join metadata.tables t on o.table_name = t.table_name and o.table_schema = t.schema_name  left join metadata.table_translation tr on o.column_name = tr.column_name   where table_schema = ? "(Only schema)
-       res2 <- liftIO$ fmap (\i@(t,c,j,k,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,d,z,b,typ)) ) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
+       [Only schemaId] <- liftIO $ query  conn "SELECT oid FROM metadata.schema where name = ?" (Only schema)
+       color <- liftIO$ query conn "SELECT color FROM metadata.schema_style where schema = ? " (Only schemaId)
+       uniqueMap <- liftIO$ fmap (\(toid,t,c,op,mod,tr) -> ((t,c), (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def toid ))) <$>  query conn "select t.oid ,o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o join metadata.tables t on o.table_name = t.table_name and o.table_schema = t.schema_name  left join metadata.table_translation tr on o.column_name = tr.column_name   where table_schema = ? "(Only schema)
+       res2 <- liftIO$ fmap (\i@(t,c,j,k,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,d,z,b,typ))) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = typeTransform ops <$> HM.fromList keyList
@@ -128,7 +129,6 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        res <- liftIO$ lookupPK <$> query conn "SELECT oid,t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
 
        resTT <- liftIO$ fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM metadata.tables where schema_name = ? " (Only schema)
-
        let
         schemaForeign :: Query
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
@@ -255,7 +255,7 @@ logUndoModification inf (RevertModification id ip) = do
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
       ltime =  utcToLocalTime utc time
-  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (fromJust . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
+  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
   let modt = lookTable (meta inf)  mod
   return ()
 

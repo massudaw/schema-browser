@@ -295,7 +295,7 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go l
       -- go (PrimColl (IProd _ i,op)) | traceShow ("Right",(i,op,(`atMay` i) v),maybe True (match op .Right) $ (`atMay` i) v) False =  undefined
-      go (PrimColl (Inline i,op)) = match (fromJust $ M.lookup i $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
+      go (PrimColl (Inline i,op)) = match (justError ("cant find " ++ show i) $ M.lookup i $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
   match (WherePredicate a)  (Left (TBIndexNode v)) = F.all id $ fst $ go a ([],[] `cinterval`  [])
     where
       -- Index the field and if not found return true to row filtering pass

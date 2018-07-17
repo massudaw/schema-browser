@@ -3,6 +3,7 @@ module ClientAccess where
 
 import Control.Monad.Reader
 import Data.Bifunctor (first)
+import Utils
 import Safe
 import qualified Data.ExtendedReal as ER
 import Graphics.UI.Threepenny hiding (meta)
@@ -147,7 +148,7 @@ instance DecodeTable User where
   isoTable = iassoc
     (isoArrow (\(i,j) -> User i j ,\(User i j ) -> (i,j)))
     (identity  <$$> prim "oid")
-    (IsoArrow fromJust Just <$$> prim "usename")
+    (IsoArrow (justError "always Just") Just <$$> prim "usename")
 
 time = TB1  . STime . STimestamp
 

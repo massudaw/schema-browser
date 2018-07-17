@@ -174,6 +174,33 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
+checkDivSetTGen'
+  :: (Show a ,Ord b ,Ord a,Eq a)
+  => Tidings [a]
+  -> Tidings (a -> b)
+  -> Tidings (S.Set a)
+  -> (a -> UI (Element,Event Bool))
+  -> Tidings (a -> Element  -> UI Element)
+  -> UI (TrivialWidget (S.Set a))
+checkDivSetTGen' ks sort binit   el st = do
+  (ce,ch) <- ui newEvent
+  w <- askWindow
+  buttonsT <- ui $ accumDiff (\b -> runUI w $ do
+    (i,(e,ev)) <- (\k -> (k,) <$> el k) b
+    let evs =  (\ab -> if not ab then S.delete i else S.insert i)  <$> ev
+    ui$ onEventIO evs ch
+    UI.div # sink items ((\f -> pure <$> f b e) <$> facts st)
+    ) (S.fromList <$> ks)
+  vini <- currentValue (facts binit)
+  let evs = unionWith (.) (const <$> rumors binit) ce
+  bv <- ui $ accumT vini  evs
+  -- Place sorted Itens
+  let sortButtons nbuttons f sel =  snd <$> L.sortBy (flip $ comparing ((\i -> (L.elem i sel, f  i) ). fst)) nbuttons
+      buttonsStyle = M.toList <$> buttonsT
+  dv <- UI.div # sink children (facts $ sortButtons <$>  buttonsStyle <*> sort <*> bv)
+  return (TrivialWidget bv dv)
+
+
 checkDivSetTGen :: (Ord b ,Ord a,Eq a)
       => [a]
       -> Tidings (a -> b)
@@ -191,10 +218,10 @@ checkDivSetTGen ks sort binit   el st = do
   dv <- UI.div
   onChanges (facts st) $ (\sti -> do
     nbuttons <- mapM fromJust . filter isJust . fmap (\(k,(v,_)) -> fmap (k,) <$> sti k v) $  buttons
+    mapM (\(k,e) -> element (fst e) # sinkDiff UI.checked (S.member k <$> bv)) buttons
     let sortButtons sti f sel =  fmap snd $ L.sortBy (flip $ comparing (\i -> (L.elem (fst i) sel,). f . fst $ i )) $nbuttons
     element dv # sink children (facts $ sortButtons <$>  pure nbuttons <*> sort <*> bv))
   -- Sink check state to elems
-  mapM (\(k,e) -> element (fst e) # sinkDiff UI.checked (S.member k <$> bv)) buttons
   return (TrivialWidget bv dv)
 
 
@@ -723,6 +750,8 @@ accumDiffMapCounter :: Ord k =>
      -> Tidings (M.Map k b)
      -> Dynamic
           (Tidings (M.Map k c))
+
+accumDiffMap f = accumDiffMapCounterIni 0 (const f)
 
 accumDiffMapCounter = accumDiffMapCounterIni 0
 

@@ -83,11 +83,11 @@ transformKPrim
 transformKPrim (KSerial :i)  (KOptional :j) (LeftTB1 v)  = LeftTB1 $ transformKPrim i j <$> v
 transformKPrim (KOptional :i)  (KSerial :j) (LeftTB1 v)  = LeftTB1 $ transformKPrim i j <$> v
 transformKPrim (KOptional :j) l (LeftTB1 v)
-    | isJust v = transformKPrim j l (fromJust v)
-    | otherwise = error "no transform optional nothing"
+  | isJust v = transformKPrim j l (justError " no prim" v)
+  | otherwise = error "no transform optional nothing"
 transformKPrim (KSerial :j)  l (LeftTB1 v)
-    | isJust v = transformKPrim j l (fromJust v)
-    | otherwise =  LeftTB1 Nothing
+  | isJust v = transformKPrim j l (justError " no prim" v)
+  | otherwise =  LeftTB1 Nothing
 transformKPrim i (KOptional :j ) v  | i == j = LeftTB1 . Just $ (transformKPrim i j v)
 transformKPrim i (KSerial :j ) v  | i == j = LeftTB1 . Just $ (transformKPrim i j v)
 transformKPrim i (KArray :j ) v  | i == j  = ArrayTB1 . pure $ transformKPrim i j v

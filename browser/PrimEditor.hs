@@ -7,6 +7,7 @@ module PrimEditor where
 import PStream
 import Types.Patch
 import Safe
+import Utils
 import RuntimeTypes
 import Control.Monad
 import Control.Applicative
@@ -81,7 +82,7 @@ instance (Patch a ,Patch b ,PrimEditor a,PrimEditor b) => PrimEditor (a,b) where
     TrivialWidget (liftA2 (,)<$> triding f <*> triding s) <$> horizontal [getElement f,getElement s]
 
 instance PrimEditor () where
-  primEditor  i = fmap Just <$> buttonAction (fromJust <$> i)
+  primEditor  i = fmap Just <$> buttonAction (justError "const prim" <$> i)
 
 instance Patch Double where
   type Index Double = Double
