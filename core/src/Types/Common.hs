@@ -542,9 +542,10 @@ aattr (IT _ i) = go i
 instance Ord a => Ord (Interval.Interval a) where
   compare i j = compare (Interval.upperBound i) (Interval.upperBound j)
 
+instance Ord k => Semigroup (KV k a) where
+  (KV i) <> (KV j) = KV (Map.union i j)
 instance Ord k => Monoid (KV k a) where
   mempty = KV Map.empty
-  mappend (KV i) (KV j) = KV (Map.union i j)
 
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
 recLookup p@(Inline l) v = _tbattr <$> kvLookup (S.singleton p) v

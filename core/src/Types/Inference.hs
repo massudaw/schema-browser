@@ -89,7 +89,7 @@ typeBool :: Type
 typeBool = TCon ( AtomicPrim PBoolean)
 
 newtype TypeEnv = TypeEnv (Map.Map Var Scheme)
-  deriving Monoid
+  deriving (Semigroup,Monoid)
 
 data Unique = Unique { count :: Integer }
 

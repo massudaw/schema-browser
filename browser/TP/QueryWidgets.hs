@@ -1161,7 +1161,6 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       -- On click select
       (eSelector,hSelector) <- ui newEvent
       selectT <- ui $ calmT =<< stepperT False  eSelector
-
       let
         reflectRels = filter ((`L.elem` ifk). _relOrigin) rel
         filterReflect m = filter (\k  -> _relOrigin (justError "no head notreflect" . safeHead $ F.toList (index k)) `L.elem` fmap _relOrigin reflectRels  ) m

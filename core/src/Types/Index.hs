@@ -337,12 +337,15 @@ instance Applicative ER.Extended where
   pure  = ER.Finite
   ER.Finite i <*>  ER.Finite j = ER.Finite $ i j
 
-instance Predicates (TBIndex  a )  => Monoid (G.GiST (TBIndex  a)  b) where
-  mempty = G.empty
-  mappend i j
+instance Predicates (TBIndex  a )  => Semigroup (G.GiST (TBIndex  a)  b) where
+  i <> j
     | G.size i < G.size j = ins  j (getEntries i )
     | otherwise  = ins  i (getEntries j )
     where ins = foldl' (\j i -> G.insertL i indexParam j)
+
+
+instance Predicates (TBIndex  a )  => Monoid (G.GiST (TBIndex  a)  b) where
+  mempty = G.empty
 
 indexParam :: (Int,Int)
 indexParam = (4,8)

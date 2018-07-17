@@ -500,9 +500,10 @@ instance (Ord a, Show a, Patch a) => Patch (FTB a) where
   createIfChange = either (\e -> Nothing) Just . createUndoFTBM
   patch = patchFTB patch
 
+instance Semigroup Showable where
+  i <> j = j
+
 instance Monoid Showable where
-  mempty = error "no empty showable"
-  mappend i j = j
 
 instance Patch () where
   type Index () = ()

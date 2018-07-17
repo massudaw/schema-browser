@@ -44,10 +44,11 @@ newtype TBPredicate k a
 instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
+instance Semigroup (WherePredicateK k) where
+  (WherePredicate i) <> (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
 instance Monoid (WherePredicateK k) where
   mempty = WherePredicate (AndColl [])
-  mappend (WherePredicate i) (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
 
 data Parser m s a b = P s (m a b) deriving Functor
@@ -123,6 +124,9 @@ instance KeyString Key where
 instance KeyString Text where
   keyString = id
 
+instance Eq a => Semigroup (Union a ) where
+  (Many j) <> (Many i) = Many (i <> j)
+
 instance Eq a => Monoid (Union a ) where
   mempty = Many []
   mappend (Many j) (Many i) = Many (i <> j)
@@ -146,6 +150,8 @@ instance  (Monoid s,Alternative (a i)) => Alternative (Parser a s i ) where
 instance (Monoid s ,Applicative (a i) , IsString m) => IsString (Parser a s i m) where
   fromString s = pure (fromString s)
 
+instance (Semigroup s ,Monad e ) => Semigroup (Parser (Kleisli e) s a m) where
+  (P i  (Kleisli l)) <> (P j (Kleisli m) ) =  P (i <> j) (Kleisli (\i -> l i >>   m i ))
+
 instance (Monoid s ,Monad e ) => Monoid (Parser (Kleisli e) s a m) where
-  mappend (P i  (Kleisli l)) (P j (Kleisli m) ) =  P (mappend i j) (Kleisli (\i -> l i >>   m i ))
 

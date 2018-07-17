@@ -122,7 +122,7 @@ setup smvar bstate plugList w = void $ do
       (sidebar,calendarT) <- calendarSelector
       tbChooser <- UI.div
           # set UI.class_ "col-xs-2"
-          # set UI.style ([("height","85vh"),("overflow-y","hidden")] ++ borderSchema inf)
+          # set UI.style ([("height","82vh"),("overflow-y","hidden")] ++ borderSchema inf)
           # set children [sidebar,posSel ^._1,getElement bset]
           # sink0 UI.style (facts $ noneShow <$> triding menu)
       let cliTables = (fmap (!!six) <$> cliTid)
@@ -192,7 +192,7 @@ setup smvar bstate plugList w = void $ do
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
-      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","85vh"),("overflow-y","auto")] ++ borderSchema inf)
+      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","82vh"),("overflow-y","auto")] ++ borderSchema inf)
                        # sink0 UI.class_ (facts $ expand <$> triding menu)
       element body # set children [tbChooser,bd]
       return tfilter
@@ -204,11 +204,7 @@ setup smvar bstate plugList w = void $ do
     ch <- UI.click h
     onEvent ch $ (\_ -> liftIO $ hdbl True)
     return h ) (S.fromList <$> evDB)
-  schemaH <- UI.div
-  hoverE <- hoverTip schemaH
-  hoverT <- ui $ stepperT True (unionWith const edbl hoverE)
   let
-    displayH =  (||) <$> hoverT <*> (L.null <$> evDB)
     style True = UI.span # set UI.class_ "glyphicon glyphicon-collapse-up"
     style False = UI.span # set UI.class_ "glyphicon glyphicon-expand"
   header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-11"
@@ -216,7 +212,8 @@ setup smvar bstate plugList w = void $ do
   (layouth,top) <- layoutSel' onShiftAlt  merged
   element layouth
     # set UI.class_ "col-xs-1"
-  element schemaH # set children [layouth,header] # set UI.class_ "row"
+  schemaH <- UI.div
+      # set children [layouth,header]
   addBody [schemaH,top]
 
 
