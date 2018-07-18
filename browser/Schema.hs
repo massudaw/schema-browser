@@ -173,7 +173,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (fmap liftFun r)) table) ref
              where
                ref =  M.lookup (tableName table) functionsRefs
-               liftFun (FunctionField k s a) =   FunctionField (lookupKey' (sKeyMap ts) tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
+               liftFun (FunctionField k s a) = FunctionField (lookupKey' (sKeyMap ts) tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
                tn = tableName table
                ts = rawSchema table
 

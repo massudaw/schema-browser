@@ -455,8 +455,7 @@ data OverloadedRule
 
 data SchemaEditor
   = SchemaEditor
-  {
-   patchEd :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
+  { patchEd :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
   , insertEd :: KVMetadata Key -> TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]

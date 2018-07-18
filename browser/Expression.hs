@@ -50,7 +50,8 @@ parseFunction =  do
 
 callFunction :: Connection -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (FTB Showable)
 callFunction conn fun ty inp = do
-  Only i <- L.head <$> query conn (fromString $ " SELECT to_json(" ++ fun ++ ")" ) (L.zip (fst ty) inp)
+  let func = fromString $ " SELECT to_json(" ++ fun ++ ")"
+  Only i <- L.head <$> queryLogged conn func (L.zip (fst ty) inp)
   return $ either (error "cant parse" ) id $  A.parseEither (fmap fst . codegent . parseShowableJSON parsePrimitiveJSON  (snd ty)) i
 
 multProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5,a6+b6,a7+b7)
@@ -83,7 +84,7 @@ replaceAny l (TCon i ) =  TCon i
 ops = (\((inp,out),_) -> Forall [TV "a"]  $ L.foldr TArr ( replaceAny (TVar (TV "a")) . ktypeToType  $ out ) (replaceAny (TVar (TV "a")). ktypeToType <$> inp) ) <$> funmap
 
 renderPostgres :: Expr -> String
-renderPostgres = go 
+renderPostgres = go
   where
     go :: Expr -> String
     go (Function i e) = T.unpack i ++ "(" ++  L.intercalate "," ( fmap  go   e) ++ ")"

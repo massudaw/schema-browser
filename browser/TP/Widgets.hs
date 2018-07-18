@@ -23,8 +23,32 @@ import Data.Maybe
 import Control.Concurrent
 import Utils
 
-instance Widget (TrivialWidget  a) where
-    getElement (TrivialWidget t e) = e
+class WidgetLayout a where
+  getLayout :: a  -> Tidings (Int,Int)
+
+class WidgetValue t  where
+  getTidings ::  t a  -> Tidings a
+
+data LayoutWidget a =
+  LayoutWidget  (Tidings a) Element (Tidings (Int,Int))
+
+instance WidgetLayout (LayoutWidget a) where
+  getLayout (LayoutWidget _ _ l ) = l
+
+instance WidgetValue LayoutWidget  where
+  getTidings (LayoutWidget t _ _ ) = t
+
+instance Widget (LayoutWidget a ) where
+  getElement (LayoutWidget _ e _ ) = e
+
+data TrivialWidget a =
+  TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
+
+instance WidgetValue TrivialWidget where
+  getTidings (TrivialWidget t _  ) = t
+
+instance Widget (TrivialWidget a) where
+  getElement (TrivialWidget t e ) = e
 
 instance Semigroup a => Semigroup (Event a) where
   i <> j = unionWith (<>) i j
@@ -33,14 +57,13 @@ instance Semigroup a => Monoid (Event a) where
   mempty = never
   mappend i j =  i <>  j
 
-data TrivialWidget a =
-    TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
+
 
 instance Functor TrivialWidget where
     fmap = trmap
 
 {-# NOINLINE[1] trmap #-}
-trmap f (TrivialWidget e j) = TrivialWidget (fmap f e) j
+trmap f (TrivialWidget e j  ) = TrivialWidget (fmap f e) j
 
 {-# RULES
 "trmap/trmap" forall f g xs . trmap f (trmap g xs) = trmap (f . g) xs
@@ -199,7 +222,7 @@ checkDivSetTGen' ks sort binit   el st = do
   let sortButtons nbuttons f sel =  snd <$> L.sortBy (flip $ comparing ((\i -> (L.elem i sel, f  i) ). fst)) nbuttons
       buttonsStyle = M.toList <$> buttonsT
   dv <- UI.div # sink children (facts $ sortButtons <$>  buttonsStyle <*> sort <*> bv)
-  return (TrivialWidget bv dv)
+  return (TrivialWidget bv dv )
 
 
 checkDivSetTGen :: (Ord b ,Ord a,Eq a)

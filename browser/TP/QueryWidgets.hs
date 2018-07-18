@@ -252,7 +252,7 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
     go  (i:l) = case i of
       KOptional  ->  go l
       KSerial  -> go l
-      KArray  -> let (i1,i2) = go l in (i1+1,i2*8)
+      KArray  -> let (i1,i2) = go l in (i1,i2*8)
       KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
 getRelOrigin :: [Column k () ] -> [k ]
@@ -318,12 +318,13 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
   return $ TrivialWidget insertT  (getElement attrUI)
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    recoverT (i,j) = liftA2 (\i j -> join (applyIfChange i j) <|> (join $ createIfChange j) <|> i ) j i
+    recoverT (i,j) = liftA2 (\i j -> traceShow (i,j) $ join (applyIfChange i j) <|> (join $ createIfChange j) <|> i ) j i
+    search i | traceShow i False = undefined
     search (Inline t) = fmap (fmap _tbattr) . recoverT <$> M.lookup (S.singleton  (Inline t)) wl
     search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverT <$> M.lookup (S.fromList t)  wl
-    refs = sequenceA $ catMaybes $ search <$> snd rel
+    refs = sequenceA . catMaybes $ search <$> traceShowId (snd rel)
 
-  funinp <- traverseUI ( traverse (liftIO. evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)). allMaybes ) refs
+  funinp <- traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
   return $ TrivialWidget (diff' <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
@@ -1096,7 +1097,7 @@ buildPrim fm tdi i
 oneInput :: KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
 oneInput i tdi = do
     v <- currentValue (facts tdi)
-    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","120px")]
+    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
     onCE <- UI.onChangeE inputUI
     let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
     -- liftUILater $ runFunctionDelayed inputUI ( ffi"var fun = function(){this.style.width = (this.value.length + 1) + 'ch'};fun.call(%1);" inputUI)
@@ -1135,8 +1136,6 @@ iUITableDiff
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
-
-
 
 
 fkUITablePrim ::
@@ -1211,16 +1210,16 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
                 return ()
               )
           pan <- UI.div
-            # set UI.class_ "col-xs-10 fixed-label"
+            # set UI.class_ "col-xs-11 fixed-label"
             # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
             # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
           panClick <- UI.click pan
           ui $ onEventIO panClick (\ _ -> hSelector True)
-          (nav,inp,celem) <- edit
+          (nav,celem) <- edit
           element nav
-            # set UI.class_ "col-xs-2"
+            # set UI.class_ "col-xs-1"
           hidden <- UI.div
-            # set children [inp,celem]
+            # set children celem
             # set UI.class_ "col-xs-12"
           return [nav,pan,hidden]
         selector True = do
@@ -1295,17 +1294,19 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             projectEdit = fmap (fmap replaceKeyP . join . fmap (maybe Keep Diff . unLeftItensP ))
             projectValue = fmap (fmap replaceKey .join . fmap unLeftItens)
 
+          nav <- openClose dblClickT
+{-
           prev <- mapM (\r -> do
             let a = Attr (alterKeyType (\(Primitive i j) -> Primitive [] j  ) $ _relOrigin r) (TB1 ())
             el <- tbCaseDiff inf targetTable mempty a mempty mempty (join . fmap (M.lookup (S.singleton $ Inline $ _relOrigin r ) ._kvvalues.tableNonRef .fst.unTBRef)  <$> ftdi)
             v <- labelCaseDiff inf a (triding el)
             UI.div # set children [getElement v,getElement el] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))) rel
-          nav <- openClose dblClickT
           inp <- UI.div
              # set children prev
              # set UI.class_ "row"
              # sink  UI.style (noneShow  <$> facts (triding nav))
              # set style [("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
+-}
           TrivialWidget pretdi celem <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods)) targetTable  tdi
           let
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
@@ -1317,7 +1318,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             when (olde /= fmap snd i) $ do
               heleditu $ (fmap snd i)
             )
-          return (getElement nav,inp,celem)
+          return (getElement nav,[celem])
         -- merge i j | traceShow (i,j) False = undefined
         merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (filterReflect i,j)
         merge _ Keep = Keep

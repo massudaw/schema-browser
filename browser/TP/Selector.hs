@@ -254,7 +254,6 @@ multiSelector
      -> UI (TrivialWidget [TBData Key Showable])
 multiSelector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
-  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   (tds ,el) <- multiSelectListUI inf table itemListEl predicate reftb [] tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"
   return (TrivialWidget tds itemSel)
@@ -269,7 +268,6 @@ selector
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 selector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
-  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   (tds ,el) <- selectListUI inf table itemListEl predicate reftb [] tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"
   return (TrivialWidget tds itemSel)
