@@ -498,6 +498,35 @@ rowTableHeaders  ftb = do
   els <- mapM label srefs
   UI.tr # set children (ixE : operation : els)
 
+validateRow ::
+     InformationSchema
+  -> Table
+  -> [( S.Set (Rel CoreKey)
+      , ( TrivialWidget (Editor (PathAttr CoreKey Showable))
+        , Tidings (Maybe (Column CoreKey Showable))))]
+  -> Tidings (Editor (TBIdx CoreKey Showable))
+validateRow inf table fks =
+  ifValid <$>
+  sequenceTable fks <*>
+  isValid fks
+  where
+    ifValid i j =
+      if isJust j
+        then i
+        else Keep
+    sequenceTable fks =
+      reduceTable <$> Tra.sequenceA (triding . fst . snd <$> fks)
+    defTable = defaultTableType inf table
+    isValid fks = fmap sequenceA $ sequenceA (checkDefaults <$> fks)
+    checkDefaults (k, (r, i)) = liftA2 applyDefaults i (triding r)
+      where
+        applyDefaults i j =
+          join (applyIfChange i j) <|> (join $ createIfChange (def j)) <|> i
+        def (Diff i) =
+          Diff $
+          maybe i (\a -> head $ compact [a, i]) $
+          L.find (\a -> index a == k) defTable
+        def Keep = maybe Keep Diff $ L.find (\a -> index a == k) defTable
 
 rowTableDiff
   :: InformationSchema
@@ -523,16 +552,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
     srefs :: [(Set (Rel Key),TB Key ())]
     srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> (resdiff <> plmods)
-    sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
-    defTable = defaultTableType inf table
-    isValid fks = fmap sequenceA $  sequenceA (check <$> fks)
-    check (k,(r,i)) = liftA2 applyDefaults i (triding r)
-            where
-              applyDefaults i j = join (applyIfChange i j) <|> (join $ createIfChange (def j)) <|> i
-              def (Diff i ) = Diff $ maybe i (\a -> head $ compact [a,i]) $ L.find (\a -> index a == k)  defTable
-              def Keep = maybe Keep Diff $ L.find (\a -> index a == k)  defTable
 
-    sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
     isSum = rawIsSum table
   (listBody,output) <- if isSum
     then
@@ -540,11 +560,10 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
     else  do
       fks <- buildFKS inf True UI.td constr table refs plugmods oldItems srefs
       listBody <- UI.tr # set children (ixE :operation:( getElement .fst . snd  <$> fks))
-      return (listBody,(\i j ->if isJust j then i else Keep )<$> sequenceTable fks <*> isValid fks)
+      return (listBody, validateRow inf table fks)
   element listBody
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
   let out = output
-  --out <- ui $ calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (join $ applyIfChange j i))  <$> output <*> oldItems
 
   reftb <- ui $ refTables inf table
   (outI ,_)<- processPanelTable listBody inf reftb  out table preOldItems
@@ -576,22 +595,12 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   let isSum = rawIsSum table
   (listBody,output) <- if isSum
     then
-        anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
+      anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
     else  do
       fks <- buildFKS inf isSum UI.div constr table refs plugmods oldItems srefs
       mapM (\(s,(i,_)) -> element (getElement  i) #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (fromJust $ M.lookup s(M.fromList srefs))))) fks
-      let sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
-          sequenceTable fks = reduceTable <$> Tra.sequenceA (triding .fst . snd <$> fks)
-          defTable = defaultTableType inf table
-          isValid fks =  sequenceA <$>  sequenceA (check  <$> fks)
-          check (k,(r,i)) = liftA2 applyDefaults i (triding r)
-            where
-              applyDefaults i j = join (applyIfChange i j) <|> (join $ createIfChange (def j)) <|> i
-              def (Diff i ) = Diff $ maybe i (\a -> head $ compact [a,i]) $ L.find (\a -> index a == k)  defTable
-              def Keep = maybe Keep Diff $ L.find (\a -> index a == k)  defTable
-
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
-      return (listBody,(\i j ->if isJust j then i else Keep )<$> sequenceTable fks <*> isValid fks)
+      return (listBody,validateRow inf table fks)
   element listBody
     # set UI.class_ "row"
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -1115,11 +1124,11 @@ oneInput i tdi = do
     v <- currentValue (facts tdi)
     inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
     onCE <- UI.onChangeE inputUI
-    let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
-    -- liftUILater $ runFunctionDelayed inputUI ( ffi"var fun = function(){this.style.width = (this.value.length + 1) + 'ch'};fun.call(%1);" inputUI)
-    pkt <- ui $ stepperT v  pke
-    -- onChanges (facts pkt)  $ (\_ -> liftUILater $ runFunctionDelayed inputUI ( ffi"var fun = function(){this.style.width = (this.value.length + 1) + 'ch'};fun.call(%1);" inputUI))
-    return $ TrivialWidget pkt inputUI
+    let pke = unionWith const  (decode  <$> onCE) (Right <$> rumors tdi)
+        decode v =maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
+    pkt <- ui $ stepperT (Right v) pke
+    element inputUI # sinkDiff UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> pkt)
+    return $ TrivialWidget (either (const Nothing) id <$> pkt) inputUI
 
 
 inlineTableUI

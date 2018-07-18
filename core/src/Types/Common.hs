@@ -597,7 +597,7 @@ indexerRel :: Text -> Rel Text
 indexerRel field =
   L.head $
   foldr
-    (\i j -> RelAccess (Inline <$> i) <$> j)
+    (\i -> fmap (RelAccess (Inline <$> i) ))
     (Inline <$> last vec)
     (init vec)
   where
