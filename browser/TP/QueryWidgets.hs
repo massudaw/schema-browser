@@ -13,6 +13,7 @@ module TP.QueryWidgets (
     metaTable,
     ) where
 
+import Data.Tuple
 import Debug.Trace
 import Safe
 import qualified Data.Functor.Contravariant as C
@@ -318,11 +319,9 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
   return $ TrivialWidget insertT  (getElement attrUI)
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    recoverT (i,j) = liftA2 (\i j -> traceShow (i,j) $ join (applyIfChange i j) <|> (join $ createIfChange j) <|> i ) j i
-    search i | traceShow i False = undefined
-    search (Inline t) = fmap (fmap _tbattr) . recoverT <$> M.lookup (S.singleton  (Inline t)) wl
-    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverT <$> M.lookup (S.fromList t)  wl
-    refs = sequenceA . catMaybes $ search <$> traceShowId (snd rel)
+    search (Inline t) = fmap (fmap _tbattr) . recoverValue <$> M.lookup (S.singleton  (Inline t)) wl
+    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverValue <$> M.lookup (S.fromList t)  wl
+    refs = sequenceA . catMaybes $ search <$> snd rel
 
   funinp <- traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
@@ -330,6 +329,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
 
 
 
+recoverValue (i,j) = liftA2 (\i j -> join (applyIfChange i j) <|> (join $ createIfChange j) <|> i ) j i
 
 
 select table  = do
@@ -524,6 +524,14 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
     srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> (resdiff <> plmods)
     sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
+    defTable = defaultTableType inf table
+    isValid fks = fmap sequenceA $  sequenceA (check <$> fks)
+    check (k,(r,i)) = liftA2 applyDefaults i (triding r)
+            where
+              applyDefaults i j = join (applyIfChange i j) <|> (join $ createIfChange (def j)) <|> i
+              def (Diff i ) = Diff $ maybe i (\a -> head $ compact [a,i]) $ L.find (\a -> index a == k)  defTable
+              def Keep = maybe Keep Diff $ L.find (\a -> index a == k)  defTable
+
     sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
     isSum = rawIsSum table
   (listBody,output) <- if isSum
@@ -532,7 +540,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
     else  do
       fks <- buildFKS inf True UI.td constr table refs plugmods oldItems srefs
       listBody <- UI.tr # set children (ixE :operation:( getElement .fst . snd  <$> fks))
-      return (listBody,sequenceTable fks)
+      return (listBody,(\i j ->if isJust j then i else Keep )<$> sequenceTable fks <*> isValid fks)
   element listBody
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
   let out = output
@@ -573,9 +581,17 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
       fks <- buildFKS inf isSum UI.div constr table refs plugmods oldItems srefs
       mapM (\(s,(i,_)) -> element (getElement  i) #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (fromJust $ M.lookup s(M.fromList srefs))))) fks
       let sequenceTable :: [(S.Set (Rel CoreKey ) ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
-          sequenceTable fks = (\old difs -> reduceTable difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+          sequenceTable fks = reduceTable <$> Tra.sequenceA (triding .fst . snd <$> fks)
+          defTable = defaultTableType inf table
+          isValid fks =  sequenceA <$>  sequenceA (check  <$> fks)
+          check (k,(r,i)) = liftA2 applyDefaults i (triding r)
+            where
+              applyDefaults i j = join (applyIfChange i j) <|> (join $ createIfChange (def j)) <|> i
+              def (Diff i ) = Diff $ maybe i (\a -> head $ compact [a,i]) $ L.find (\a -> index a == k)  defTable
+              def Keep = maybe Keep Diff $ L.find (\a -> index a == k)  defTable
+
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
-      return (listBody,sequenceTable fks)
+      return (listBody,(\i j ->if isJust j then i else Keep )<$> sequenceTable fks <*> isValid fks)
   element listBody
     # set UI.class_ "row"
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -1266,8 +1282,9 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
               element navMeta # set UI.class_ navSize
               elout <- UI.div # set children [getElement navMeta ,getElement lboxeel]
               esc <- onEsc elout
+              loaded <- ui $ loadItems inf targetTable (triding lboxeel)
               ui $ onEventIO esc (\ _ ->hSelector False)
-              return (TrivialWidget  (triding lboxeel) elout)
+              return (TrivialWidget  loaded elout)
 
           let nevsel = unionWith const (rumors tdi) (rumors $ triding itemList)
           tds <- ui $ stepperT cv nevsel
