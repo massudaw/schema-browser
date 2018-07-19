@@ -27,7 +27,7 @@ class WidgetLayout a where
   getLayout :: a  -> Tidings (Int,Int)
 
 class WidgetValue t  where
-  getTidings ::  t a  -> Tidings a
+  triding ::  t a  -> Tidings a
 
 data LayoutWidget a =
   LayoutWidget  (Tidings a) Element (Tidings (Int,Int))
@@ -36,16 +36,16 @@ instance WidgetLayout (LayoutWidget a) where
   getLayout (LayoutWidget _ _ l ) = l
 
 instance WidgetValue LayoutWidget  where
-  getTidings (LayoutWidget t _ _ ) = t
+  triding (LayoutWidget t _ _ ) = t
 
 instance Widget (LayoutWidget a ) where
   getElement (LayoutWidget _ e _ ) = e
 
 data TrivialWidget a =
-  TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
+  TrivialWidget  (Tidings a) Element
 
 instance WidgetValue TrivialWidget where
-  getTidings (TrivialWidget t _  ) = t
+  triding (TrivialWidget t _  ) = t
 
 instance Widget (TrivialWidget a) where
   getElement (TrivialWidget t e ) = e
@@ -58,6 +58,9 @@ instance Semigroup a => Monoid (Event a) where
   mappend i j =  i <>  j
 
 
+
+instance Functor LayoutWidget where
+  fmap f  (LayoutWidget e j  l) = LayoutWidget (fmap f e) j l
 
 instance Functor TrivialWidget where
     fmap = trmap
@@ -702,6 +705,45 @@ switchManyUI t bool map = do
   let ev =  unionWith const (rumors t) evp
   b <- ui $ stepper ini ev
   return (TrivialWidget (tidings b ev) out)
+
+switchManyLayout
+  :: (Ord a, Show a) =>
+     Tidings a
+     -> Map a (UI (LayoutWidget a1))
+     -> UI (LayoutWidget a1)
+switchManyLayout  bool map = do
+  (evp,h) <- ui newEvent
+  (levp,hl) <- ui newEvent
+  let
+    fun x = do
+      case M.lookup x map of
+        Just i -> do
+          el <- i
+          onChanges (facts (triding el )) (liftIO . h)
+          onChanges (facts (getLayout el)) (liftIO . hl)
+          return el
+        Nothing -> error ("no ix " ++ (show x))
+
+  els <- traverseUI fun bool
+  currentEl <- currentValue (facts els)
+  currentLayout <- currentValue (facts $ getLayout currentEl)
+  currentResult <- currentValue (facts $ triding currentEl)
+  out <- UI.div # sink root (getElement <$> facts els)
+  let ev = evp
+  t <- ui $ stepperT currentResult ev
+  l <- ui $ stepperT currentLayout levp
+  return (LayoutWidget t out l)
+
+
+
+switchUILayout
+  :: Semigroup a1 => Tidings a1
+     -> UI Element
+     -> Tidings Bool
+     -> UI (LayoutWidget a1)
+     -> UI (LayoutWidget a1)
+switchUILayout t def bool next  = switchManyLayout  bool (M.fromList [(True,next),(False , (\i -> LayoutWidget t i (pure (0,0))) <$> def )])
+
 
 
 
