@@ -120,7 +120,7 @@ viewerMode six inf table tix cli cliTid = do
 
   v <- ui $ currentValue (facts tdi)
 
-  cru <- switchManyUI tdi (triding nav) $
+  cru <- switchManyUI (triding nav) $
     M.fromList [
     ("Edit",do
       itemList <- selector inf table reftb (pure Nothing) (safeHead <$> tdi)

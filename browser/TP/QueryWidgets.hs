@@ -380,7 +380,7 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk <- buttonDivSetO (M.keys (unKV k))  (fmap index <$> initialAttr)  marker sumButtom
-      fks <- switchManyUIDiff (const Keep <$> oldItems) (triding chk) fks2
+      fks <- switchManyUI  (triding chk) fks2
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
@@ -662,7 +662,7 @@ openClose open = do
       translate False = "collapse-up"
   nav  <- buttonDivSet [True,False] (fmap Just open)
       (\i -> UI.button
-          # set UI.style [("font-size","smaller"),("font-weight","bolder")]
+          # set UI.style [("font-size","unset"),("font-weight","bolder")]
           # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon glyphicon-" <> translate i))
   return nav
 
@@ -1272,7 +1272,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           let navSize =  "col-xs-" ++ (show $ length availableModes - 1)
               selSize =  "col-xs-" ++ (show $ 12 - (length availableModes - 1))
           itemList <- do
-              lboxeel <- switchManyUI tdi (triding navMeta) (M.fromList
+              lboxeel <- switchManyUI (triding navMeta) (M.fromList
                   [("List" , do
                     itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
                     (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr tdi

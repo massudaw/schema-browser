@@ -128,7 +128,7 @@ setup smvar bstate plugList w = void $ do
       let cliTables = (fmap (!!six) <$> cliTid)
       iniCliTable <- currentValue (facts cliTables)
       ui $ accumDiffCounterIni (maybe 0 (length .table_selection)  iniCliTable) (\ix table->  trackTable (meta inf) (wId w) table six ix) (triding bset)
-      tfilter <-  switchManyUI (pure (buttonStyle,const True)) (triding nav) (M.fromList
+      tfilter <-  switchManyUI  (triding nav) (M.fromList
           [("Map",do
             (m,widget) <-  configExtension inf agendaDef (mapWidget calendarT posSel (triding bset) inf)
             st <- once (fmap (flip elem . fmap (^._2)) m)

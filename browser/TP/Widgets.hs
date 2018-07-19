@@ -656,55 +656,29 @@ calmT t = do
   eCalm <- calmE (New current) (rumors t)
   stepperT current eCalm
 
-switchManyUIDiff
-  :: (Semigroup a1, Ord a, Show a) =>
-     Tidings a1
-     -> Tidings a
-     -> Map a (UI (TrivialWidget a1))
-     -> UI (TrivialWidget a1)
-switchManyUIDiff t bool map = do
-  (evp,h) <- ui newEvent
-  let
-    fun x = do
-      case M.lookup x map of
-        Just i -> do
-          TrivialWidget ts el <- i
-          onChanges (facts ts) (liftIO . h)
-          return el
-        Nothing -> error ("no ix " ++ (show x))
-
-  els <- traverseUI fun bool
-  out <- UI.div # sink root (facts els)
-  ini <- currentValue (facts t)
-  let ev =  unionWith (<>) (rumors t) evp
-  b <- ui $ stepper ini ev
-  return (TrivialWidget (tidings b ev) out)
-
-
-
 switchManyUI
   :: (Ord a, Show a) =>
-     Tidings a1
-     -> Tidings a
+     Tidings a
      -> Map a (UI (TrivialWidget a1))
      -> UI (TrivialWidget a1)
-switchManyUI t bool map = do
+switchManyUI  bool map = do
   (evp,h) <- ui newEvent
   let
     fun x = do
       case M.lookup x map of
         Just i -> do
-          TrivialWidget ts el <- i
-          onChanges (facts ts) (liftIO . h)
+          el <- i
+          onChanges (facts (triding el)) (liftIO . h)
           return el
         Nothing -> error ("no ix " ++ (show x))
 
   els <- traverseUI fun bool
-  out <- UI.div # sink root (facts els)
-  ini <- currentValue (facts t)
-  let ev =  unionWith const (rumors t) evp
-  b <- ui $ stepper ini ev
-  return (TrivialWidget (tidings b ev) out)
+  currentEl <- currentValue (facts els)
+  currentResult <- currentValue (facts $ triding currentEl)
+  out <- UI.div # sink root (getElement <$> facts els)
+  t <- ui $ stepperT currentResult evp
+  return (TrivialWidget t out)
+
 
 switchManyLayout
   :: (Ord a, Show a) =>
@@ -737,23 +711,13 @@ switchManyLayout  bool map = do
 
 
 switchUILayout
-  :: Semigroup a1 => Tidings a1
+  :: Tidings a1
      -> UI Element
      -> Tidings Bool
      -> UI (LayoutWidget a1)
      -> UI (LayoutWidget a1)
-switchUILayout t def bool next  = switchManyLayout  bool (M.fromList [(True,next),(False , (\i -> LayoutWidget t i (pure (0,0))) <$> def )])
+switchUILayout  t def bool next  = switchManyLayout  bool (M.fromList [(True,next),(False , (\i -> LayoutWidget t i (pure (0,0))) <$> def )])
 
-
-
-
-switchUIDiff
-  :: Semigroup a1 => Tidings a1
-     -> UI Element
-     -> Tidings Bool
-     -> UI (TrivialWidget a1)
-     -> UI (TrivialWidget a1)
-switchUIDiff t def bool next  = switchManyUIDiff t bool (M.fromList [(True,next),(False , TrivialWidget t <$> def )])
 
 
 
@@ -763,7 +727,7 @@ switchUI
      -> Tidings Bool
      -> UI (TrivialWidget a1)
      -> UI (TrivialWidget a1)
-switchUI t def bool next  = switchManyUI t bool (M.fromList [(True,next),(False , TrivialWidget t <$> def )])
+switchUI  t def bool next  = switchManyUI  bool (M.fromList [(True,next),(False , TrivialWidget t <$> def )])
 
 
 
