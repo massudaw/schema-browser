@@ -1,18 +1,22 @@
-.hot-container p { margin-top: 10px; }
-a { text-decoration: none; margin: 0 10px; }
+.col-xs-9 .col-xs-6 {
+  width:66.666%
+}
+.col-xs-9 .col-xs-3 {
+  width:33.333%
+}
+.col-xs-6 .col-xs-3 {
+  width:50%
+}
+.col-xs-3 .col-xs-3 {
+  width:100%
+}
+.col-xs-6 .col-xs-6 {
+  width:100%
+}
+.col-xs-9 .col-xs-9 {
+  width:100%
+}
 
-@media (min-width: $screen-xs-min) {
-    .col-xs-auto { width: auto; }
-}
-@media (min-width: $screen-sm-min) {
-    .col-sm-auto { width: auto; }
-}
-@media (min-width: $screen-md-min) {
-    .col-md-auto { width: auto; }
-}
-@media (min-width: $screen-lg-min) {
-    .col-lg-auto { width: auto; }
-}
 
 label {
   margin:0px

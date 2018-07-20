@@ -126,13 +126,13 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                 tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
                 let tdi = tidings tdib (fmap snd <$> evsel)
                     table = lookTable inf tname
-                TrivialWidget _ el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
+                el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
 
                 traverseUI (\i ->
                   createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) (filtering tb v)
 
                 stat <- UI.div  # sinkDiff text (show . M.lookup pred . unIndexMetadata <$>   (reftb ^. _1))
-                edit <- UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
+                edit <- UI.div # set children [getElement el] # sink UI.style  (noneShow . isJust <$> tdib)
                 UI.div # set children [stat,edit]
                 ) pcal
               ) selected

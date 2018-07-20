@@ -132,9 +132,9 @@ viewerMode six inf table tix cli cliTid = do
       title <- UI.h5
         # sink text (facts $ maybe "" (attrLine inf  (tableMeta table)) <$> tds)
         # set UI.class_ "header col-xs-12"
-      TrivialWidget tdf ev <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
-      element ev # set UI.class_ "col-xs-12"
-      TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,title,ev]
+      edit <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
+      element edit # set UI.class_ "col-xs-12"
+      TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,title,getElement edit]
     ),
     ("Table",do
       itemList <- multiSelector inf table reftb (pure Nothing) tdi

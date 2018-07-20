@@ -52,7 +52,7 @@ configExtension inf model view = do
           reftb@(vptmeta,vpt,_,var) <- ui $ refTables' minf table Nothing pred
           config <- selector minf table reftb  (pure (Just pred)) (pure Nothing)
           let tds = triding config
-          TrivialWidget pretdi cru <- crudUITable minf table reftb mempty [] (allRec' (tableMap minf) table) (triding config)
+          LayoutWidget pretdi cru _ <- crudUITable minf table reftb mempty [] (allRec' (tableMap minf) table) (triding config)
           UI.div # set children [tname,tpred,getElement config,cru]) (triding headers)
         body <- UI.div # sink children (pure <$> facts tables) # set UI.class_ "row"
         element headers  # set UI.class_ "row"

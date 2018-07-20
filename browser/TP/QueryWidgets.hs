@@ -369,7 +369,7 @@ anyColumns
    -> TBData Key ()
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> [(Set (Rel Key),TB Key ())]
-   ->  UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
+   ->  UI (LayoutWidget  (Editor (TBIdx CoreKey Showable)))
 anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       let
         fks2 = M.fromList $ run <$> cols
@@ -380,21 +380,21 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk <- buttonDivSetO (M.keys (unKV k))  (fmap index <$> initialAttr)  marker sumButtom
-      fks <- switchManyUI  (triding chk) fks2
+      fks <- switchManyLayout (triding chk) fks2
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
         resei = fmap pure <$> triding fks
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
-      return (listBody, resei)
+      return (LayoutWidget resei listBody (getLayout fks))
   where
     meta = tableMeta table
     run (l,m) = (l,do
       let hasEl = L.any (mAny (maybe False (l==) . safeHead ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
           plugattr = indexPluginAttrDiff m plugmods
           oldref = join . fmap ((^?  Le.ix l ) . _kvvalues ) <$> oldItems
-      wn <- tbCaseDiff inf table constr m  M.empty plugattr oldref
-      TrivialWidget (triding wn) <$> el # set children [getElement wn])
+      tbCaseDiff inf table constr m  M.empty plugattr oldref
+      )
 
 
 
@@ -559,10 +559,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
     plugmods = first traRepl <$> (resdiff <> plmods)
 
     isSum = rawIsSum table
-  (listBody,output) <- if isSum
-    then
-      anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
-    else  do
+  (listBody,output) <- do
       fks <- buildFKS inf True UI.td constr table refs plugmods oldItems srefs
       listBody <- UI.tr # set children (ixE :operation:( getElement .fst . snd  <$> fks))
       return (listBody, validateRow inf table fks)
@@ -598,14 +595,15 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
     plugmods = first traRepl <$> (resdiff <> plmods)
 
   let isSum = rawIsSum table
-  (listBody,output) <- if isSum
+  LayoutWidget output listBody layout <- if isSum
     then
       anyColumns inf isSum UI.div constr table refs plugmods ftb oldItems srefs
     else  do
       fks <- buildFKS inf isSum UI.div constr table refs plugmods oldItems srefs
       mapM (\(s,(i,_)) -> element (getElement  i) #  sink UI.class_ (facts $ (\i -> "col-xs-" <> show (fst   i)) <$> getLayout i)) fks
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
-      return (listBody,validateRow inf table fks)
+      let vertical = (\i -> (min (fst i )  12,max (snd i)  1 ) ) . foldl1 horizontalL <$> sequenceA(getLayout . fst .snd <$>  fks)
+      return $ LayoutWidget (validateRow inf table fks) listBody  vertical
   element listBody
     # set UI.class_ "row"
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -614,7 +612,7 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
-  return $ LayoutWidget output body (pure (12,1))
+  return $ LayoutWidget output body layout
 
 
 loadItems
@@ -641,21 +639,21 @@ crudUITable
    -> PluginRef (TBData CoreKey Showable)
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI (TrivialWidget (Editor (TBIdx CoreKey Showable)))
+   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 crudUITable inf table reftb@(_,gist ,sgist,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
   preoldItems <- ui $ loadItems inf table preoldItems2
   let
     constraints = tableConstraints (m,sgist,gist) preoldItems ftb
-  LayoutWidget tablebdiff listBody _ <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
+  LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
   (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   errors <- printErrors e
   debug <- debugConsole   preoldItems tablebdiff
   let
   out <- UI.div # set children [listBody,panelItems,errors,debug]
-  return $ TrivialWidget tablebdiff out
+  return $ LayoutWidget tablebdiff out layout
 
 openClose open = do
   let translate True = "expand"
@@ -673,9 +671,9 @@ dynCrudUITable
    -> PluginRef (TBData CoreKey Showable)
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI (TrivialWidget (Editor (TBIdx CoreKey Showable)))
+   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 dynCrudUITable inf nav refs pmods table preoldItems = do
-  switchUI delta UI.div nav
+  switchUILayout delta UI.div nav
       (do
         reftb@(_,gist,sgist,_) <- ui $ refTables inf   table
         crudUITable inf table reftb refs pmods (allRec' (tableMap inf) table) preoldItems)
@@ -1206,6 +1204,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       (elsel, helsel) <- ui newEvent
       (eledit, heledit) <- ui newEvent
       (eleditu, heleditu) <- ui newEvent
+      (elayout, hlayout) <- ui newEvent
 
       let
         evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
@@ -1247,7 +1246,8 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
           panClick <- UI.click pan
           ui $ onEventIO panClick (\ _ -> hSelector True)
-          (nav,celem) <- edit
+          (nav,celem,layout) <- edit
+          onChanges (facts  layout) (liftIO . hlayout)
           element nav
             # set UI.class_ "col-xs-1"
           hidden <- UI.div
@@ -1339,7 +1339,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
              # sink  UI.style (noneShow  <$> facts (triding nav))
              # set style [("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
 -}
-          TrivialWidget pretdi celem <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods)) targetTable  tdi
+          LayoutWidget pretdi celem layout <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods)) targetTable  tdi
           let
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
             fksel = fmap TBRef . (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
@@ -1350,7 +1350,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             when (olde /= fmap snd i) $ do
               heleditu $ (fmap snd i)
             )
-          return (getElement nav,[celem])
+          return (getElement nav,[celem],layout)
         -- merge i j | traceShow (i,j) False = undefined
         merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (filterReflect i,j)
         merge _ Keep = Keep
@@ -1358,12 +1358,13 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         merge Keep  (Diff _) = Keep
         merge Delete (Diff _) = Delete
 
+      layoutT <- ui $ stepperT (6,1) elayout
       selEls <- traverseUI selector selectT
       element top
         # sink children (facts selEls)
       let oldReflect = join . fmap nonEmptyTBRef . (fmap (\(TBRef (i,j)) -> TBRef (filterReflectKV i,j ))) <$> oldItems
       out <- ui $ calmT (diff' <$> oldReflect <*> ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk ))
-      return $ LayoutWidget out top ((\i -> if i then  (12,6) else (6,1) ) <$> triding nav)
+      return $ LayoutWidget out top ((\i j -> if i then  j else (6,1) ) <$> triding nav <*> layoutT )
 
 traceShowIdPrefix s i = traceShow (s,show i) i
 
