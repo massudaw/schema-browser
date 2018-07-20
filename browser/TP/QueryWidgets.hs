@@ -1272,18 +1272,18 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
           let navSize =  "col-xs-" ++ (show $ length availableModes - 1)
               selSize =  "col-xs-" ++ (show $ 12 - (length availableModes - 1))
           itemList <- do
-              lboxeel <- switchManyUI (triding navMeta) (M.fromList
+              lboxeel <- switchManyLayout (triding navMeta) (M.fromList
                   [("List" , do
                     itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
                     (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr tdi
                     element l # set UI.class_ selSize
-                    return (TrivialWidget lbox l)),
+                    return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
                     let selection = fromJust hasMap
                     t <- liftIO getCurrentTime
                     TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, pure Nothing)
                     element el # set UI.class_ selSize
-                    return (TrivialWidget i el)),
+                    return (LayoutWidget i el (pure (12,1)))),
                   ("Agenda" ,do
                     let selection = fromJust hasAgenda
                     (sel ,(j,i)) <- calendarSelector
@@ -1293,8 +1293,9 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
                       return (TrivialWidget (fmap snd <$> l) c)) $ (,) <$> i <*> j
                     el2 <- UI.div  # sink children (pure . getElement <$> facts el)
                     tsel <- ui $ joinT (triding <$> el)
-                    TrivialWidget tsel <$> UI.div # set children [sel,el2] # set UI.class_ selSize)])
+                    (\i -> LayoutWidget tsel i (pure (12,1))) <$> UI.div # set children [sel,el2] # set UI.class_ selSize)])
 
+              onChanges (facts  (getLayout lboxeel)) (liftIO . hlayout)
               element navMeta # set UI.class_ navSize
               elout <- UI.div # set children [getElement navMeta ,getElement lboxeel]
               esc <- onEsc elout
@@ -1350,7 +1351,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             when (olde /= fmap snd i) $ do
               heleditu $ (fmap snd i)
             )
-          return (getElement nav,[celem],layout)
+          return (getElement nav,[celem],max (6,1) <$> layout)
         -- merge i j | traceShow (i,j) False = undefined
         merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (filterReflect i,j)
         merge _ Keep = Keep
@@ -1364,7 +1365,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         # sink children (facts selEls)
       let oldReflect = join . fmap nonEmptyTBRef . (fmap (\(TBRef (i,j)) -> TBRef (filterReflectKV i,j ))) <$> oldItems
       out <- ui $ calmT (diff' <$> oldReflect <*> ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk ))
-      return $ LayoutWidget out top ((\i j -> if i then  j else (6,1) ) <$> triding nav <*> layoutT )
+      return $ LayoutWidget out top layoutT
 
 traceShowIdPrefix s i = traceShow (s,show i) i
 
