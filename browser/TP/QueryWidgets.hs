@@ -907,8 +907,8 @@ buildUIDiff f (Primitive l prim) = go l
                   wid <- go ti  plix valix
                   lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
                   paintEditDiff valix (triding wid) lb
-                  element wid # set UI.class_ "col-xs-11"
-                  row <- UI.div # set children [lb,getElement wid] # set UI.class_"col-xs-12"
+                  element wid # set UI.class_ "col-xs-12"
+                  row <- UI.div # set children [lb,getElement wid]
                   return $ LayoutWidget (triding wid) row (getLayout wid) ) unIndexEl unplugix
 
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
