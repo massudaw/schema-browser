@@ -426,7 +426,7 @@ buildFKS inf hasLabel el constr table refs plugmods   oldItems =  F.foldl'  run 
           then do
             (\i -> LayoutWidget (triding wn) i (getLayout wn)) <$> el # set children [getElement wn]
           else do
-            v <- labelCaseDiff inf m oldref (diff' <$> oldref <*> checkDefaults inf table  (index m ) (wn,oldref))
+            v <- labelCaseDiff inf m oldref (diff' <$> oldref <*> checkDefaults inf table  (index m) (wn,oldref))
             out <- el # set children [getElement v,getElement  wn]
             return $ LayoutWidget (triding wn) out (getLayout wn)
         return (w <> [( index m,(lab,oldref))] )
@@ -480,7 +480,7 @@ batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems2 
   let
     widgets2 = Tra.sequenceA (triding <$> widgets)
   headers <- rowTableHeaders ftb
-  out <- UI.table # set UI.class_ "table"
+  out <- UI.div # set UI.style [("display","flex"),("flex-flow","column")]
       # set children (headers : (getElement <$> widgets))
   divTable <- UI.div
       # set children [out]
@@ -492,15 +492,15 @@ batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems2 
 rowTableHeaders
   :: TBData CoreKey () -> UI Element
 rowTableHeaders  ftb = do
-  ixE <- UI.th # set text "#"
-  operation <- UI.th # set text "Action"
+  ixE <- UI.div # set UI.class_ "col-xs-1" # set text "#"
+  operation <- UI.div # set UI.class_ "col-xs-1"# set text "Action"
   let
     label (k,x) = do
       l <- detailsLabel (set UI.text (attributeLabel x )) (UI.div # set text (show $ index x))
-      UI.th # set children [l]
+      UI.div # set children [l] # set UI.class_ ("col-xs-" <> show (fst (attrSize x)))
     srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ (_kvvalues ftb)
   els <- mapM label srefs
-  UI.tr # set children (ixE : operation : els)
+  UI.div # set children (ixE : operation : els) # set UI.style [("display", "flex")]
 
 validateRow :: WidgetValue f =>
      InformationSchema
@@ -526,7 +526,7 @@ checkDefaults inf table k  (r, i) = liftA2 applyDefaults i (triding r)
   where
     defTable = defaultTableType inf table
     applyDefaults i j =
-      join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
+      join (applyIfChange i j) <|> join (createIfChange (traceShowId $ def j)) <|> i
     def (Diff i) =
       Diff . maybe i (\a -> head $ compact [a, i]) $
       L.find (\a -> index a == k) defTable
@@ -544,8 +544,8 @@ rowTableDiff
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
 rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
-  ixE <- UI.td# set text (show ix)
-  operation <- UI.td
+  ixE <- UI.div # set text (show ix) # set UI.class_ "col-xs-1"
+  operation <- UI.div # set UI.class_ "col-xs-1"
   oldItems <- ui $ cacheTidings preOldItems
   plugins <- ui $ loadPlugins inf
   let
@@ -560,8 +560,9 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
 
     isSum = rawIsSum table
   (listBody,output) <- do
-      fks <- buildFKS inf True UI.td constr table refs plugmods oldItems srefs
-      listBody <- UI.tr # set children (ixE :operation:( getElement .fst . snd  <$> fks))
+      fks <- buildFKS inf True UI.div constr table refs plugmods oldItems srefs
+      mapM (\(s,(i,_)) -> element (getElement  i) #  sink UI.class_ (facts $ (\i -> "col-xs-" <> show (fst   i)) <$> getLayout i)) fks
+      listBody <- UI.div # set children (ixE :operation:( getElement .fst . snd  <$> fks)) # set UI.style [("display", "flex"),("min-width","max-content")]
       return (listBody, validateRow inf table fks)
   element listBody
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -785,7 +786,7 @@ debugConsole oldItemsi inscrudp = do
                   ("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
                   ,("Undo", maybe "" (onDiff (ident . renderRowPatch) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
             else  return [] ) (triding debugBox)
-    debug <- UI.div # sink children (facts debugT)
+    debug <- UI.div # sink children (facts debugT) # set UI.class_ "col-xs-12"
     UI.div #  set children [getElement debugBox,debug]
 
 processPanelTable

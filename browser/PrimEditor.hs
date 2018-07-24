@@ -4,7 +4,6 @@
 
 module PrimEditor where
 
-import PStream
 import Types.Patch
 import Safe
 import Utils

@@ -237,8 +237,6 @@ addRecInit inf t = t & (rawFKSL %~ map path) . (_inlineFKS %~ map path)
 
 
 
-
-
 catchPluginException :: InformationSchema -> Int -> Int -> Map Key ( FTB Showable) -> IO a -> IO (Either Int a)
 catchPluginException inf pname tname  idx i =
   (Right <$> i) `catch` (\e  -> do
