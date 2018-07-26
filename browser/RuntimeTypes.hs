@@ -735,6 +735,7 @@ patchNoRef l =  concat $ attrNoRef <$> l
   where
     attrNoRef (PFK _ l _ ) = l
     attrNoRef (PInline i l ) = [PInline i $ patchNoRef <$> l]
+    attrNoRef (PFun _ _ _) = []
     attrNoRef i = [i]
 
 mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
@@ -762,6 +763,7 @@ recComplement inf =  filterAttrs []
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
     go r m _ _ v@(Attr k a) = if L.elem k (_kvpk m <> r) then Just v else Nothing
+    go r m _ _ v@(Fun _ _ _) = Nothing
 
 
 recPK inf = filterTBData pred inf

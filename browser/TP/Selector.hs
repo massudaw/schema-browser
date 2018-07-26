@@ -273,7 +273,7 @@ selector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
   return (TrivialWidget tds itemSel)
 
 
-showFKLook inf m collection = (\col v j -> j  # set text (maybe "No reference" (showFKText inf m) (G.lookup v col ))) <$>  collection
+showFKLook inf m collection = (\col v j -> j  # set text (maybe ("No reference: " <> show  v) (showFKText inf m) (G.lookup v col ))) <$>  collection
 showFK inf m = pure (\v j -> j  # set text (showFKText inf m v))
 
 offsetField  initT eve  max = offsetFieldFiltered initT eve [max]

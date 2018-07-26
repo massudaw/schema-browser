@@ -526,7 +526,7 @@ checkDefaults inf table k  (r, i) = liftA2 applyDefaults i (triding r)
   where
     defTable = defaultTableType inf table
     applyDefaults i j =
-      join (applyIfChange i j) <|> join (createIfChange (traceShowId $ def j)) <|> i
+      join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
     def (Diff i) =
       Diff . maybe i (\a -> head $ compact [a, i]) $
       L.find (\a -> index a == k) defTable
@@ -851,6 +851,7 @@ reduceDiffList arraySize o i plugM
    | F.all isKeep (snd <$> i) = Keep
    | otherwise = patchEditor $  removeOverlap plugl ++ notOverlap ++  removeOverlap plugu ++ reverse (rights diffs)
    where diffs = catMaybes $ (\(ix,v) -> treatA (o+ix)v) <$> i
+         -- treatA i j | traceShow ("treatA",i,j) False = undefined
          treatA a (Diff v) = Just $ Left $ PIdx a  (Just v)
          treatA a Delete =  Just $ Right $ PIdx a Nothing
          treatA _ Keep = Nothing
@@ -1130,8 +1131,8 @@ oneInput i tdi = do
     v <- currentValue (facts tdi)
     inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
     onCE <- UI.onChangeE inputUI
-    let pke = unionWith const  (decode  <$> onCE) (Right <$> rumors tdi)
-        decode v =maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
+    let pke = unionWith const  (decode <$> onCE) (Right <$> rumors tdi)
+        decode v = maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
     pkt <- ui $ stepperT (Right v) pke
     element inputUI # sinkDiff UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> pkt)
     return $ TrivialWidget (either (const Nothing) id <$> pkt) inputUI
@@ -1195,7 +1196,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         filterReflect m = filter (\k  -> _relOrigin (justError "no head notreflect" . safeHead $ F.toList (index k)) `L.elem` fmap _relOrigin reflectRels  ) m
         filterNotReflect (KV m) = KV $ M.filterWithKey (\k  _-> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
         filterReflectKV (KV m) = KV $ M.filterWithKey (\k  _-> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
-        nonEmptyTBRef v@(TBRef (KV m,KV n )) = if L.null m && L.null n then Nothing else Just v
+        nonEmptyTBRef v@(TBRef (KV m,KV n )) = if  L.null n then Nothing else Just v
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
@@ -1209,9 +1210,9 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
 
       let
         evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
-      tsel <- ui $ stepperT (fst <$> inip) evsel
-      tseledit <- ui $ stepperT (snd <$> inip) eledit
-      tedit <- ui $ stepperT (snd <$> inip) eleditu
+      tsel <- ui $ stepperT (sourcePRef <$> inip) evsel
+      tseledit <- ui $ stepperT (targetPRef <$> inip) eledit
+      tedit <- ui $ stepperT (targetPRef <$> inip) eleditu
 
       nav <- openClose dblClickT
       let
@@ -1223,7 +1224,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         sel = liftA2 diff' oldItems ftdi
         selector False = do
           ui $ onEventDyn
-            ((,,,) <$>   facts tsel <*> facts oldItems <*> facts tedit <@> rumors (fmap fst <$> sel))
+            ((,,,) <$>   facts tsel <*> facts oldItems <*> facts tedit <@> rumors (fmap sourcePRef <$> sel))
             (\(oldsel,initial,oldedit,vv) -> do
               when (oldsel /= vv ) $ do
                 liftIO $ helsel vv
@@ -1258,7 +1259,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         selector True = do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,sgist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-          let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems)<*>(fmap fst <$> sel)
+          let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems)<*>(fmap sourcePRef <$> sel)
           tdi <- ui $ cacheTidings ((\g s v -> searchGist relTable targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           cv <- currentValue (facts tdi)
           metaMap <- mapWidgetMeta inf
@@ -1311,8 +1312,8 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             output = diff' <$> oldItems <*> fksel
           ui $ onEventIO (rumors output) (\i -> do
             when (not (L.null reflectRels)) $ do
-              helsel $ (fmap (filterReflect.fst) i)
-              heleditu $ fmap snd i)
+              helsel $ (fmap (filterReflect.sourcePRef) i)
+              heleditu $ fmap targetPRef i)
           return [getElement itemList]
 
         edit =  do
@@ -1341,20 +1342,20 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
              # sink  UI.style (noneShow  <$> facts (triding nav))
              # set style [("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
 -}
-          LayoutWidget pretdi celem layout <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap snd)) <$> plmods)) targetTable  tdi
+          LayoutWidget pretdi celem layout <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap targetPRef)) <$> plmods)) targetTable  tdi
           let
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
             fksel = fmap TBRef . (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
             output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
           ui $ onEventIO (rumors $ (,,) <$> facts tsel <*> facts tedit <#> output) (\(old,olde,i) -> do
-            when (fmap filterReflect old /= fmap filterReflect (fmap fst i) && not (L.null reflectRels)) $ do
-              helsel $ fmap (filterReflect.fst) i
-            when (olde /= fmap snd i) $ do
-              heleditu $ (fmap snd i)
+            when (fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
+              helsel $ fmap (filterReflect.sourcePRef) i
+            when (olde /= fmap targetPRef i) $ do
+              heleditu $ (fmap targetPRef i)
             )
           return (getElement nav,[celem],max (6,1) <$> layout)
-        -- merge i j | traceShow (i,j) False = undefined
-        merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (filterReflect i,j)
+        -- merge i j | traceShow ("merge",i,j) False = undefined
+        merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j )
         merge _ Keep = Keep
         merge _ Delete = Delete
         merge Keep  (Diff _) = Keep
@@ -1364,8 +1365,9 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       selEls <- traverseUI selector selectT
       element top
         # sink children (facts selEls)
-      let oldReflect = join . fmap nonEmptyTBRef . (fmap (\(TBRef (i,j)) -> TBRef (filterReflectKV i,j ))) <$> oldItems
-      out <- ui $ calmT (diff' <$> oldReflect <*> ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk ))
+      let lintReflect item = join . fmap nonEmptyTBRef . (fmap (\(TBRef (i,j)) -> TBRef (filterReflectKV i,j ))) <$> item
+          oldReflect = lintReflect oldItems
+      out <- ui $ calmT (diff' <$> oldReflect <*> (lintReflect  ((\i -> join . applyIfChange  i)<$> oldReflect <*> tdfk )))
       return $ LayoutWidget out top layoutT
 
 traceShowIdPrefix s i = traceShow (s,show i) i

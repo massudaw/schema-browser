@@ -130,9 +130,9 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
           return charts) sel
 
         element chart # sink children (F.toList <$> facts edits)
-      exec = do
-        onFFI "google.charts.setOnLoadCallback(%1)" (evalUI chart $ traverseUI calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
-        return [chart]
+      exec =   do
+        v <- traverseUI calFun ((,,) <$> resolutionT <*> incrementT <*> positionB)
+        pure <$> UI.div # sink children (pure <$> facts v)
 
     return  (legendStyle , dashes ,exec)
 

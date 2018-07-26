@@ -727,7 +727,7 @@ recInsert k1  v1 = do
    ret <- KV <$> Tra.traverse (tbInsertEdit k1) (unKV v1)
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
-   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (traceShowId $ recPK inf k1 (allRec' (tableMap inf) tb)))
+   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf k1 (allRec' (tableMap inf) tb)))
    if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
         tb  <- insertFrom k1 ret

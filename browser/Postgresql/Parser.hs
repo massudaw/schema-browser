@@ -6,6 +6,7 @@ import qualified Data.HashMap.Strict as HM
 import Types hiding (Parser,double)
 import Postgresql.Types
 import Data.Dynamic
+import Debug.Trace
 import Text
 import Types.Patch
 import Postgresql.Printer
@@ -83,7 +84,11 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
           toFiel (KSerial : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
           toFiel (KSerial : k ) i = toFiel  k i
           toFiel (KArray : k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (Primitive (KArray :k) n )))
-          toFiel (KInterval : k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (Primitive  (KInterval: k) n ) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+          toFiel (KInterval : k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (Primitive  (KInterval: k) n ) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ",'" ,TF.Plain (down (snd $ Interval.lowerBound' is)) , TF.Plain (up (snd $ Interval.upperBound' is)) ,TF.Plain "')"]
+            where up True = "]"
+                  up False = ")"
+                  down True = "["
+                  down False = "("
           toFiel [] (TB1 i) = TF.Many [TF.toField (kp,i) ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
           toFiel i j = error ("toFiel" ++ show (i,j))
 
@@ -94,17 +99,17 @@ instance  TF.ToField (TB PGKey Showable)  where
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain (fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField (TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattr )) (F.toList (_kvvalues i)))
+  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattr )) (F.toList (_kvvalues i)))
   toField (IT n (ArrayTB1 is )) = TF.toField . PGTypes.PGArray $ IT n <$> F.toList is
   toField e = error (show e)
 
 
 
 instance TR.ToRow a => TF.ToField (TBRecord2 a) where
-  toField (TBRecord2 l) =  TF.Many (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ")") ] )
+  toField (TBRecord2 (s,t) l) =  TF.Many (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromString . T.unpack $  ") :: " <> s <> "." <> t) ] )
 
 
-data TBRecord2 a = TBRecord2 a
+data TBRecord2 a = TBRecord2 (Text,Text) a
 
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDouble i )) =  TF.toField i
@@ -343,7 +348,7 @@ parseShowableJSON  fun p@(Primitive l i) v = fix parseKTypePrim l v
             lb <- (char '[' >> return True) <|> (char '(' >> return False )
             [i,j] <- sepBy1 (tryquoted dec) (char ',')
             rb <- (char ']' >> return True) <|> (char ')' >> return False )
-            return $ IntervalTB1 $ Interval.interval (maybe ER.NegInf (either error ER.Finite)  i,lb) ( maybe ER.NegInf (either error ER.Finite)  j,rb)
+            return $ IntervalTB1 $ Interval.interval (maybe ER.NegInf (either error ER.Finite)  i,lb) ( maybe ER.PosInf (either error ER.Finite)  j,rb)
 
         case parseOnly inter (BS.pack $ T.unpack v) of
               Right i -> return i

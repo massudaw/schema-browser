@@ -37,7 +37,7 @@ module Types.Patch
   , indexFilterR
   , indexFilterPatch
   , G.tbpred
-  , PTBRef
+  , PTBRef(..)
   --
   , nonRefPatch
   , patchfkt
@@ -131,6 +131,12 @@ filterDiff = fmap (\(Diff i) -> i) . filter isDiff
 instance (Patch a , Patch b) => Patch (a,b) where
   type Index (a,b) = (Index a , Index b)
   createIfChange (i,j) = liftA2 (,) (createIfChange i ) (createIfChange j)
+  applyUndo  (i,j) (a,b)  = do
+    (i',ua) <- applyUndo i a
+    (j',ub) <- applyUndo j b
+    return ((i',j'),(ua,ub))
+
+  diff (i,j) (a,b) = (,) <$> diff i a <*> diff j b
 
 
 instance (Patch a ,Patch b) => Patch (Either a b) where
@@ -149,7 +155,7 @@ instance Patch b => Patch (Maybe b) where
   patch i = maybe Delete (Diff . patch) i
   applyUndo i = recoverEditChange i
 
-type PTBRef k s = (TBIdx k s, TBIdx k s)
+data PTBRef k s = PTBRef { sourcePRef :: (TBIdx k s) , targetPRef :: (TBIdx k s) }  deriving(Show,Eq,Ord,Functor,Generic)
 
 nonRefPatch (PFK rel i j) = i
 nonRefPatch i = [i]
@@ -200,7 +206,7 @@ instance (Compact i) => Compact (Editor i) where
       pred i Keep = i
       pred i Delete = Keep
       pred (Diff i) (Diff j) = maybe Keep Diff $ safeHead $ compact [i, j]
-      pred _ (Diff i) = Diff i
+      pred _ (Diff i) = (maybe Keep Diff $ safeHead $compact [i])
 
 firstPatchRow ::
      (Ord a, Ord k, Ord (Index a), Ord j)
@@ -398,6 +404,7 @@ class Address f where
   content :: f -> Content f
   rebuild :: Idx f -> Content f -> f
 
+
 class Compact f where
   compact :: [f] -> [f]
 
@@ -517,21 +524,31 @@ instance Patch Showable where
   createIfChange = Just
   patch = id
 
-instance (Compact a , Compact b) => Compact (a,b) where
-  compact i = zipWith (,) (compact (fst <$> i)) (compact (snd <$> i))
+instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
+  compact i = fromMaybe [] $ liftA2 (zipWith (,)) f s <|> (fmap (,mempty ) <$> f)  <|> (fmap (mempty ,) <$> s)
+    where
+      f = nonEmpty (compact (fst <$> i))
+      s = nonEmpty (compact (snd <$> i))
+
+
+instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
+  compact i = zipWith PTBRef f s
+    where
+      f = compact (sourcePRef <$> i)
+      s = compact (targetPRef <$> i)
 
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = PTBRef Key Showable
   diff (TBRef (i, j)) (TBRef (k, l) )=
-    ((,) <$> dref <*> dtb) <|> ((,) <$> dref <*> pure []) <|>
-    ((,) <$> pure [] <*> dtb)
+    (PTBRef <$> dref <*> dtb) <|> (PTBRef <$> dref <*> pure []) <|>
+    (PTBRef <$> pure [] <*> dtb)
     where
       dref = diff i k
       dtb = diff j l
-  patch (TBRef (i, j)) = (patch i, patch j)
-  applyUndo (TBRef (i, j)) ((k, l)) =
-    (\(a, b) (i, j) -> (TBRef (a, i), (b, j))) <$> applyUndo i k <*> applyUndo j l
-  createIfChange (i, j) = fmap TBRef $
+  patch (TBRef (i, j)) = PTBRef (patch i) (patch j)
+  applyUndo (TBRef (i, j)) (PTBRef k l) =
+    (\(a, b) (i, j) -> (TBRef (a, i), PTBRef b j)) <$> applyUndo i k <*> applyUndo j l
+  createIfChange (PTBRef i j) = fmap TBRef $
     ((,) <$> createIfChange i <*> createIfChange j) <|>
     ((kvlist [], ) <$> createIfChange j) <|>
     ((, kvlist []) <$> createIfChange i)
@@ -1016,7 +1033,7 @@ liftPRel ::
   -> [Rel k]
   -> PathFTB (TBIdx k b)
   -> PathFTB (PTBRef k b)
-liftPRel l rel f = liftA2 (,) (F.foldl' (flip mergePFK) (PAtom []) rels) f
+liftPRel l rel f = liftA2 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f
   where
     rels = catMaybes $ findPRel l <$> rel
 
@@ -1030,12 +1047,12 @@ mergePFK (PatchSet i) (PatchSet j) = PatchSet $ Non.zipWith mergePFK i j
 mergePFK (PIdx ixi i) (PIdx ixj j)
   | ixi == ixj = PIdx ixi $ mergePFK <$> i <*> j
   | otherwise = error ("wrong idx: " ++ show (ixi, ixj))
+mergePFK (PAtom i) (PAtom l) = PAtom (i : l)
 mergePFK (POpt i) j = POpt $ flip mergePFK j <$> i
 mergePFK j (POpt i) = POpt $ mergePFK j <$> i
 mergePFK (PatchSet j) i = PatchSet $ flip mergePFK i <$> j
 mergePFK i (PatchSet j) = PatchSet $ mergePFK i <$> j
 mergePFK (PIdx ix i) (PAtom l) = PIdx ix (flip mergePFK (PAtom l) <$> i)
-mergePFK (PAtom i) (PAtom l) = PAtom (i : l)
 mergePFK i j = error (show (i, j))
 
 findPRel l (Rel k op j) = do
@@ -1056,7 +1073,7 @@ recoverPFK ori rel i =
         (fmap join .
          traverse
            (fmap patchvalue .
-            L.find ((== Set.singleton (Inline k)) . index) . fst) $
+            L.find ((== Set.singleton (Inline k)) . index) . sourcePRef) $
          i)) <$>
      ori)
-    (fmap snd i)
+    (fmap targetPRef i)

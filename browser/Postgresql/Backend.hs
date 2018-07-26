@@ -3,6 +3,7 @@ module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import Step.Client
+import Debug.Trace
 import Control.Exception
 import Data.Time
 import qualified Types.Index as G
@@ -311,7 +312,7 @@ updateQuery m (pks,skv) = (qstr,qargs,Nothing)
     equality k = k <> "="  <> "?"
     koldPk (G.Idex kold) = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
     pred   (G.Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
-    inputs = execWriter $ mapM (attrPatchName Nothing) skv
+    inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
     paren i = "(" <> i <> ")"
     up = "UPDATE " <> kvMetaFullName m <> setter <> " WHERE " <> T.intercalate " OR " ( paren . pred  <$> pks)
@@ -425,7 +426,8 @@ insertMod m j  = do
   liftIO $ do
       let
         table = lookTable inf (_kvname m)
-        ini = defaultTableData inf table j ++  patch j
+        defs = defaultTableData inf table j
+        ini = compact (defs ++  patch j)
       d <- insertPatch  inf (conn  inf) (create ini) table
       l <- liftIO getCurrentTime
       return    $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
