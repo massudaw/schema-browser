@@ -10,7 +10,9 @@ module Default where
 import Types
 import qualified Data.Poset as P
 import Utils
+import qualified NonEmpty as Non
 import RuntimeTypes
+import Debug.Trace
 import Query
 import Types.Patch
 import qualified  Data.Map as M
@@ -58,16 +60,16 @@ defaultTB inf prev (RecJoin     _ i ) v =  defaultTB inf prev i v
 defaultTB _ _ (FunctionField  k _ _ ) _ = defaultAttrs k
 defaultTB inf prev (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ keyType k) l
   where
+    go   (KArray :xs) (ArrayTB1 l) = Just . PatchSet . Non.fromList $ zipWith (\i j -> (PIdx i ) $ go xs j ) [0..] (F.toList l)
     go  (KSerial :xs) (LeftTB1 i) =
         case i of
           Just i -> POpt . Just <$> go xs i
           Nothing -> Just (POpt Nothing)
-
     go  (KOptional :xs) (LeftTB1 i) =
         case i of
           Just i -> POpt . Just <$> go xs i
           Nothing -> Just (POpt Nothing)
-    go  [] (TB1  _) = PAtom  <$> nonEmpty (defaultTableType rinf (lookTable rinf (snd i)))
+    go  [] (TB1  v) = PAtom  <$> nonEmpty (defaultTableData rinf (lookTable rinf (snd i)) v)
     go  _  _ = Nothing
     rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultTB inf prev j@FKJoinTable {} _ = defaultFKS inf prev j
