@@ -384,7 +384,14 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
-        resei = fmap pure <$> triding fks
+        resei = (\i j -> defaultInitial j <$> i) <$> triding fks <*> initialAttr
+          where
+            defaultInitial ini new
+              = case ini of
+                 Nothing -> [new]
+                 Just ini -> if index ini == index new
+                                then [new]
+                                else new : [patch (addDefault ini :: TB Key Showable)]
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
       return (LayoutWidget resei listBody (getLayout fks))
   where
@@ -531,6 +538,7 @@ checkDefaults inf table k  (r, i) = liftA2 applyDefaults i (triding r)
       Diff . maybe i (\a -> head $ compact [a, i]) $
       L.find (\a -> index a == k) defTable
     def Keep = maybe Keep Diff $ L.find (\a -> index a == k) defTable
+    def i = error ("Invalid pattern: " ++ show (k,i))
 
 
 rowTableDiff
