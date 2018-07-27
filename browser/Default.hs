@@ -42,7 +42,7 @@ defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateK
         i -> Nothing
 
 defaultFKS inf prev (FKJoinTable i j )
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = flip (PFK i) (POpt Nothing) <$>  nonEmpty (catMaybes (defaultAttrs .  _relOrigin  <$> filter (not. (`S.member` prev) ._relOrigin) i))
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = Just $ PFK i  (catMaybes (defaultAttrs .  _relOrigin  <$> filter (not. (`S.member` prev) ._relOrigin) i)) (POpt Nothing)
   | otherwise  = Nothing
   where isRel Rel{} = True
         isRel _ = False

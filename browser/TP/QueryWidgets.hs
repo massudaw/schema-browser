@@ -302,15 +302,14 @@ tbCaseDiff
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (LayoutWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
-    let
-      nonInj = S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
-      nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin $ k) wl
-      relTable = M.fromList $ fmap (_relTarget &&& _relOrigin) rel
-      restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
-      reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
-        where frel = filter (\i -> isJust $ M.lookup (S.singleton (Inline (_relOrigin i))) (_kvvalues ifk)) rel
-      convertConstr (f,j) = (f, fmap (\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel ) j)
-    fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  nonInjRefs oldItems  i
+  let
+    nonInj = S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
+    nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin $ k) wl
+    restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
+    reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
+      where frel = filter (\i -> isJust $ M.lookup (S.singleton (Inline (_relOrigin i))) (_kvvalues ifk)) rel
+    convertConstr (f,j) = (f, fmap (\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel ) j)
+  fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  nonInjRefs oldItems  i
 
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.map _relOrigin. S.unions  .fst) constr
@@ -390,8 +389,8 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
               = case ini of
                  Nothing -> [new]
                  Just ini -> if index ini == index new
-                                then [new]
-                                else new : [patch (addDefault ini :: TB Key Showable)]
+                      then [new]
+                      else new : [patch (addDefault ini :: TB Key Showable)]
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
       return (LayoutWidget resei listBody (getLayout fks))
   where
@@ -524,12 +523,12 @@ validateRow inf table fks =
     ifValid i j =
       if isJust j
         then i
-        else Keep
+        else traceShow ("not valid",i) Keep
     sequenceTable fks =
-      reduceTable <$> Tra.sequenceA (triding . fst . snd <$> fks)
+      reduceTable . traceShowId <$> Tra.sequenceA (triding . fst . snd <$> fks)
     isValid fks = sequenceA <$> sequenceA (uncurry (checkDefaults inf table) <$> fks)
 
-checkDefaults inf table k  (r, i) = liftA2 applyDefaults i (triding r)
+checkDefaults inf table k  (r, i) = traceShowIdPrefix (show k) <$> liftA2 applyDefaults i (triding r)
   where
     defTable = defaultTableType inf table
     applyDefaults i j =
