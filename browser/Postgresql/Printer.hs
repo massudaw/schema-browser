@@ -25,6 +25,7 @@ module Postgresql.Printer
 import Control.Applicative
 import Control.Monad
 import Control.Monad.RWS
+import Debug.Trace
 import Data.Bifunctor
 import qualified Data.Foldable as F
 import Data.Functor.Identity
@@ -32,6 +33,7 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
+import Postgresql.Function
 import qualified Data.Poset as P
 import qualified Data.Set as S
 import Data.String
@@ -102,6 +104,12 @@ lkTB (Attr k _) = do
     Just a -> "k" <> T.pack (show a)
     Nothing ->keyValue  k
 
+lkTB (Fun k _ _ ) = do
+  a <-lkAttr k
+  return $ case a of
+    Just a -> "k" <> T.pack (show a)
+    Nothing -> keyValue k
+
 lkTB (IT k _ ) = do
   a <-lkIT k
   return $ case a of
@@ -115,6 +123,8 @@ lkTB (FKT  _ rel _ ) = do
     Nothing -> error (show rel)
 
 lkAttr k = lkKey (AttributeReference k)
+
+newFun k = mkKey (AttributeReference k)
 
 newIT k = mkKey (TableReference $ RelInline k)
 lkIT k = lkKey (TableReference $ RelInline k)
@@ -151,7 +161,7 @@ reservedNames = ["column","table","schema"]
 escapeReserved :: T.Text -> T.Text
 escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
 
-tableAttr = unkvlist .tableNonRef
+tableAttr = unkvlist . tableNonRef
 
 expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
 expandInlineTable meta tb@( _) pre = asNewTable meta $ (\t->  do
@@ -267,7 +277,10 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 
 
-expandQuery' inf meta left m = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
+expandQuery' inf meta left m = atTable meta $ F.foldl' (\j i -> do
+        v <- j
+        l <- (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )
+        return (l . v)  ) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
 
 
 
@@ -294,6 +307,14 @@ expandJoin inf meta left env (t@(IT a (TB1 tb))) =  do
      return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
         where
           jt = if left then JDLeft  else JDNormal
+expandJoin inf meta left env  (Fun k (ex,a)  _ ) = do
+  v <- replaceexpr ex <$> traverse (\i-> do
+    l <- lkKey (AttributeReference (_relOrigin i))
+    (_,m) <- snd <$> get
+    return $ T.pack $ "k" <> show (justError (show (i,k,m)) l )) a
+  iref  <- newFun  k
+  let ref = "k" <> T.pack (show iref)
+  return $ \row -> SQLRJoin row JTLateral JDNormal (SQLRInline $ "(SELECT " <> v <> maybe "" (" :: " <>) (renderType (keyType k)) <> ") as t" <> ref <> "(" <> ref  <> ")" ) Nothing
 expandJoin inf meta left env v = return id
   {-
 joinOnPredicate :: [Rel Key] -> [Column Key ()] -> [Column Key ()] -> Codegen Text
@@ -320,10 +341,10 @@ explodeRecord inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (exp
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
--- explodeDelayed inf m tb (Fun k (ex,a)  _ )
-  -- = replaceexpr ex <$> traverse (\i-> explodeDelayed inf m tb $ indexLabel i tb) a
+explodeDelayed inf m tb f@(Fun k (ex,a)  _ )
+  = lkTB f
 explodeDelayed inf m _ t@(Attr k  _ )
-  = foldr (=<<) prim (eval<$>kty)
+  = foldr (=<<) prim (eval <$> kty)
   where
     Primitive kty (AtomicPrim _) = keyType k
     eval _ = return
@@ -341,7 +362,7 @@ explodeDelayed inf m _ t@(IT  k tb  )
    prim = do
      l <- lkTB t
      let nmeta = tableMeta $ lookSTable inf r
-     selectRow l <$> explodeRecord inf nmeta  (tableNonRef $head . F.toList $tb)
+     selectRow l <$> explodeRecord inf nmeta  (restrictTable nonFK $head . F.toList $tb)
 
 
 printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Rel Key ,[(Key,AccessOp Showable )]) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
@@ -369,7 +390,7 @@ indexFieldL
     -> TBData Key ()
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 indexFieldL inf m e c p@(Inline l) v =
-  case findAttr l (tableNonRef v) of
+  case findAttr l (restrictTable nonFK v) of
     Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
     Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess l nt) v =
@@ -461,7 +482,7 @@ justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
 justLabel namemap meta t k = fst $ evalRWS getLabels  [Root meta] namemap
   where
     getLabels :: Codegen Text
-    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ tableNonRef t)
+    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ restrictTable nonFK t)
 
 loadDelayedQuery
   :: InformationSchema

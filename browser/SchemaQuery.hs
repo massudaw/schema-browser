@@ -367,7 +367,7 @@ getFKS
               (TBData Key Showable))
 getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (refLookup (pathRelRel f) tbf) )) (return (return ,S.empty )) sorted
   where
-    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table)
+    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table <> functionRefs table)
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
 
@@ -417,7 +417,7 @@ tableLoader' table  page size presort fixed tbf = do
           go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
           predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
           predicate i  = [i]
-    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (tableNonRef tbf) page token size presort (unestPred predicate)
+    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
     resFKS  <- getFKS inf predicate table res tbf
     let result = fmap resFKS   res
     liftIO $ when (not $ null (lefts result)) $ do

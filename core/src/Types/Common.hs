@@ -55,6 +55,8 @@ module Types.Common
   , aattr
   , nonRefTB
   , tableNonRef
+  , restrictTable
+  , nonFK
   , Rel(..)
   , indexerRel
   , _relOrigin
@@ -499,14 +501,26 @@ findRel l (Rel k op j) = do
   return $ fmap (Attr k . TB1) v
 
 
-tableNonRef :: Ord k => KV k a -> KV k a
-tableNonRef n = (rebuildTable . unkvlist) n
+restrictTable :: Ord k => (TB k a  -> [TB k a]) -> KV k a -> KV k a
+restrictTable f n =  (rebuildTable . unkvlist) n
   where
-    rebuildTable n = kvlist . concat . F.toList $ nonRefTB <$> n
+    rebuildTable n = kvlist . concat . F.toList $ f <$> n
+
+tableNonRef :: Ord k => KV k a -> KV k a
+tableNonRef = restrictTable  nonRefTB
+
+nonFK :: Ord k => TB k a -> [TB k a]
+nonFK (FKT i _ _) = concat (nonFK <$> _kvvalues i)
+nonFK (IT j k) = [IT j (restrictTable nonFK <$> k)]
+nonFK (Fun _ (_,l)  _) | L.any isRel l = []
+  where isRel (RelAccess i _ ) = L.any isRel i
+        isRel (Rel _ _ _) = True
+        isRel _ = False
+nonFK i = [i]
 
 nonRefTB :: Ord k => TB k a -> [TB k a]
-nonRefTB (FKT i _ _) = concat (nonRefTB <$> unkvlist i)
-nonRefTB (IT j k) = [IT j (tableNonRef <$> k)]
+nonRefTB (FKT i _ _) = concat (nonRefTB <$> _kvvalues i)
+nonRefTB (IT j k) = [IT j (restrictTable nonRefTB <$> k)]
 nonRefTB (Fun _ _ _) = []
 nonRefTB i = [i]
 

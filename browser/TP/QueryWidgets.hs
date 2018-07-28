@@ -322,12 +322,15 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
 
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    search (Inline t) = fmap (fmap _tbattr) . recoverValue <$> M.lookup (S.singleton  (Inline t)) wl
-    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverValue <$> M.lookup (S.fromList t)  wl
-    refs = sequenceA . catMaybes $ search <$> snd rel
+    -- search i | traceShow ("search",i) False = undefined
+    search (Inline t) = fmap (fmap _tbattr) . recoverValue . snd $ justError (show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
+    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverValue $ justError (show t) (M.lookup (S.fromList t)  wl)
+    refs = sequenceA $ search <$> snd rel
+    liftType (KOptional :xs) i = Just $ LeftTB1 (join $ liftType xs . Just <$> i)
+    liftType [] i = i
 
-  funinp <- traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
-  ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
+  funinp <- fmap (liftType (_keyFunc $ keyType i).join) <$> traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
+  ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] ( funinp)
   return $ LayoutWidget (diff' <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev) (getLayout ev)
 
 
@@ -375,7 +378,7 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
         initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unLeftItens <$> F.toList (_kvvalues j))  <$>oldItems
         sumButtom itb =  do
           el <- UI.div
-          element =<< labelCaseDiff inf (fromJust $ M.lookup itb (unKV k)) (join . fmap (M.lookup itb . unKV) <$> oldItems) ((\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
+          element =<< labelCaseDiff inf (justError "no sum column" $ M.lookup itb (unKV k)) (join . fmap (M.lookup itb . unKV) <$> oldItems) ((\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk <- buttonDivSetO (M.keys (unKV k))  (fmap index <$> initialAttr)  marker sumButtom
@@ -456,7 +459,7 @@ tableConstraints (m ,sgist,gist) preoldItems ftb = constraints
   where
     primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> (deleteCurrentUn m un  <$> preoldItems <*> gist))
       where un = _kvpk m
-    secondaryConstraints un = (M.keys $ _kvvalues $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn m un <$> preoldItems <*> (fromJust . M.lookup un <$>  sgist)))
+    secondaryConstraints un = (M.keys $ _kvvalues $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn m un <$> preoldItems <*> (justError "no un". M.lookup un <$>  sgist)))
     constraints :: SelPKConstraint
     constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
 
@@ -523,21 +526,23 @@ validateRow inf table fks =
     ifValid i j =
       if isJust j
         then i
-        else traceShow ("not valid",i) Keep
+        else  Keep
     sequenceTable fks =
-      reduceTable . traceShowId <$> Tra.sequenceA (triding . fst . snd <$> fks)
+      reduceTable <$> Tra.sequenceA (triding . fst . snd <$> fks)
     isValid fks = sequenceA <$> sequenceA (uncurry (checkDefaults inf table) <$> fks)
 
-checkDefaults inf table k  (r, i) = traceShowIdPrefix (show k) <$> liftA2 applyDefaults i (triding r)
+checkDefaults inf table k  (r, i) =   liftA2 (applyDefaults inf table k ) i (triding r)
+
+
+applyDefaults inf table k i j = -- traceShowIdPrefix (show k) $
+  join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
   where
     defTable = defaultTableType inf table
-    applyDefaults i j =
-      join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
     def (Diff i) =
       Diff . maybe i (\a -> head $ compact [a, i]) $
       L.find (\a -> index a == k) defTable
     def Keep = maybe Keep Diff $ L.find (\a -> index a == k) defTable
-    def i = error ("Invalid pattern: " ++ show (k,i))
+    def i = Keep -- error ("Invalid pattern: " ++ show (k,i))
 
 
 rowTableDiff
@@ -651,7 +656,7 @@ crudUITable
 crudUITable inf table reftb@(_,gist ,sgist,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <- ui $ loadItems inf table preoldItems2
+  preoldItems <-  ui ( loadItems inf table preoldItems2)
   let
     constraints = tableConstraints (m,sgist,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
@@ -945,7 +950,8 @@ buildUIDiff f (Primitive l prim) = go l
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
-           return $ (reduceOptional <$> tdnew)
+           return $ LayoutWidget ((\i j -> maybe (head . compact $ [ Diff $ POpt Nothing ,i]) (const i ) j ) <$> (reduceOptional <$> triding tdnew)<*>  tdi ) (getElement tdnew) (getLayout tdnew)
+           -- return $ (reduceOptional <$> tdnew)
          KInterval -> do
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = error (show i)

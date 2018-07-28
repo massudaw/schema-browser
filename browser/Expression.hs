@@ -5,6 +5,7 @@ import Data.Either
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
 import Control.Monad.State
+import Data.Time
 import Types.Inference
 import Control.Monad.Except
 import Control.Arrow (first)
@@ -48,11 +49,11 @@ parseFunction =  do
   many (char ' ')
   return (Function (pack $ BS.unpack fun ) f)
 
-callFunction :: Connection -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (FTB Showable)
+callFunction :: Connection -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (Maybe (FTB Showable))
 callFunction conn fun ty inp = do
-  let func = fromString $ " SELECT to_json(" ++ fun ++ ")"
+  let func = fromString $ " SELECT to_json(" ++ fun ++ ") "
   Only i <- L.head <$> queryLogged conn func (L.zip (fst ty) inp)
-  return $ either (error "cant parse" ) id $  A.parseEither (fmap fst . codegent . parseShowableJSON parsePrimitiveJSON  (snd ty)) i
+  return $ either (error "cant parse" ) id .   (A.parseEither (fmap fst . codegent . parseShowableJSON parsePrimitiveJSON  (snd ty)))<$>  i
 
 multProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5,a6+b6,a7+b7)
 divProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1-b1,a2-b2,a3-b3,a4-b4,a5-b5,a6-b6,a7-b7)
@@ -62,14 +63,16 @@ inter = KInterval
 
 funmap :: Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable)
 funmap = M.fromList [
-        ("lower",(([prim [KInterval] PAny],prim [KOptional] PAny),\[IntervalTB1 i] -> LeftTB1 $  unFinite $  lowerBound i))
-       ,("upper",(([prim [KInterval] PAny],prim [KOptional] PAny),\[IntervalTB1 i] -> LeftTB1 $  unFinite $  upperBound i))
+        ("lower",(([prim [KInterval] PAny],prim [] PAny),\[IntervalTB1 i] -> justError "" $  unFinite $  lowerBound i))
+       ,("upper",(([prim [KInterval] PAny],prim [] PAny),\[IntervalTB1 i] -> justError "" $  unFinite $  upperBound i))
+       ,("tstzrange_subdiff",(([prim [] (PTime $ PTimestamp (Just utc)),prim [] (PTime $ PTimestamp (Just utc))],prim [] PDouble ),\[TB1 (STime (STimestamp i)),TB1 (STime (STimestamp j))] -> TB1 $ SDouble $ realToFrac $ diffUTCTime i j))
        ,("dimensional",(([prim [] PDouble],prim []$ PDimensional 0 (0,0,0,0,0,0,0) ),\[i]-> i))
        ,("float8sum",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i + j))
        ,("float8sub",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i - j))
        ,("float8div",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i / j))
        ,("float8mul",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i * j))
        ,("dimensionalmult",(([prim []PAny ,prim []PAny],prim []PAny),\[i,j]-> i * j))
+       ,("dimensionaldiv",(([prim []PAny ,prim []PAny],prim []PAny),\[i,j]-> i / j))
        ]
 
 replaceList l =  L.foldl' extend emptyTyenv (fmap (Forall [TV "a"] . replaceAny (TVar (TV "a")) ) <$> L.zip [0..] l  )
@@ -106,14 +109,15 @@ testFFI = do
   evaluateFFI conn fun funmap [Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))) ,Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))),Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0)))] [TB1 (SDouble 3 ) , TB1 (SDouble 2),TB1 (SDouble 3)]
 
 
-evaluateFFI :: Connection -> Expr -> Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable) -> [KType (Prim KPrim (Text,Text)) ] -> [FTB Showable]  -> IO (FTB Showable)
+evaluateFFI :: Connection -> Expr -> Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable) -> [KType (Prim KPrim (Text,Text)) ] -> [FTB Showable]  -> IO (Maybe (FTB Showable))
 evaluateFFI conn expr fs ac2 res = evalTop expr
   where
-    evalTop ::  Expr -> IO (FTB Showable)
+    evalTop ::  Expr -> IO (Maybe (FTB Showable))
     evalTop fun@(Function i e) = do
-        let out = either (error . show ) schemeToKType $ inferExpr ops (replaceList  (ktypeToType <$> ac2)) fun
+        let rl = replaceList  (ktypeToType <$> ac2)
+        let out = either (error . show ) schemeToKType $ inferExpr ops  rl  fun
         callFunction conn (renderPostgres fun) (ac2, out ) res
-    evalTop (Value i ) = return (justError "no expr" $ res `atMay` fromIntegral i)
+    evalTop (Value i ) = return (Just $ justError "no expr" $ res `atMay` fromIntegral i)
 
 
 schemeToKType (Forall [] i ) = typeToKType i
@@ -129,4 +133,4 @@ evaluate k e fs ac tb = Fun k (e,ac) <$> go e
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> traverse go   e
       where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
-    go (Value i ) = join $ flip recLookup tb <$> (ac `atMay` i)
+    go (Value i ) =  join $ flip recLookup tb <$> (ac `atMay` i)

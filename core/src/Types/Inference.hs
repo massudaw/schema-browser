@@ -17,6 +17,7 @@ module Types.Inference
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Maybe
+import Utils
 import Data.Monoid
 import Data.List (nub)
 import Data.Foldable (foldr)
@@ -89,7 +90,7 @@ typeBool :: Type
 typeBool = TCon ( AtomicPrim PBoolean)
 
 newtype TypeEnv = TypeEnv (Map.Map Var Scheme)
-  deriving (Semigroup,Monoid)
+  deriving (Show,Semigroup,Monoid)
 
 data Unique = Unique { count :: Integer }
 
@@ -231,7 +232,7 @@ infer ops env ex = case ex of
   Value x -> lookupEnv env (fromIntegral x)
 
   Function op l -> do
-    inferPrim ops env l  (fromJust (Map.lookup op ops ))
+    inferPrim ops env l  (justError ("cant find op: " <> show (op,ops))(Map.lookup op ops ))
 
 
 

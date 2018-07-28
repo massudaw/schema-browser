@@ -41,6 +41,7 @@ defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateK
         KSerial :i -> Just (POpt (go i))
         i -> Nothing
 
+-- TODO: Double check if FKT defaulting is correct
 defaultFKS inf prev (FKJoinTable i j )
   | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = Just $ PFK i  (catMaybes (defaultAttrs .  _relOrigin  <$> filter (not. (`S.member` prev) ._relOrigin) i)) (POpt Nothing)
   | otherwise  = Nothing
@@ -98,7 +99,7 @@ nonFKS table =  nonFKAttrs
     where
     fks' =  rawFKS table
     items = rawAttrs table
-    fkSet,funSet:: S.Set Key
+    fkSet, funSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) fks'
     funSet = S.unions $ pathRelOri <$> filter isFunction fks'
     nonFKAttrs :: [Key]

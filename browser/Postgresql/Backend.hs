@@ -455,8 +455,8 @@ loadDelayed :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key
 loadDelayed table  values = do
   inf <- askInf
   let
-    v = tableNonRef $ allRec' (tableMap inf) table
-    nonRefV = tableNonRef values
+    v = restrictTable nonFK $ allRec' (tableMap inf) table
+    nonRefV = restrictTable nonFK values
     delayed =  recComplement inf m nonRefV v
   -- liftIO $ print delayed
   liftIO $ fmap join $ traverse (check inf nonRefV )  delayed
