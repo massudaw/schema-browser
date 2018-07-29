@@ -328,9 +328,10 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
     refs = sequenceA $ search <$> snd rel
     liftType (KOptional :xs) i = Just $ LeftTB1 (join $ liftType xs . Just <$> i)
     liftType [] i = i
+    liftKey = fmap (liftType (_keyFunc $ keyType i).join)
 
-  funinp <- fmap (liftType (_keyFunc $ keyType i).join) <$> traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
-  ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] ( funinp)
+  funinp <-  liftKey <$> traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
+  ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
   return $ LayoutWidget (diff' <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev) (getLayout ev)
 
 
@@ -1026,7 +1027,7 @@ buildPrim fm tdi i
              | i == 0 = ""
              | otherwise = "10^" <> show i  <> "."
        tag <- UI.span # set text  (scale s <> build pols negs)
-       inp <- oneInput i tdi
+       inp <- oneInput fm i tdi
        out <- horizontal [getElement inp,tag]
        element out # set UI.style [("width","100%")]
        return (TrivialWidget (triding inp) out)
@@ -1042,8 +1043,8 @@ buildPrim fm tdi i
          PDate -> do
            let date = IsoArrow SDate (\(SDate i) -> i)
            uiEditor (time Cat.. date <$$> UIEditor primEditor) tdi
-         PDayTime -> oneInput i tdi
-         PInterval ->oneInput i tdi
+         PDayTime -> oneInput fm i tdi
+         PInterval ->oneInput fm i tdi
      PAddress -> do
        let binarySrc = (\(SText i) -> "https://drive.google.com/embeddedfolderview?id=" <> T.unpack i <> "#grid")
        i <- UI.input  # sink UI.value ( maybe "" (\(SText t) -> T.unpack t) <$> facts tdi)
@@ -1137,12 +1138,15 @@ buildPrim fm tdi i
         onChanges f (runFunctionDelayed inputUI . ffi "updateColor(%1,%2)" inputUI . maybe "FFFFFF" renderPrim)
         return $ TrivialWidget pkt sp
      z ->
-       oneInput z tdi
+       oneInput fm z tdi
 
-oneInput :: KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
-oneInput i tdi = do
+
+oneInput :: [FieldModifier] -> KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
+oneInput fm i tdi = do
     v <- currentValue (facts tdi)
     inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
+    when (fm ==  [FRead]) . void $ do
+      element inputUI # set UI.enabled False
     onCE <- UI.onChangeE inputUI
     let pke = unionWith const  (decode <$> onCE) (Right <$> rumors tdi)
         decode v = maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v

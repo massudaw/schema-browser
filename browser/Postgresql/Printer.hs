@@ -214,7 +214,7 @@ expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
      aliasKeys (at@(IT n _ )) = do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
-     name =  {- L.nubBy (\i j -> let f = fmap _relOrigin . keyattr  in f i  == f j)$-} tableAttr tb -- <> ((flip Attr (TB1 ()) ) <$> _kvattrs meta)
+     name = tableAttr tb
   cols <- mapM (aliasKeys  )  (sortPosition name)
   return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing
   )
@@ -277,12 +277,11 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 
 
-expandQuery' inf meta left m = atTable meta $ F.foldl' (\j i -> do
-        v <- j
-        l <- (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )
-        return (l . v)  ) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
-
-
+expandQuery' inf meta left m = atTable meta $ F.foldl'
+  (\j i -> do
+    v <- j
+    l <- expandJoin inf meta left (F.toList (_kvvalues  m) ) i
+    return (l . v)) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
 
 expandJoin :: InformationSchema -> KVMetadata Key -> Bool -> [Column Key ()] -> Column Key () -> Codegen (SQLRow -> SQLRow)
 expandJoin inf meta left env (IT i (LeftTB1 (Just tb) ))
@@ -332,7 +331,6 @@ intersectionOp (Primitive [] j) op (Primitive (KArray :_) i )
   | isPrimReflexive i j = (\i j  -> i <> renderBinary op <> "(" <> j <> ")" )
   | otherwise = error $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i op j = inner (renderBinary op)
-
 
 
 
