@@ -38,6 +38,8 @@ module Types.Common
   , liftFK
   , recoverFK
   , kvFilter
+  , kvNull
+  , kvSize
   -- ,recoverAttr', firstATB ,traFAValue,AValue(..),TBAttr
   , FTB(..)
   , unTB1
@@ -820,7 +822,13 @@ replaceRecRel ::
   -> KV k b
 replaceRecRel i = foldr (\(MutRec l) v -> foldr (\a -> recOverKV a l) v l) i
 
-kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> TBData  k a ->  TBData  k a
+kvSize :: Ord k => KV k a ->  Int
+kvSize (KV i) = Map.size i
+
+kvNull :: Ord k => KV k a ->  Bool
+kvNull (KV i) = Map.null i
+
+kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  KV k a
 kvFilter pred (KV item) = KV $ Map.filterWithKey (\k _ -> pred k ) item
 
 

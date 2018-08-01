@@ -299,7 +299,7 @@ getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
       table = lookTable rinf $ snd j
       editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $ Inline r)  i )
       nextRef :: [FTB (TBData Key Showable)]
-      nextRef = fmap (\i -> _fkttable $ justError "no it" $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) ) set
+      nextRef = fmap (\i -> _fkttable $ justError "no it" $ kvLookup (S.singleton $ Inline r) i ) set
 
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
@@ -325,7 +325,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
         primPredicate o k  = do
           i <- unSOptional (_tbattr (lkAttr k o))
           return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-        lkAttr k v = justError ("no attr " <> show k) $ M.lookup (S.singleton (Inline (_relOrigin k))) (_kvvalues $ tableNonRef (KV v))
+        lkAttr k v = justError ("no attr " <> show k) $ kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef (KV v))
         refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
         predm = refs <> predicate i predtop
     tb2 <-  case predm of
@@ -342,17 +342,17 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
             replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
             taratt = getAtt tar (tableNonRef m)
             tarinj = getAtt inj (tableNonRef m)
-        addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-        addAttr r = (\(KV i) -> KV (M.insert (keyattrs r) r  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k) i ))
+        add :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
+        add r = addAttr r  . kvFilter (\k -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k)
         joined i = do
            fk <- joinFK i
-           return $ addAttr  fk i
+           return $ add fk i
     return (me >=> joined,old <> refl)
 
 mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
-getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues  $ k
+getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . unkvlist  $ k
 
 
 getFKS
@@ -807,7 +807,7 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = do
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel = fmap (_relOrigin. head. F.toList) .M.keys  $ _kvvalues pk
+    pkrel = fmap (_relOrigin. head. F.toList) $ kvkeys pk
   recoverFK pkrel rel2 <$> (tbEditRef (tbRefFun rel2) m2 (liftFK g) (liftFK f))
 
 type RelOperations b
@@ -861,7 +861,7 @@ tbInsertEdit m f@(FKT pk rel2 t2) = do
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel = fmap (_relOrigin. head. F.toList) .M.keys  $ _kvvalues pk
+    pkrel = fmap (_relOrigin. head. F.toList) . kvkeys  $ pk
   recoverFK  pkrel rel2 <$> tbInsertRef (tbRefFun rel2) m2 (liftFK f)
 
 tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
@@ -1151,9 +1151,6 @@ loadFKDisk  inf old  re (RecJoin i l)
     loadFKDisk inf old (i:re) l
 loadFKDisk  _ _ _ _  = return (const Nothing)
 
-addAttr :: Ord k => S.Set k -> TBData k Showable -> Column k Showable ->  TBData k Showable
-addAttr refl  i r = (\(KV i) -> KV (M.insert (keyattrs r) (r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i
-
 
 writeSchema (schema,schemaVar) = do
   varmap <- atomically $ M.toList <$>  readTVar (mvarMap schemaVar)
@@ -1218,9 +1215,7 @@ innerJoin targetM srel alias (origin,pinf,emap)= do
         where
           replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           taratt = getAtt tar (tableNonRef m)
-    addAttr :: Maybe (Column Key Showable) -> TBData Key Showable -> Maybe (TBData Key Showable)
-    addAttr r (KV i) = (\l -> KV (M.insert (S.singleton $ Inline aliask) l i)) <$> r
-    joined i = addAttr (joinFK i) i
+    joined i = flip addAttr i <$> joinFK i
   return $ (origin,inf,G.fromList' $ catMaybes $ (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap)
 
 
@@ -1245,8 +1240,6 @@ joinTable  targetM srel alias (origin,pinf,emap)= do
             where
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
-    addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-    addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ Inline aliask ) r i ))
     joined i = addAttr (joinFK i) i
   return $ (origin,inf,joined <$> emap)
 
@@ -1383,9 +1376,7 @@ innerJoinR (P j k) (P l n) srel alias
             where
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
-          addAttr :: Maybe (Column Key Showable) -> TBData Key Showable -> Maybe (TBData Key Showable)
-          addAttr r (KV i) = (\l -> KV (M.insert (S.singleton $ Inline aliask) l i)) <$> r
-          joined i = addAttr (joinFK i) i
+          joined i = flip addAttr i <$> joinFK i
         return (G.fromList' $ catMaybes $ (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap)) -< (kv,nv))
 
 leftJoinR
@@ -1412,8 +1403,6 @@ leftJoinR (P j k) (P l n) srel alias
             where
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
-          addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-          addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ Inline aliask ) r i ))
           joined i = addAttr (joinFK i) i
         return $  joined  <$> emap)-< (kv,nv))
 

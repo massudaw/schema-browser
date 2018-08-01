@@ -1237,7 +1237,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       let
         tdfk = merge <$> tsel <*> tedit
         iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
-        iold2 =  fmap (M.mapKeys (justError "no head iold2" . safeHead . F.toList . S.map _relOrigin ). fmap _tbattr . _kvvalues . filterNotReflect . fst.unTBRef) <$> ftdi
+        iold2 =  fmap (M.fromList . fmap (\(Attr i v) -> (i,v)) . unkvlist . filterNotReflect . fst.unTBRef) <$> ftdi
         predicatefk o = WherePredicate . AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   [(_relTarget rel,Left  (o,Flip $ _relOperator rel))] )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional v) <$> M.toList o
         predicate = fmap predicatefk <$> iold2
         sel = liftA2 diff' oldItems ftdi
@@ -1252,7 +1252,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
                 g <- currentValue (facts gist)
                 s <- currentValue (facts sgist)
                 let search  i
-                      | M.size  (_kvvalues  i) /= L.length rel =  Nothing
+                      | kvSize i /= L.length rel =  Nothing
                       | otherwise = searchGist relTable targetTable  g s i
                     searchDiff i = diff' (snd .unTBRef<$> initial) (search =<< i)
                     newsel =  applyIfChange (fst .unTBRef<$> initial) vv
