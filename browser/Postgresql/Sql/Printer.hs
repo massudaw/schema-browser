@@ -39,6 +39,7 @@ test = renderRow example
 renderAttr (SQLAReference t a) = maybe a (\t -> t <> "." <> a) t
 renderAttr (SQLAIndexAttr a f ) = "(" <> renderAttr a <> ")." <> f
 renderAttr (SQLARename a f ) =  renderAttr a <> " AS " <> f
+renderAttr (SQLAType a t) =  renderAttr a <> " :: " <> t
 renderAttr (SQLAInline a ) =  a
 
 renderJoinType JTLateral = "LATERAL"

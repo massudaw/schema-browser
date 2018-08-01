@@ -34,48 +34,6 @@ import Prelude hiding ((.), head, id)
 import Step.Common
 import Types
 
-findFK :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
-findFK l v =
-  fmap snd $
-  L.find (\(i, v) -> isFK v && S.map _relOrigin i == (S.fromList l)) $
-  M.toList $ _kvvalues $ (v)
-  where
-    isRel (Rel _ _ _) = True
-    isRel _ = False
-    isFK i =
-      case i of
-        FKT _ _ _ -> True
-        IT _ _ -> True
-                   -- ARel _ _ -> True
-                   -- ARef  _  -> True
-        i -> False
-
--- findFK  l v =  fmap recoverAttr' $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ v
-findAttr :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
-findAttr l v = kvLookup (S.singleton . Inline $ l) v <|> findFun l v
-
-findFun :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
-findFun l v =
-  fmap snd .
-  L.find (((pure . Inline $ l) ==) . fmap mapFunctions . S.toList . fst) $
-  M.toList $ _kvvalues $ (v)
-  where
-    mapFunctions (RelFun i _ _) = Inline i
-    mapFunctions j = j
-
--- findFun l v = fmap recoverAttr' . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ v
-findFKAttr :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
-findFKAttr l v =
-  case L.find (\(k, v) -> not $ L.null $ L.intersect l (S.toList k)) $
-       M.toList $ M.mapKeys (S.map (_relOrigin)) $ _kvvalues $ (v) of
-    Just (k, FKT a _ _) ->
-      L.find
-        (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i)
-        (F.toList $ _kvvalues $a)
-   -- Just (k,ARel a _ ) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (unkvlist a)
-    Just (k, i) -> error (show l)
-    Nothing -> Nothing
-
 replaceU ix i (Many nt) = Many $ (fmap (replace ix i) nt)
 
 replace ix i (Nested k nt) = Nested k (replaceU ix i nt)

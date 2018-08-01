@@ -367,7 +367,7 @@ getFKS
               (TBData Key Showable))
 getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (refLookup (pathRelRel f) tbf) )) (return (return ,S.empty )) sorted
   where
-    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table <> functionRefs table)
+    sorted = P.sortBy (P.comparing (relSort . pathRelRel))  (rawFKS table <> functionRefs table)
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
 
@@ -1005,7 +1005,7 @@ createTableRefs inf re table = do
           dynFork $ forever $ updateTable inf dbref
           let
             -- Collect all nested references and add one per relation avoided duplicated refs
-            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[]) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (rawFKS table)
+            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[]) $ P.sortBy (P.comparing (relSort . pathRelRel)) (rawFKS table)
           -- TODO : Add evaluator for functions What to do when one of the function deps change?
           nestedFKS <- mapM (\((rinf, t),l) -> do
             liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
@@ -1097,7 +1097,7 @@ updateTable inf (DBRef {..})
 
 loadFKSDisk inf targetTable re = do
   let
-    psort = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ rawFKS targetTable
+    psort = P.sortBy (P.comparing (relSort . pathRelRel)) $ rawFKS targetTable
     (fkSet2,pre) = F.foldl' (\(s,l) i -> ( (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )))  (S.empty , return []) psort
   prefks <- pre
   return (\table ->

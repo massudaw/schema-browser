@@ -17,5 +17,7 @@ extra-deps:
   - deps/extended-reals
   - deps/data-interval
   - deps/threepenny-gui
+  - pomaps-0.0.1.0
+
 
 resolver: lts-12.1

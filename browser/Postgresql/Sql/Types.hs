@@ -34,6 +34,7 @@ data SQLAttr
   | SQLAReference (Maybe Text) Text
   | SQLAInline Text
   | SQLAValue Value
+  | SQLAType SQLAttr Text
   | SQLAIndexAttr SQLAttr Text
   | SQLARename SQLAttr Text
   deriving(Show)

@@ -241,6 +241,8 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
        PColor-> (3,1)
        PTime (PTimestamp _ )-> (3,1)
        PTime PDayTime -> (3,1)
+       PGeom 3 PPosition  -> (6,1)
+       PGeom 2 PPosition  -> (3,1)
        PAddress -> (12,8)
        PMime m -> case m of
               "image/jpg" ->  (4,8)
@@ -307,7 +309,7 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
     nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin $ k) wl
     restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
     reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
-      where frel = filter (\i -> isJust $ M.lookup (S.singleton (Inline (_relOrigin i))) (_kvvalues ifk)) rel
+      where frel = filter (\i -> isJust $ kvLookup (S.singleton (Inline (_relOrigin i))) ifk) rel
     convertConstr (f,j) = (f, fmap (\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel ) j)
   fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  nonInjRefs oldItems  i
 
@@ -376,7 +378,7 @@ anyColumns
 anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       let
         fks2 = M.fromList $ run <$> cols
-        initialAttr = join . fmap (\ j -> safeHead $ catMaybes  $ unLeftItens <$> F.toList (_kvvalues j))  <$>oldItems
+        initialAttr = ((\j -> safeHead $ catMaybes $ unLeftItens <$> unkvlist  j) =<<) <$>oldItems
         sumButtom itb =  do
           el <- UI.div
           element =<< labelCaseDiff inf (justError "no sum column" $ M.lookup itb (unKV k)) (join . fmap (M.lookup itb . unKV) <$> oldItems) ((\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
@@ -402,7 +404,7 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
     run (l,m) = (l,do
       let hasEl = L.any (mAny (maybe False (l==) . safeHead ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
           plugattr = indexPluginAttrDiff m plugmods
-          oldref = join . fmap ((^?  Le.ix l ) . _kvvalues ) <$> oldItems
+          oldref = (kvLookup l =<<) <$> oldItems
       tbCaseDiff inf table constr m  M.empty plugattr oldref
       )
 
@@ -427,7 +429,7 @@ buildFKS inf hasLabel el constr table refs plugmods   oldItems =  F.foldl'  run 
         w <- jm
         let hasEl = L.any (mAny (maybe False (l==) . safeHead ))  (fmap (fmap S.fromList ) <$> _kvrecrels meta)
             plugattr = indexPluginAttrDiff m plugmods
-            oldref = join . fmap ((^?  Le.ix l ) . _kvvalues) <$> oldItems
+            oldref = (kvLookup l =<<) <$> oldItems
             aref = M.lookup l refs
             replaceNonInj = maybe [] (\j -> pure (Many ((IProd Nothing. _relOrigin <$> F.toList l)), onDiff  Just  (const Nothing)<$> fst j))  aref
         wn <-  tbCaseDiff inf table constr m  (M.fromList $ fmap (first triding) <$> w) (replaceNonInj <> plugattr) oldref
@@ -458,9 +460,9 @@ tableConstraints
      -> Tidings (f (TBData Key Showable)) -> KV Key a -> SelPKConstraint
 tableConstraints (m ,sgist,gist) preoldItems ftb = constraints
   where
-    primaryConstraint = (M.keys $ _kvvalues $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> (deleteCurrentUn m un  <$> preoldItems <*> gist))
+    primaryConstraint = (kvkeys $ tbPK m ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$> (deleteCurrentUn m un  <$> preoldItems <*> gist))
       where un = _kvpk m
-    secondaryConstraints un = (M.keys $ _kvvalues $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn m un <$> preoldItems <*> (justError "no un". M.lookup un <$>  sgist)))
+    secondaryConstraints un = (kvkeys  $ tbUn (S.fromList un ) ftb ,  C.Predicate . flip ( checkGist m un .kvlist ) <$>  (deleteCurrentUn m un <$> preoldItems <*> (justError "no un". M.lookup un <$>  sgist)))
     constraints :: SelPKConstraint
     constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
 
@@ -508,7 +510,7 @@ rowTableHeaders  ftb = do
     label (k,x) = do
       l <- detailsLabel (set UI.text (attributeLabel x )) (UI.div # set text (show $ index x))
       UI.div # set children [l] # set UI.class_ ("col-xs-" <> show (fst (attrSize x)))
-    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ (_kvvalues ftb)
+    srefs = sortedFields ftb
   els <- mapM label srefs
   UI.div # set children (ixE : operation : els) # set UI.style [("display", "flex")]
 
@@ -568,7 +570,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
   let
     resdiff =   snd <$> res
     srefs :: [(Set (Rel Key),TB Key ())]
-    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst)) . M.toList $ replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    srefs =  sortedFields $ ftb -- $ replaceRecRel ftb (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> (resdiff <> plmods)
 
     isSum = rawIsSum table
@@ -605,7 +607,7 @@ eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
   let
     resdiff =   snd <$> res
     srefs :: [(Set (Rel Key),TB Key ())]
-    srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ (_kvvalues ftb) -- replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    srefs = sortedFields  ftb -- replaceRecRel (_kvvalues ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> (resdiff <> plmods)
 
   let isSum = rawIsSum table
@@ -1211,9 +1213,9 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
       let
         reflectRels = filter ((`L.elem` ifk). _relOrigin) rel
         filterReflect m = filter (\k  -> _relOrigin (justError "no head notreflect" . safeHead $ F.toList (index k)) `L.elem` fmap _relOrigin reflectRels  ) m
-        filterNotReflect (KV m) = KV $ M.filterWithKey (\k  _-> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
-        filterReflectKV (KV m) = KV $ M.filterWithKey (\k  _-> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
-        nonEmptyTBRef v@(TBRef (KV m,KV n )) = if  L.null n then Nothing else Just v
+        filterNotReflect m = kvFilter (\k -> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
+        filterReflectKV m = kvFilter (\k -> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
+        nonEmptyTBRef v@(TBRef n) = if  snd n  == mempty then Nothing else Just v
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
@@ -1410,8 +1412,8 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
     emptyFKT = FKT  (kvlist []) rel (const (kvlist []) <$> fkref)
-    mergeRef (FKT r rel v) i = FKT (foldl' addAttr r (nonRefTB i)) rel v
-    addAttr  (KV i) v = KV $ if isNothing (unSOptional (_tbattr v)) then i else (M.insert (index v) v i)
+    mergeRef (FKT r rel v) i = FKT (foldl' addAttrO r (nonRefTB i)) rel v
+    addAttrO  i v = if isNothing (unSOptional (_tbattr v)) then i else addAttr v i
     (targetSchema,target) = findRefTableKey table rel
     inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
     setattr = keyAttr <$> unkvlist ifk

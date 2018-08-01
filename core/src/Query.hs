@@ -8,9 +8,7 @@
 
 module Query
   (
-   tbPK
-  ,RelSort(..)
-  ,TableMap
+  TableMap
   ,joinRel2
   ,isPrimReflexive
   ,alterKeyType
@@ -29,9 +27,10 @@ module Query
   ,isInlineRel
   ,mAny
   ,allRec'
-  ,eitherDescPK
   ,inf'
   ,sup'
+  ,eitherDescPK
+  ,tbPK
   )
   where
 
@@ -181,11 +180,12 @@ pathToRel (FKInlineTable i _ )  = [Inline i]
 pathToRel (FunctionField i _ _ )  = [Inline i]
 pathToRel (FKJoinTable ks _  ) = ks
 
-findRefIT ::  Key -> KV Key () -> TB Key ()
-findRefIT ifk = justError ("cant find ref" <> show ifk) . M.lookup (S.singleton $ Inline ifk ) . _kvvalues
 
 findRefFK ::  [Key] -> KV Key ()  -> KV Key ()
 findRefFK fks ksbn = kvlist $ fmap (\i -> findRefIT i ksbn ) fks
+  where
+    findRefIT ::  Key -> KV Key () -> TB Key ()
+    findRefIT ifk = justError ("cant find ref" <> show ifk) . findAttr  ifk
 
 recursePath
   :: RecState Key
@@ -235,26 +235,25 @@ recurseTB invSchema isRec table =
     m = tableMeta table
     fks' = rawFKS table
     kv = labelTable table
-    items = _kvvalues kv
+    items = kv
     fkSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ fks'
     funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ functionRefs table
-    nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
-    fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (fks' <> functionRefs table)
+    nonFKAttrs =  kvFilter (\i -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
+    fklist = P.sortBy (P.comparing (relSort . pathRelRel)) (fks' <> functionRefs table)
     pt  = F.foldl (\acc  fk ->
           let relFk =pathRelRel fk
               lastItem =   L.filter cond isRec
               cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
-              i = (relFk,) . recursePath  (fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) acc kv invSchema $ fk
+              i = (relFk,) .  recursePath  (fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) acc kv invSchema $ fk
           in if L.length lastItem < 2
                 then i:acc
                 else acc) [] fklist
-  in (KV . M.fromList $ nonFKAttrs <> pt)
+  in ( nonFKAttrs <> kvlist  (snd <$> pt))
 
 mAny f (MutRec i) = L.any f i
 
 type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
-
 
 
 
@@ -268,9 +267,6 @@ eitherDescPK kv i
 tbDesc, tbPK :: Ord k => KVMetadata k -> TBData  k a ->  TBData  k a
 tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) )
 tbPK kv = kvFilter (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) )
-
-kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> TBData  k a ->  TBData  k a
-kvFilter pred (KV item) = KV $ M.filterWithKey (\k _ -> pred k ) item
 
 -- Combinators
 
@@ -295,7 +291,7 @@ backFKRefType
      -> [Key]
      -> TBData  Key a
      -> Maybe [ TB Key a]
-backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK . concat . fmap aattr . F.toList .  _kvvalues
+backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK . concat . fmap aattr . unkvlist
   where
     reorderPK  = fmap lookFKsel
     lookFKsel (ko,v)=  (\kn tkn -> (kn , transformKey (keyType ko ) tkn v)) <$> knm <*> tknm
@@ -305,7 +301,7 @@ backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . cat
 
 reflectFK
   :: Show a => [Rel Key] -> TBData Key a -> Maybe (TBData Key a)
-reflectFK [] i = pure $ KV M.empty
+reflectFK [] i = pure mempty
 reflectFK rel table =
   kvlist <$> backFKRefType relTable relType (_relOrigin <$> rel) table
       where
@@ -321,7 +317,7 @@ backFKRef
      -> [Key]
      -> TBData  Key a
      -> Maybe [ TB Key a]
-backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues
+backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK .  concat . fmap aattr . unkvlist
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
     lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
@@ -329,9 +325,6 @@ backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reo
 
 
 tbpred m un  = G.notOptional . G.getUnique  un
-
-kvToMap :: Ord k => KV k a -> M.Map k (FTB a)
-kvToMap  = M.mapKeys (_relOrigin . head .F.toList ) . fmap _tbattr . _kvvalues
 
 tbpredFK
   ::  ( Show k,Ord k)

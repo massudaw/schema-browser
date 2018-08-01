@@ -46,8 +46,10 @@ library
    , lens
    , unordered-containers
    , data-interval
+   , lattices
    , extended-reals
    , safe
+   , pomaps
    , binary
    , binary-orphans
    , GiST

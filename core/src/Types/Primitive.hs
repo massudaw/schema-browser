@@ -53,8 +53,6 @@ import System.IO.Unsafe
 import Types.Common
 import Utils
 
-makeLenses ''KV
-makeLenses ''TB
 
 data KTypePrim
   = KSerial
@@ -181,10 +179,6 @@ data SqlOperationTK t k
   | FKInlineTable k t
   | FunctionField k Expr [Rel k]
   deriving (Eq, Ord, Show, Functor, Foldable, Generic)
-
-newtype MutRec a = MutRec
-  { unMutRec :: [a]
-  } deriving (Eq, Ord, Show, Functor, Foldable, Generic, Binary, NFData)
 
 instance Binary k => Binary (SqlOperationK k)
 
@@ -708,136 +702,6 @@ unKOptional (Key a v c m n d (Primitive [] e)) =
 unKOptional i = i -- error ("unKOptional" <> show i)
 
 
-
-recOverAttr ::
-     Ord k
-  => [Set (Rel k)]
-  -> TB k a
-  -> (Map (Set (Rel k)) (TB k a) -> Map (Set (Rel k)) (TB k a))
-recOverAttr (k:[]) attr = Map.insert k attr
-recOverAttr (k:xs) attr =
-  Map.alter
-    (fmap (Le.over ifkttable (fmap (KV . recOverAttr xs attr . _kvvalues))))
-    k
-
-recOverMAttr' ::
-     [Set (Rel Key)]
-  -> [[Set (Rel Key)]]
-  -> Map (Set (Rel Key)) (TB Key b)
-  -> Map (Set (Rel Key)) (TB Key b)
-recOverMAttr' tag tar m = foldr go m tar
-  where
-    go (k:[]) =
-      Map.alter
-        (fmap
-           ((Le.over
-               ifkttable
-               ((fmap ((KV . recOverAttr tag recv . _kvvalues)))))))
-        k
-      where
-        recv = gt tag m
-    go (k:xs) =
-      Map.alter
-        (fmap ((Le.over ifkttable ((fmap ((KV . go xs . _kvvalues)))))))
-        k
-    gt (k:[]) = justError "no key" . Map.lookup k
-    gt (k:xs) =
-      gt xs .
-      _kvvalues .
-      head . F.toList . _fkttable . justError "no key" . Map.lookup k
-
-replaceRecRel ::
-     Map (Set (Rel Key)) (TB Key b)
-  -> [MutRec [Set (Rel Key)]]
-  -> Map (Set (Rel Key)) (TB Key b)
-replaceRecRel = foldr (\(MutRec l) v -> foldr (\a -> recOverMAttr' a l) v l)
-
-
-
-data RelSort k =
-  RelSort [Rel k]
-  deriving (Eq, Ord)
-
--- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
-instance (Ord k, Show k, P.Poset k) => P.Poset (RelSort k) where
-  compare (RelSort i) (RelSort j) =
-    case ( comp (out i) (inp j)
-         , (comp (out j) (inp i))
-         , P.compare (inp i) (inp j)
-         , P.compare (out i) (out j))
-            -- Reverse order
-          of
-      (_, P.LT, _, _) ->
-        if S.size (out j) == L.length j
-          then P.GT
-          else P.EQ
-            -- Right order
-      (P.LT, _, _, _) -> P.LT
-            -- No intersection  between elements sort by inputset
-      (_, _, P.EQ, o) -> o
-      (_, _, i, _) -> i
-    where
-      inp j = norm $ _relInputs <$> j
-      out j = norm $ _relOutputs <$> j
-      norm = S.fromList . concat . catMaybes
-      comp i j
-        | S.null (S.intersection i j) = P.EQ
-      comp i j
-        | S.empty == i = P.EQ
-      comp i j
-        | S.empty == j = P.EQ
-      comp i j = P.compare i j
-  compare (RelSort [i]) (RelSort [j]) = P.compare i j
-  compare (RelSort [i]) (RelSort j) =
-    P.compare (S.singleton i) (S.fromList j) <>
-    if L.any (== P.EQ) (P.compare i <$> j)
-      then P.LT
-      else foldl1 mappend (P.compare i <$> j)
-  compare (RelSort i) (RelSort [j]) =
-    P.compare (S.fromList i) (S.singleton j) <>
-    if L.any (== P.EQ) (flip P.compare j <$> i)
-      then P.GT
-      else foldl1 mappend (flip P.compare j <$> i)
-  compare (RelSort i) (RelSort j) = P.compare (S.fromList i) (S.fromList j)
-
-instance (Show i, P.Poset i) => P.Poset (Rel i) where
-  compare (Inline i) (Inline j) = P.compare i j
-  compare (Rel i _ a) (Inline j) =
-    case i == j of
-      True -> P.GT
-      False -> P.compare i j
-  compare (Inline j) (Rel i _ a) =
-    case i == j of
-      True -> P.LT
-      False -> P.compare j i
-  compare (Rel i _ a) (Rel j _ b) = P.compare i j <> P.compare a b
-  compare n@(RelFun i ex a) o@(RelFun j ex2 k) =
-    case (L.any (== Inline j) a, L.any (== Inline i) k) of
-      (True, _) -> P.GT
-      (_, True) -> P.LT
-      (False, False) -> P.compare (Inline i) (Inline j)
-  compare (RelFun i e a) j =
-    case L.any (== j) a of
-      True -> P.GT
-      False -> P.compare (Inline i) j
-  compare j (RelFun i e a) =
-    case L.any (== j) a of
-      True -> P.LT
-      False -> P.compare j (Inline i)
-  compare i j = error (show ("cant compare", i, j))
-
-instance P.Poset (FKey i) where
-  compare i j =
-    case compare (keyPosition i) (keyPosition j) of
-      EQ -> P.EQ
-      LT -> P.LT
-      GT -> P.GT
-
-tbUn :: Ord k => Set k -> KV k a -> KV k a
-tbUn un (KV item) = KV $ Map.filterWithKey (\k _ -> pred k) item
-  where
-    pred k = S.isSubsetOf (S.map _relOrigin k) un
-
 generateUn :: Ord k => KVMetadata k -> [k] -> [Set (Rel k)]
 generateUn m un = inline <> rels
   where
@@ -958,6 +822,17 @@ atTBValue l f g h v = traTable (Le.at (Set.fromList l) (traverse modify)) v
           ti -> case recoverAttr (F.toList key,ti) of
                  t@(FKT l i j) ->   valueattr . recoverFK  (concat $ fmap _relOrigin . keyattr <$> (unkvlist l )) i <$> h (liftFK t)
 -}
+
+instance P.Poset (FKey i) where
+  compare i j =
+    case compare (keyPosition i) (keyPosition j) of
+      EQ -> P.EQ
+      LT -> P.LT
+      GT -> P.GT
+
+
+
+
 
 keyRef k = Inline k
 

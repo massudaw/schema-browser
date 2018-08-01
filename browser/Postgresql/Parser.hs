@@ -104,7 +104,6 @@ instance  TF.ToField (TB Key Showable)  where
   toField e = error (show e)
 
 
-
 instance TR.ToRow a => TF.ToField (TBRecord2 a) where
   toField (TBRecord2 (s,t) l) =  TF.Many (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromString . T.unpack $  ") :: " <> s <> "." <> t) ] )
 
@@ -475,7 +474,6 @@ diffInterval = (do
     v -> error $ show v)
     where
       diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
-
 
 
 fromShowable k f = case A.parseEither (fmap fst.codegent. parseShowableJSON  parsePrimitiveJSON k) f of

@@ -26,7 +26,7 @@ import qualified Data.Text as T
 import qualified Data.Set as S
 
 
-foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[]) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel))fks)
+foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[]) $ P.sortBy (P.comparing (relSort . pathRelRel))fks)
 
 filterDuplicated  fun (i,l)  j = (i <> S.map _relOrigin (pathRelRel j) ,fun i j : l)
 

@@ -3,6 +3,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -25,6 +26,7 @@ module Types.Patch
   , groupSplit2
   --,recoverEdit
   , Editor(..)
+  , Atom(..)
   , filterDiff
   , isDiff
   , isKeep
@@ -99,6 +101,18 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Exts
 
+
+newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
+
+instance (Compact (Index a ),Patch a ) => Patch (Atom a) where
+  type Index (Atom a) = [Index a]
+  createIfChange l =  do
+    n <- safeHead (compact l)
+    Atom <$> createIfChange n
+  applyUndo (Atom i) j = first Atom <$> foldUndo  i j
+
+
+
 instance Applicative PathFTB where
   pure = PAtom
   POpt i <*> POpt j = POpt $ liftA2 (<*>) i j
@@ -128,15 +142,19 @@ data EitherDiff a b
 
 filterDiff = fmap (\(Diff i) -> i) . filter isDiff
 
-instance (Patch a , Patch b) => Patch (a,b) where
-  type Index (a,b) = (Index a , Index b)
-  createIfChange (i,j) = liftA2 (,) (createIfChange i ) (createIfChange j)
+instance (Compact (Index a),Compact (Index b),Patch a , Patch b) => Patch (a,b) where
+  type Index (a,b) = (Index (Atom a) , Index (Atom b))
+  createIfChange (i,j) = liftA2 (,) (unAtom' <$> createIfChange i ) (unAtom' <$>createIfChange j)
   applyUndo  (i,j) (a,b)  = do
-    (i',ua) <- applyUndo i a
-    (j',ub) <- applyUndo j b
-    return ((i',j'),(ua,ub))
+    (i',ua) <- applyUndo (Atom i) a
+    (j',ub) <- applyUndo (Atom j) b
+    return ((unAtom'  i',unAtom'  j'),(ua,ub))
 
-  diff (i,j) (a,b) = (,) <$> diff i a <*> diff j b
+  diff (i,j) (a,b) = all (diff (Atom i) (Atom a)) (diff (Atom j) (Atom b))
+    where
+      all Nothing Nothing = Nothing
+      all (Just []) (Just []) = Nothing
+      all i j = Just (fromMaybe [] i,fromMaybe [] j)
 
 
 instance (Patch a ,Patch b) => Patch (Either a b) where
@@ -380,7 +398,7 @@ recoverEditChange (Just i) Keep = Right (Just i, Keep)
 recoverEditChange (Just i) Delete = Right (Nothing, Diff (patch i))
 recoverEditChange (Just i) (Diff j) = bimap Just Diff <$> applyUndo i j
 recoverEditChange Nothing (Diff j) =
-  (, Delete) . Just <$> maybe (Left $ "cant create") Right (createIfChange j)
+  (, Delete) . Just <$> maybe (Left $ "cant create: Nothing, Diff") Right (createIfChange j)
 recoverEditChange Nothing Keep = Right (Nothing, Keep)
 recoverEditChange Nothing Delete = Left "cant delete"
 recoverEditChange _ _ = error "no edit"
@@ -989,7 +1007,7 @@ createUndoFTBM (PInter b o) =
         else interval (Interval.NegInf, False) <$>
              (firstT (traverse createUndoFTBM) o)
 createUndoFTBM (PAtom i) =
-  maybe (Left $ "cant create: ") (Right . TB1) $ createIfChange i
+  maybe (Left  "cant create: ") (Right . TB1) $ createIfChange i
 createUndoFTBM (PatchSet (i Non.:| l)) =
   F.foldl'
     (\i j -> flip (\i -> fmap fst . applyUndoFTBM i) j =<< i)

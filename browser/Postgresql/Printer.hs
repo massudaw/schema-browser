@@ -3,11 +3,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Postgresql.Printer
   (selectQuery
+  ,lkTB
   ,codegen
   ,codegent
   ,runCodegenT
   ,expandBaseTable
-  ,explodeRecord
+  ,projectTree
   ,renderType
   ,createTable
   ,dropTable
@@ -16,8 +17,7 @@ module Postgresql.Printer
   ,CodegenT
   ,Address(..)
   ,selectRow
-  ,loadDelayedQuery
-  ,lkTB
+  ,getFromQuery
   ,atTable
   )
   where
@@ -83,9 +83,10 @@ mkKey i = do
 mkTable i = do
   (c,m) <- fst <$> get
   path <- ask
-  let next = (c+1,M.insert (path ++ [i]) (c+1) m)
+  let next = (cnew, M.insert (path ++ [i]) cnew m)
+      cnew = c + 1
   modify (\(_,j) -> (next,j))
-  return (c+1)
+  return $ "t" <> T.pack (show cnew)
 
 atTable :: MonadReader [Address k] m => KVMetadata k -> m a -> m a
 atTable m = local (++ [Root m])
@@ -96,25 +97,25 @@ lkKey i = do
   path <- ask
   return $ M.lookup (path ++ [i]) m
 
-newAttr k = mkKey (AttributeReference k)
 
 lkTB (Attr k _) = do
   a<- lkAttr k
   return $ case a of
     Just a -> "k" <> T.pack (show a)
-    Nothing ->keyValue  k
+    Nothing -> keyValue  k
+-- error (show k)
 
 lkTB (Fun k _ _ ) = do
   a <-lkAttr k
   return $ case a of
     Just a -> "k" <> T.pack (show a)
-    Nothing -> keyValue k
+    Nothing -> error (show k)
 
 lkTB (IT k _ ) = do
   a <-lkIT k
   return $ case a of
     Just a -> "k" <> T.pack (show a)
-    Nothing -> keyValue k
+    Nothing -> error (show k)
 
 lkTB (FKT  _ rel _ ) = do
   a <- lkFK rel
@@ -123,16 +124,21 @@ lkTB (FKT  _ rel _ ) = do
     Nothing -> error (show rel)
 
 lkAttr k = lkKey (AttributeReference k)
+lkIT k = lkKey (TableReference $ RelInline k)
+lkFK k = lkKey (TableReference $ RelFK k)
 
 newFun k = mkKey (AttributeReference k)
 
-newIT k = mkKey (TableReference $ RelInline k)
-lkIT k = lkKey (TableReference $ RelInline k)
+newAttr k = do
+  a <- mkKey (AttributeReference k)
+  return ("k" <>T.pack (show a))
+
+newIT k = do
+  a <- mkKey (TableReference $ RelInline k)
+  return ("ik"<> T.pack (show a))
 
 newFK k = mkKey (TableReference $ RelFK k)
-lkFK k = lkKey (TableReference $ RelFK k)
 
-newTable m = mkTable (Root m)
 
 dropTable :: Table -> Text
 dropTable r= "DROP TABLE "<> rawFullName r
@@ -154,42 +160,12 @@ createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate 
     -- renderFK (Path origin (FKJoinTable  ks (_,table)) ) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
     renderFK _ = ""
 
-
-
 reservedNames = ["column","table","schema"]
 
 escapeReserved :: T.Text -> T.Text
 escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
 
-tableAttr = unkvlist . tableNonRef
-
-expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
-expandInlineTable meta tb@( _) pre = asNewTable meta $ (\t->  do
-  let
-    name =  tableAttr tb
-    aliasKeys (Attr n    _ )  =  do
-      a <- newAttr n
-      return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre) ) ( keyValue n)) ("k" <>T.pack (show a))
-    aliasKeys (IT n _ )  =    do
-      a <- newIT  n
-      return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre )) ( keyValue n)) ("ik"<> T.pack (show a))
-  cols <- mapM (aliasKeys )  (sortPosition name)
-  return $ SQLRSelect cols Nothing Nothing)
-
-
-expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen SQLRow
-expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta $ (\t -> do
-  let
-     rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
-     name =  tableAttr tb
-     aliasKeys (Attr n    _ )  =  do
-       a <- newAttr n
-       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("k" <>T.pack (show a))
-     aliasKeys (IT n _ )  =do
-       a <- newIT  n
-       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("ik"<> T.pack (show a))
-  cols <- mapM (aliasKeys )  (sortPosition name)
-  return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) "ix" )Nothing)
+tableAttr = sortPosition . unkvlist . tableNonRef
 
 sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
 
@@ -199,25 +175,38 @@ asNewTable
       Show a) =>
      KVMetadata k -> (Text -> m SQLRow) -> m SQLRow
 asNewTable meta action = do
-  tidx <- newTable meta
-  let name =    "t" <> T.pack (show tidx)
-  t <- local (++[Root meta]) (action name)
-  return $ SQLRRename  t name
+  tidx <- mkTable (Root meta)
+  t <- atTable meta (action tidx)
+  return $ SQLRRename t tidx
+
+aliasKeys :: Text -> TB Key a -> Codegen SQLAttr
+aliasKeys ref (Attr n    _ )  =  do
+  SQLARename (SQLAIndexAttr (SQLAReference Nothing ref) (keyValue n)) <$> newAttr n
+aliasKeys ref (IT n _ )  =
+  SQLARename (SQLAIndexAttr (SQLAReference Nothing ref) (keyValue n)) <$> newIT n
+
+expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
+expandInlineTable meta tb@( _) pre = asNewTable meta (\t->  do
+  let
+    name =  tableAttr tb
+  cols <- mapM (aliasKeys ("i" <> pre))  name
+  return $ SQLRSelect cols Nothing Nothing)
+
+expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen SQLRow
+expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta  (\t -> do
+  let
+    rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
+    name =  tableAttr tb
+  cols <- mapM (aliasKeys t)  name
+  return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) t) Nothing)
 
 
 expandBaseTable ::  KVMetadata Key -> TBData  Key  () -> Codegen SQLRow
-expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
+expandBaseTable meta tb@( KV i) = asNewTable meta (\t -> do
   let
-     aliasKeys (at@(Attr n _ )) = do
-       a <- newAttr n
-       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("k"<> T.pack (show a))
-     aliasKeys (at@(IT n _ )) = do
-       a <- newIT  n
-       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
-     name = tableAttr tb
-  cols <- mapM (aliasKeys  )  (sortPosition name)
-  return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing
-  )
+    name = tableAttr tb
+  cols <- mapM (aliasKeys t)  name
+  return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing)
 
 
 
@@ -241,32 +230,32 @@ selectQuery
   -> WherePredicate
   -> ((Text,Maybe [(PrimType ,FTB Showable)]),NameMap)
 selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
-      where
-        tableQuery = do
-          tname <- expandBaseTable m t
-          tquery <- expandQuery' inf m False t
-          rec <- explodeRecord inf m t
-          order <- orderBy
-          (predquery,predvalue) <- customPredicate
-          (orderquery,ordervalue) <- ordquery
-          let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
-          let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
-          return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
-        customPredicate = atTable m $ printPred inf m t wpred
-        orderBy = atTable m $ mapM (\(i,j) -> do
-            l <- lkTB (Attr i (TB1 ()))
-            return $ l <> " " <> showOrder j ) order
-        ordquery =  atTable m $ do
-          let
-            preds = zip (_kvpk m) <$> koldpre
-            orderpreds = (\i -> filter ((`elem` (fmap fst i)).fst) order ) <$> preds
-            koldPk :: Maybe [(PrimType,FTB Showable)]
-            koldPk =  fmap (fmap (first keyType )) preds
-            pkParam =  koldPk <> (tail .reverse <$> koldPk)
-          oq <- traverse (traverse (\(i,v) ->  do
-            l <- lkTB (Attr i (TB1 ()))
-            return $ (l,v) ) ) orderpreds
-          return (pure .generateComparison <$> oq,pkParam)
+    where
+      tableQuery = do
+        tname <- expandBaseTable m t
+        tquery <- expandQuery' inf m JDNormal t
+        rec <- projectTree inf m t
+        order <- orderBy
+        (predquery,predvalue) <- customPredicate
+        (orderquery,ordervalue) <- ordquery
+        let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
+        let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
+        return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
+      customPredicate = atTable m $ printPred inf m t wpred
+      orderBy = atTable m $ mapM (\(i,j) -> do
+          l <- lkTB (Attr i (TB1 ()))
+          return $ l <> " " <> showOrder j ) order
+      ordquery =  atTable m $ do
+        let
+          preds = zip (_kvpk m) <$> koldpre
+          orderpreds = (\i -> filter ((`elem` (fmap fst i)).fst) order ) <$> preds
+          koldPk :: Maybe [(PrimType,FTB Showable)]
+          koldPk =  fmap (fmap (first keyType )) preds
+          pkParam =  koldPk <> (tail .reverse <$> koldPk)
+        oq <- traverse (traverse (\(i,v) ->  do
+          l <- lkTB (Attr i (TB1 ()))
+          return $ (l,v))) orderpreds
+        return (pure .generateComparison <$> oq,pkParam)
 
 generateComparison ((k,v):[]) = k <>  dir v <> "?"
   where dir Asc = ">"
@@ -276,44 +265,51 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
         dir Desc = "<"
 
 
-
 expandQuery' inf meta left m = atTable meta $ F.foldl'
   (\j i -> do
     v <- j
     l <- expandJoin inf meta left (F.toList (_kvvalues  m) ) i
-    return (l . v)) (return id) (P.sortBy (P.comparing (RelSort. keyattr )) $  F.toList (_kvvalues  m))
+    return (l . v)) (return id) (P.sortBy (P.comparing (relSort. keyattrs )) $  F.toList (_kvvalues  m))
 
-expandJoin :: InformationSchema -> KVMetadata Key -> Bool -> [Column Key ()] -> Column Key () -> Codegen (SQLRow -> SQLRow)
+expandJoin
+  :: InformationSchema
+  -> KVMetadata Key
+  -> JoinDirection
+  -> [Column Key ()]
+  -> Column Key ()
+  -> Codegen (SQLRow -> SQLRow)
 expandJoin inf meta left env (IT i (LeftTB1 (Just tb) ))
-  = expandJoin inf meta True env $ (IT i tb)
+  = expandJoin inf meta JDLeft env $ (IT i tb)
 expandJoin inf meta left env (t@(IT a (ArrayTB1 (TB1 tb :| _ ) ))) = do
     l <- lkTB t
     let nmeta = lookSMeta inf r
         r = _keyAtom $ keyType a
     itb <- expandInlineArrayTable nmeta tb l
     tjoin <- expandQuery' inf nmeta left tb
-    r <- explodeRecord inf nmeta tb
-    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> l <> " " <> (renderRow  $ tjoin (SQLRFrom  itb )) <> " )  as p" <> l
-    return $ (\row -> SQLRJoin row JTLateral jt (SQLRInline joinc) Nothing)
+    r <- projectTree inf nmeta tb
+    let joinc = SQLRRename (SQLRSelect [SQLARename (SQLAInline $ "array_agg(" <> selectRow "arr" r <> " order by row_number) ") l] (Just $ tjoin (SQLRFrom  itb )) Nothing) ("p" <> l)
+    return $ (\row -> SQLRJoin row JTLateral jt joinc Nothing)
         where
-          jt = if left then JDLeft  else JDNormal
+          jt = left
 expandJoin inf meta left env (t@(IT a (TB1 tb))) =  do
-     l <- lkTB t
-     let nmeta = lookSMeta inf r
-         r =_keyAtom $ keyType a
-     itable <- expandInlineTable  nmeta tb l
-     tjoin <- expandQuery' inf nmeta left tb
-     return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
-        where
-          jt = if left then JDLeft  else JDNormal
-expandJoin inf meta left env  (Fun k (ex,a)  _ ) = do
-  v <- replaceexpr ex <$> traverse (\i-> do
+  l <- lkTB t
+  let nmeta = lookSMeta inf r
+      r =_keyAtom $ keyType a
+  itable <- expandInlineTable  nmeta tb l
+  tjoin <- expandQuery' inf nmeta left tb
+  return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
+     where
+       jt = left
+expandJoin inf meta left env  (Fun k (ex,a) _) = do
+  v <- SQLAInline . replaceexpr ex <$> traverse (\i-> do
     l <- lkKey (AttributeReference (_relOrigin i))
     (_,m) <- snd <$> get
     return $ T.pack $ "k" <> show (justError (show (i,k,m)) l )) a
   iref  <- newFun  k
   let ref = "k" <> T.pack (show iref)
-  return $ \row -> SQLRJoin row JTLateral JDNormal (SQLRInline $ "(SELECT " <> v <> maybe "" (" :: " <>) (renderType (keyType k)) <> ") as t" <> ref <> "(" <> ref  <> ")" ) Nothing
+      sel = SQLRRename (SQLRSelect  [maybe v (SQLAType v) (renderType (keyType k))] Nothing Nothing) ("t" <> ref <> "(" <> ref  <> ")")
+  return $ \row -> SQLRJoin row JTLateral JDNormal sel Nothing
+
 expandJoin inf meta left env v = return id
   {-
 joinOnPredicate :: [Rel Key] -> [Column Key ()] -> [Column Key ()] -> Codegen Text
@@ -334,40 +330,35 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 
-explodeRecord :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
-explodeRecord inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (explodeDelayed inf m t )  $ P.sortBy (P.comparing (RelSort. keyattr ))$ F.toList  tb)
+projectTree :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
+projectTree inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf m t )  $ P.sortBy (P.comparing (relSort. keyattrs ))$ F.toList  tb)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
-explodeDelayed inf m tb f@(Fun k (ex,a)  _ )
+projectColumn inf m tb f@(Fun k (ex,a)  _ )
   = lkTB f
-explodeDelayed inf m _ t@(Attr k  _ )
+projectColumn inf m _ t@(Attr k  _ )
   = foldr (=<<) prim (eval <$> kty)
   where
     Primitive kty (AtomicPrim _) = keyType k
     eval _ = return
-    prim =  do
-      l <- lkTB t
-      return  l
-explodeDelayed inf m _ t@(IT  k tb  )
+    prim =  lkTB t
+projectColumn inf m _ t@(IT  k tb  )
   = foldr (=<<) prim (eval<$>kty)
   where
    Primitive kty (RecordPrim r) = keyType k
-   eval KArray = \p -> do
-    l <- lkTB t
-    return  l
+   eval KArray = \p -> lkTB t
    eval _ = return
    prim = do
      l <- lkTB t
      let nmeta = tableMeta $ lookSTable inf r
-     selectRow l <$> explodeRecord inf nmeta  (restrictTable nonFK $head . F.toList $tb)
+     selectRow l <$> projectTree inf nmeta  (restrictTable nonFK $head . F.toList $tb)
 
 
 printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Rel Key ,[(Key,AccessOp Showable )]) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred inf m t (PrimColl (a,e)) = do
   idx <- indexFieldL inf m e [] a t
   return (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
-
 printPred inf m t (OrColl wpred) = do
       w <- fmap unzip <$> traverse (traverse (printPred inf m  t)) (nonEmpty wpred)
       return (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " <$> join (nonEmpty. concat . catMaybes . fst <$> w) , concat . catMaybes . snd <$> w )
@@ -476,21 +467,15 @@ tlabel'  t@(IT k tb ) =  do
   l <- lkTB t
   return (k,"i" <> l <> fromMaybe "" (inlineType (keyType k)))
 
-justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
-justLabel namemap meta t k = fst $ evalRWS getLabels  [Root meta] namemap
-  where
-    getLabels :: Codegen Text
-    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ restrictTable nonFK t)
-
-loadDelayedQuery
+getFromQuery
   :: InformationSchema
      -> KVMetadata Key
      -> TBData Key ()
      -> RWST [Address Key] String NameMap Identity Text
-loadDelayedQuery inf m delayed= do
+getFromQuery inf m delayed= do
   tq <- expandBaseTable m delayed
-  tquery <- expandQuery' inf m False delayed
-  rq <- explodeRecord inf m delayed
+  tquery <- expandQuery' inf m JDNormal delayed
+  rq <- projectTree inf m delayed
   out <- atTable m $ mapM (\i-> do
     v <- lkTB (Attr i (TB1 ()))
     return $   v  <>  " = ?") (_kvpk m)

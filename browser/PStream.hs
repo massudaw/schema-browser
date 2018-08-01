@@ -23,7 +23,8 @@ instance Compact String where
 
 instance Patch String where
   type Index String = String
-  apply =  (++)
+  createIfChange = Just
+  applyUndo i j =  Right (i ++ j ,[])
 
 instance Patch (a -> b ) where
   type Index (a -> b) = ((a,Index a) -> Index b)
@@ -79,23 +80,6 @@ unaction3 (PAction i j)  = (fmap (fmap total.total ) i,fmap (fmap partial.total 
 instance PFunctor PStream where
   pmap (PAction f g) (PStream b e) = PStream (f <$> b) (curry g <$> b <@> e)
 
-test = runDynamic $ do
-  (e,h) <- newEvent
-  (e2,h2) <- newEvent
-  (e3,h3) <- newEvent
-  t <- accumS "wfew" e
-  t2 <- accumS "abc" e2
-  t3 <- accumS "poi" e3
-  let a = (paction3 (\i j k-> (i ,j <> k))   (\(a,b) (c,d) (e,f) -> (b ,d <> f)) <$|>  t <*|> t2 <*|> t3 )  :: PStream (String,String)
-  i <- currentValue (facts . toTidings $ a)
-  onEventIO (psevent a) $   print . ("EventP: " ++) . show
-  onEventIO (rumors $ toTidings a) $   print . ("EventT: " ++) . show
-  onChangeDyn (psvalue a)    (liftIO . print . ("Behavior: "++). show )
-  liftIO $ mapM h2 ["a11","a22","a33"]
-  liftIO $ mapM h3 ["p11","p22","p33"]
-  liftIO $ mapM h ["w11","w22","w33"]
-  liftIO $print i
-  liftIO $print "End"
 
 
 focus :: Patch b => (a -> b) -> (Index a -> Maybe (Index b)) -> PStream a -> PStream b

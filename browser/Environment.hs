@@ -25,11 +25,6 @@ type DatabaseM ix i a = Parser (Kleisli TransactionM) ix i  a
 
 type PluginM ix s m  i a = Parser (Kleisli (RWST (s,Index s) (Index s) ()  m )) ([ix],[ix]) i  a
 
-newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
-
-instance (Show a,Show (Index a)) => Patch (Atom a) where
-  type Index (Atom a) = [Index a]
-
 instance (Show u ,Patch a) => Patch (M.Map u a ) where
   type Index  (M.Map u a) = [(u,Index a)]
 

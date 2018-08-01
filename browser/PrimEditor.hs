@@ -1,5 +1,6 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -51,7 +52,7 @@ class PrimEditor a where
   default primEditor :: Patch a => Tidings (Maybe a) -> UI (TrivialWidget (Maybe a))
   primEditor i = do
     TrivialWidget d e <- primDiff i (pure Keep)
-    return $ TrivialWidget (apply <$> i <*> d) e
+    return $ TrivialWidget (join <$> (applyIfChange <$> i <*> d)) e
 
 newtype UIEditor a
   = UIEditor {uiEditor :: Tidings (Maybe a) -> UI (TrivialWidget (Maybe a))}
@@ -96,9 +97,14 @@ instance Compact Double where
     0 -> []
     i -> [i]
 
-instance (Patch a,Patch b,Patch c) => Patch (a,b,c) where
-  type Index (a,b,c) = (Index a , Index b , Index c)
-  apply (i,j,k) (a,b,c) = (apply i a, apply j b, apply k c)
+instance (Compact (Index a),Compact (Index b), Compact (Index c),Patch a,Patch b,Patch c) => Patch (a,b,c) where
+  type Index (a,b,c) = (Index (Atom a) , Index (Atom b) , Index (Atom c))
+  createIfChange (i,j,k) = (,,) <$> (unAtom' <$> createIfChange i) <*> (unAtom' <$> createIfChange j) <*> (unAtom' <$> createIfChange k)
+  applyUndo (i,j,k) (a,b,c) = do
+    (v,l) <- applyUndo (Atom i) a
+    (s,m) <- applyUndo (Atom j) b
+    (t,n) <- applyUndo (Atom k) c
+    return ((unAtom' v, unAtom' s, unAtom' t),(l,m,n))
 
 instance (Show (Index a),Compact (Index a),Patch a ,PrimEditor a) => PrimEditor (Transaction a) where
   primDiff i dl = mdo
@@ -122,22 +128,42 @@ instance (Patch a,Patch b,Patch c,Patch d,PrimEditor a,PrimEditor b,PrimEditor c
 
 liftA4 f i j k l = f <$> i <*> j <*> k <*> l
 
-instance (Patch a ,Patch b ,Patch c,Monoid (Index b),Monoid (Index a) ,Monoid (Index c) ,PrimEditor a,PrimEditor b,PrimEditor c) => PrimEditor (a,b,c) where
+instance (Compact (Index a),Compact (Index b),Compact (Index c),Patch a ,Patch b ,Patch c,PrimEditor a,PrimEditor b,PrimEditor c) => PrimEditor (a,b,c) where
   primDiff i d = do
-    f <- primDiff (fmap (Le.view Le._1)<$> i) (fmap (Le.view Le._1)<$> d)
-    s <- primDiff (fmap (Le.view Le._2)<$> i) (fmap (Le.view Le._2)<$> d)
-    t <- primDiff (fmap (Le.view Le._3)<$> i) (fmap (Le.view Le._3)<$> d)
-    let def Keep = Diff mempty
-        def (Diff i) = (Diff i)
-    TrivialWidget (liftA3 (,,)<$> (def <$> triding f) <*> (def <$>triding s) <*> (def <$> triding t)) <$> horizontal [getElement f,getElement s,getElement t]
+    let
+        lower :: forall a . Compact a => [a] -> Editor a
+        lower = maybe Keep Diff . safeHead . compact
+        raise (Diff i) = [i]
+        raise Keep = []
+        --  All Keep, Any Delete and Merge Diff
+        all Keep Keep Keep  = Keep
+        all Delete _ _ = Delete
+        all _ Delete _ = Delete
+        all _ _ Delete = Delete
+        all i j k = Diff (raise i ,raise j ,raise k)
+    f <- primDiff (fmap (Le.view Le._1)<$> i) (join . fmap (lower.Le.view Le._1)<$> d)
+    s <- primDiff (fmap (Le.view Le._2)<$> i) (join . fmap (lower . Le.view Le._2)<$> d)
+    t <- primDiff (fmap (Le.view Le._3)<$> i) (join . fmap (lower . Le.view Le._3)<$> d)
+    let r = (all <$> triding f <*> (triding s) <*> (triding t))
+    TrivialWidget r <$> horizontal [getElement f,getElement s,getElement t]
 
-instance (Eq (Index b),Eq (Index a),Monoid (Index b),Monoid (Index a) ,Patch a ,Patch b ,PrimEditor a,PrimEditor b) => PrimEditor (a,b) where
+instance (Compact (Index a),Compact (Index b),Patch a ,Patch b ,PrimEditor a,PrimEditor b) => PrimEditor (a,b) where
   primDiff i dl = do
-    f <- primDiff (fmap fst <$> i) (fmap fst <$> dl)
-    s <- primDiff (fmap snd <$> i) (fmap snd <$> dl)
+    let
+        lower :: forall a . Compact a => [a] -> Editor a
+        lower = maybe Keep Diff . safeHead . compact
+        raise (Diff i) = [i]
+        raise Keep = []
+        --  All Keep, Any Delete and Merge Diff
+        all Keep Keep = Keep
+        all Delete _  = Delete
+        all _ Delete  = Delete
+        all i j  = Diff (raise i ,raise j )
+    f <- primDiff (fmap fst <$> i) (join .fmap (lower.fst) <$> dl)
+    s <- primDiff (fmap snd <$> i) (join . fmap (lower.snd) <$> dl)
     let def Keep = Diff mempty
         def (Diff i) = (Diff i)
-    TrivialWidget (liftA2 (,)<$> (def <$> triding f) <*> (def <$> triding s)) <$> horizontal [getElement f,getElement s]
+    TrivialWidget (all <$> (triding f) <*> (triding s)) <$> horizontal [getElement f,getElement s]
 
 instance PrimEditor () where
   primEditor  i = fmap Just <$> buttonAction (justError "const prim" <$> i)
@@ -205,12 +231,14 @@ instance PrimEditor Day where
 
 readShowUIDiff :: (Eq (Index a),Show (Index a),Read a , Show a ,Patch a ) => Tidings (Maybe a) ->Tidings (Index (Maybe a)) ->  UI (TrivialWidget (Index (Maybe a)))
 readShowUIDiff tdi del = mdo
-    inputUI <- UI.input # sinkDiff UI.value (maybe "" show <$> tdi) # set UI.style [("min-width","30px"),("max-width","120px")]
+    let res = join <$> (applyIfChange <$> tdi <*> del)
+    inputUI <- UI.input # sink UI.value (maybe "" show <$> facts res) # set UI.style [("min-width","30px"),("max-width","120px")]
     onCE <- UI.onChangeE inputUI
-    let pke = (readMay <$> onCE ) --(rumors tdi)
-        filtered = (diff'<$> facts (apply <$> tdi <*> del)<@> pke)
-    p <- ui (stepperT Keep  filtered)
-    return $  TrivialWidget ((\i j -> if i == j  then Keep else j ) <$> facts del <#> p) inputUI
+    let pke = readMay <$> onCE
+        filtered = unionWith const (const Keep <$>  rumors tdi) (unionWith const (diff'<$> facts res <@> pke) (rumors del))
+    ini <- currentValue (facts del)
+    p <- ui (stepperT ini filtered)
+    return $  TrivialWidget  p inputUI
 
 
 timeUI :: (FormatTime a ,ParseTime a) => (String,String) -> Tidings (Maybe a) -> UI (TrivialWidget (Maybe a))

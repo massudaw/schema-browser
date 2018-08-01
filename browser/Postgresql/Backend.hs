@@ -211,7 +211,7 @@ insertPatch  inf conn i  t = either error (\i ->  liftIO $ if not $ L.null seria
         let
           iquery :: String
           (iquery ,namemap)= codegen $ do
-            j <- explodeRecord inf (tableMeta t) (kvlist serialAttr)
+            j <- projectTree inf (tableMeta t) (kvlist serialAttr)
             return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
         print  =<< formatQuery conn (fromString iquery) directAttr
         [out] <- queryWith (fromRecordJSON inf (tableMeta t) serialTB namemap ) conn (fromString  iquery) directAttr
@@ -242,46 +242,7 @@ value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
 attrValueName ::  TB (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = keyValue i
-{-
-instance Functor (BackendCommand m ) where
-  fmap f g = pure f <*> g
 
-
-
-instance Applicative (BackendCommand m ) where
-  pure = PureBackend
-  (<*>) = AppBackend
-
-instance Monad (BackendCommand m ) where
-   return = pure
-   m >>= k  = BindBackend m k
-
-runBackendCommand :: forall m  b. (Monad m ) => Connection -> BackendCommand m b -> m (IO b)
-runBackendCommand  conn = go
-  where
-    go :: forall a . BackendCommand m a -> m (IO a)
-    go (PureBackend i) = return (return i)
-    go (EffectBackend i) = fmap return i
-    go (RunBackend i j ) = do
-      a <- go i
-      return (a >>= executeLogged conn j >> return ())
-    go (QueryBackend i j ) = do
-      a <- go i
-      return (a >>= queryLogged conn j )
-    go (AppBackend i j ) = do
-      a <- go i
-      b <- go j
-      return $ a <*>  b
-
-
-data BackendCommand m b where
-  PureBackend :: a -> BackendCommand m a
-  EffectBackend :: m a -> BackendCommand m a
-  RunBackend :: ToRow a =>  BackendCommand m a -> Query -> BackendCommand m ()
-  QueryBackend :: (ToRow a,FromRow b) => BackendCommand m a -> Query -> BackendCommand m [b]
-  BindBackend :: BackendCommand m a -> (a -> BackendCommand m b) -> BackendCommand m b
-  AppBackend :: BackendCommand m (a -> b)  -> (BackendCommand m a) -> BackendCommand m b
--}
 deleteIdx
   ::
      Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
@@ -373,8 +334,6 @@ sqlPatchFTB f k call (Primitive l c ) s = go k call l s
     go  k ca ty i@(PAtom _) = f k ca (Primitive ty c) i
     go  k  _ ty i = error $ show (k,ty,i)
 
-diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
-diffUpdateAttr  kv kold  =  fmap KV  .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . tableNonRef  $ kv ) (unKV . tableNonRef $ kold )
 
 paginate
   :: InformationSchema
@@ -451,29 +410,27 @@ patchMod m pk patch = do
     applyPatch (conn inf) (recoverFields inf <$> m) (pk,patchNoRef $ firstPatch (recoverFields inf) patch)
     return $ rebuild  pk (PatchRow patch)
 
-loadDelayed :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
-loadDelayed table  values = do
+getRow  :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
+getRow table  values = do
   inf <- askInf
   let
     v = restrictTable nonFK $ allRec' (tableMap inf) table
     nonRefV = restrictTable nonFK values
     delayed =  recComplement inf m nonRefV v
-  -- liftIO $ print delayed
-  liftIO $ fmap join $ traverse (check inf nonRefV )  delayed
+  liftIO $ fmap join $ traverse (check inf nonRefV)  delayed
   where
     m = tableMeta table
     check inf values delayed = do
-           let
-               (str,namemap) = codegen (loadDelayedQuery inf m delayed)
-               pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m values
-               qstr = (fromString $ T.unpack str)
-           print  =<< formatQuery (conn  inf) qstr pk
-           is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
-           res <- case is of
-                    [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow <$> diff values i
-                    [] -> error "empty query"
-                    _ -> error "multiple result query"
-           return res
+         let
+             (str,namemap) = codegen (getFromQuery inf m delayed)
+             pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m values
+             qstr = (fromString $ T.unpack str)
+         print  =<< formatQuery (conn  inf) qstr pk
+         is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
+         case is of
+            [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow <$> diff values i
+            [] -> error "empty query"
+            _ -> error "multiple result query"
 
 selectAll
   ::
@@ -498,4 +455,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 tSize = 400
 
 
-postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll loadDelayed mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules
+postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll getRow mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules
