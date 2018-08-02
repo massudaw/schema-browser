@@ -1337,7 +1337,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
 
         edit =  do
           let
-            tdi =  fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> tseledit
+            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> tseledit
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable

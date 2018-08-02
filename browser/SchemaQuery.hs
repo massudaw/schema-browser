@@ -297,23 +297,21 @@ getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
     let
       rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
       table = lookTable rinf $ snd j
-      editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $ Inline r)  i )
       nextRef :: [FTB (TBData Key Showable)]
       nextRef = fmap (\i -> _fkttable $ justError "no it" $ kvLookup (S.singleton $ Inline r) i ) set
-
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
         joinFK <- getFKS rinf predtop table  refs tbf
-        let joined = editAttr joinFK
+        let joined = alterAtF (S.singleton (Inline r)) (traverse joinFK)
         return (me >=> joined,old <> S.singleton r)
       Nothing ->
         return (me ,old <> S.singleton r)
 
-getFKRef inf predtop (me,old) v (FunctionField a b c) tbf = do
+getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf = do
   let
-    addAttr :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
-    addAttr i = Right $ maybe i (\r -> (\(KV i) -> KV (M.insert (keyattrs r) r i) ) i) (evaluate  a b funmap c i)
-  return (me >=> addAttr ,old <> S.singleton a )
+    evalFun :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
+    evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
+  return (me >=> evalFun ,old <> S.singleton a )
 
 getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
 
@@ -321,11 +319,11 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
         rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
         table = lookTable rinf $ snd j
-        genpredicate (KV o) = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
+        genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
         primPredicate o k  = do
           i <- unSOptional (_tbattr (lkAttr k o))
           return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-        lkAttr k v = justError ("no attr " <> show k) $ kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef (KV v))
+        lkAttr k v = justError ("no attr " <> show k) $ kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
         refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
         predm = refs <> predicate i predtop
     tb2 <-  case predm of
@@ -724,7 +722,7 @@ tableLoaderAll table  page size presort fixed tbf = do
 recInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
 recInsert k1  v1 = do
    inf <- askInf
-   ret <- KV <$> Tra.traverse (tbInsertEdit k1) (unKV v1)
+   ret <- traverseKV (tbInsertEdit k1) v1
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf k1 (allRec' (tableMap inf) tb)))
@@ -743,9 +741,9 @@ itRefFun :: RelOperations (KV Key Showable)
 itRefFun = (id,id,noEdit,noInsert)
   where
     noInsert k1 v1   = do
-      KV <$>  Tra.traverse (tbInsertEdit k1)  (unKV v1)
+      traverseKV (tbInsertEdit k1)  v1
     noEdit k1 v1 v2  = do
-      KV <$>  Tra.sequence ( M.intersectionWith (tbDiffEditInsert k1) (unKV v1) (unKV v2))
+      trazipWithKV (tbDiffEditInsert k1) v1 v2
 
 asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 asyncPatches m i =
@@ -783,7 +781,7 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ trans
 
 fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
 fullDiffEdit k1 old v2 = do
-   edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
+   edn <-  trazipWithKV (tbDiffEditInsert k1)  old v2
    when (isJust $ diff (tableNonRef old) (tableNonRef edn)) . void $do
      traverse (updateFrom k1 old (G.getIndex k1 edn))  (diff old edn)
    return edn

@@ -33,6 +33,7 @@ module Types.Common
   , firstKV
   , secondKV
   , traverseKV
+  , trazipWithKV
   , traTable
   , keyattr
   , liftFK
@@ -55,6 +56,7 @@ module Types.Common
   , kvkeys
   , kvToMap
   , addAttr
+  , alterAtF
   , findFun
   , findFK
   , findFKAttr
@@ -212,6 +214,8 @@ traverseKV
   :: Applicative f =>
      (TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
 traverseKV f (KV n) = KV <$> traverse f n
+
+trazipWithKV f v1 v2 = KV <$>  sequence (Map.intersectionWith f (unKV v1) (unKV v2))
 
 filterKV :: (TB k a -> Bool) -> KV k a -> KV k a
 filterKV i (KV n) = KV $ Map.filterWithKey (\k -> i) n
@@ -671,6 +675,8 @@ findFK l v =
 findAttr :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
 findAttr l v = kvLookup (S.singleton . Inline $ l) v <|> findFun l v
 
+
+
 addAttr :: Ord k => TB k v -> KV k v -> KV k v
 addAttr v i = KV $ Map.insert (S.fromList $ keyattr v) v (_kvvalues i)
 
@@ -831,4 +837,4 @@ kvNull (KV i) = Map.null i
 kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  KV k a
 kvFilter pred (KV item) = KV $ Map.filterWithKey (\k _ -> pred k ) item
 
-
+alterAtF k fun (KV i) = fmap KV (Le.at k (traverse (Le.traverseOf ifkttable fun))  i)
