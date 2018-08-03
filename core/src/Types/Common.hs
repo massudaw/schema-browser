@@ -859,7 +859,7 @@ kvFind :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  Maybe (TB k a)
 kvFind pred (KV item) = safeHead . F.toList $ PM.filterWithKey (\k _ -> pred k ) item
 
 kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  KV k a
-kvFilter pred (KV item) = KV $ PM.filterWithKey (\k _ -> pred k ) item
+kvFilter pred = kvFilterWith (\i _ -> pred i)
 
 kvFilterWith :: Ord k =>  (Set (Rel k) -> TB k a -> Bool) -> KV k a ->  KV k a
 kvFilterWith pred (KV item) = KV $ PM.filterWithKey pred item
