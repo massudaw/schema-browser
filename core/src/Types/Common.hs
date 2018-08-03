@@ -33,13 +33,18 @@ module Types.Common
   , firstKV
   , secondKV
   , traverseKV
+  , traverseKVWith
+  , mergeKV
   , trazipWithKV
   , traTable
   , keyattr
   , liftFK
   , recoverFK
+  , kvFind
   , kvFilter
+  , kvFilterWith
   , kvNull
+  , kvSingleton
   , kvSize
   -- ,recoverAttr', firstATB ,traFAValue,AValue(..),TBAttr
   , FTB(..)
@@ -49,7 +54,7 @@ module Types.Common
   , unSDelayed
   , addDefault
   , unArray
-  , KV(..)
+  , KV
   , TBData
   , unKV
   , kvlist
@@ -193,7 +198,7 @@ kvToMap = Map.mapKeys (_relOrigin . L.head .F.toList ) . fmap _tbattr . _kvvalue
 kvkeys :: Ord k => KV k a -> [Set (Rel k)]
 kvkeys = Map.keys . _kvvalues
 
-unkvlist :: Ord k => KV k a -> [TB k a]
+unkvlist :: KV k a -> [TB k a]
 unkvlist = F.toList . _kvvalues
 
 -- unkvlist = fmap (recoverAttr . first F.toList ) . Map.toList . _kvvalues
@@ -209,6 +214,13 @@ mapBothKV :: Ord b => (a -> b) -> (AValue a c -> AValue b d) -> KV a c -> KV b d
 mapBothKV k f (KV n) = KV (Map.mapKeys (S.map (fmap k)) $ fmap f n)
 
 mapKV f (KV n) = KV (fmap f n)
+
+mergeKV (KV i ) (KV j) = KV $ Map.unionWith const i j
+traverseKVWith
+  :: Applicative f =>
+    (Set (Rel k) -> TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
+traverseKVWith f (KV n) = KV <$> Map.traverseWithKey f n
+
 
 traverseKV
   :: Applicative f =>
@@ -828,13 +840,22 @@ replaceRecRel ::
   -> KV k b
 replaceRecRel i = foldr (\(MutRec l) v -> foldr (\a -> recOverKV a l) v l) i
 
+kvSingleton  :: Ord k => TB k a -> KV k a
+kvSingleton i = KV $ Map.singleton (S.fromList $ keyattr i ) i
+
 kvSize :: Ord k => KV k a ->  Int
 kvSize (KV i) = Map.size i
 
 kvNull :: Ord k => KV k a ->  Bool
 kvNull (KV i) = Map.null i
 
+kvFind :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  Maybe (TB k a)
+kvFind pred (KV item) = safeHead . F.toList $ Map.filterWithKey (\k _ -> pred k ) item
+
 kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  KV k a
 kvFilter pred (KV item) = KV $ Map.filterWithKey (\k _ -> pred k ) item
+
+kvFilterWith :: Ord k =>  (Set (Rel k) -> TB k a -> Bool) -> KV k a ->  KV k a
+kvFilterWith pred (KV item) = KV $ Map.filterWithKey pred item
 
 alterAtF k fun (KV i) = fmap KV (Le.at k (traverse (Le.traverseOf ifkttable fun))  i)

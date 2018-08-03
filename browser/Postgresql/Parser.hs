@@ -99,7 +99,7 @@ instance  TF.ToField (TB PGKey Showable)  where
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain (fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattr )) (F.toList (_kvvalues i)))
+  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    snd <$> sortedFields  i)
   toField (IT n (ArrayTB1 is )) = TF.toField . PGTypes.PGArray $ IT n <$> F.toList is
   toField e = error (show e)
 
@@ -243,8 +243,7 @@ parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   let try1 i v = do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
-  im <- traverse ((\ i -> parseAttrJSON  inf i =<<  try1 i v))$   _kvvalues m
-  return $KV im
+  traverseKV ((\ i -> parseAttrJSON  inf i =<<  try1 i v))$   m
 
 decodeDynamic :: String -> BSL.ByteString  -> Showable
 decodeDynamic "row_index" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: [TBIndex Showable])

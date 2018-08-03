@@ -257,12 +257,12 @@ type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
 
 
 
-eitherDescPK :: Show a => KVMetadata Key -> TBData Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
+eitherDescPK :: Show a => KVMetadata Key -> TBData Key a -> KV  Key a
 eitherDescPK kv i
-  | not (null (_kvdesc kv)) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
+  | not (null (_kvdesc kv)) = fromMaybe pk desc
   | otherwise = pk
-    where desc =  (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter isJust  $  fmap unLeftItens $  (_kvvalues $ tbDesc kv i)
-          pk = _kvvalues $ tbPK kv i
+    where desc =   (\i -> if L.null i then Nothing else Just (kvlist i)). fmap (justError "") . filter isJust  $  fmap unLeftItens $  (unkvlist $ tbDesc kv i)
+          pk = tbPK kv i
 
 tbDesc, tbPK :: Ord k => KVMetadata k -> TBData  k a ->  TBData  k a
 tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) )

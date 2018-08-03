@@ -738,27 +738,22 @@ pattrKey (PFK s _ _) = Set.fromList s
 
 applyRecordChange ::
      PatchConstr d a
-  => TBData d a
+  => KV d a
   -> TBIdx d (Index a)
-  -> Either String (TBData d a, TBIdx d (Index a))
+  -> Either String (KV d a, TBIdx d (Index a))
 applyRecordChange i [] = Right (i, [])
-applyRecordChange (KV v) k =
-  bimap KV id . add . swap <$>
+applyRecordChange v k =
+  add . swap <$>
   getCompose
-    (Map.traverseWithKey
+    (traverseKVWith
        (\key vi ->
         let
-           edits  = (filter ((key ==) . index) k)
-        in Compose .
-          fmap
-            swap
-            $ foldUndo vi
-            edits )
-       v)
+           edits = filter ((key ==). index) k
+        in Compose . fmap swap $ foldUndo vi edits) v)
   where
     add (v, p) =
-      (foldr (\p v -> maybe v (\i -> Map.insert (index p) i v) (createIfChange p) ) v $
-        filter (isNothing . flip Map.lookup v . index) k
+      (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
+        filter (isNothing . flip kvLookup v . index) k
       , p)
     edit l (i, tr) = fmap (: tr) <$> applyUndoAttrChange i l
 
@@ -801,7 +796,7 @@ diffAttr (FKT k _ i) (FKT m rel b) =
   (Just $
    catMaybes $
    F.toList $
-   Map.intersectionWith (\i j -> diffAttr (i) (j)) (_kvvalues k) (_kvvalues m)) <*>
+     Map.intersectionWith (\i j -> diffAttr (i) (j)) (unKV k) (unKV m)) <*>
   diff i b
 
 patchAttr :: PatchConstr k a => TB k a -> PathAttr k (Index a)

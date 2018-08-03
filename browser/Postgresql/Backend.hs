@@ -423,7 +423,7 @@ getRow table  values = do
     check inf values delayed = do
          let
              (str,namemap) = codegen (getFromQuery inf m delayed)
-             pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m values
+             pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . unKV $ tbPK m values
              qstr = (fromString $ T.unpack str)
          print  =<< formatQuery (conn  inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk

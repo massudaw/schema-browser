@@ -298,7 +298,7 @@ recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (T
   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( j)
 -}
 recAttr un f@(FKT l rel k) = first (PathForeign rel) <$> recPred (\i ->
-  let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
+  let nest = concat $ recAttr un <$> unkvlist i
   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
 
 recPred
@@ -317,13 +317,13 @@ applySecondary (RowPatch (patom,DropRow )) (RowPatch (_,CreateRow v)) (TableRep 
     didxs un sidx = G.delete (fmap create $ G.getUnique  un v) G.indexParam sidx
 applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableRep (m,M.mapWithKey didxs sidxs,l)
   where
-    didxs un sidx = maybe sidx (F.foldl' (\sidx (ref ,u) -> G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u sidx) sidx .recAttr un ).safeHead $ F.toList $ M.filterWithKey (\k _-> not . S.null $ (S.map _relOrigin k) `S.intersection` (S.fromList un) )  $ _kvvalues el
+    didxs un sidx = maybe sidx (F.foldl' (\sidx (ref ,u) -> G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u sidx) sidx .recAttr un ) . safeHead .unkvlist $ kvFilter  (\k -> not . S.null $ (S.map _relOrigin k) `S.intersection` (S.fromList un) )   el
 
 
     el = fmap create elp
 applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
   where
-    didxs un sidx = maybe sidx (F.foldl' (\sidx  (ref,u)  -> G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx ) sidx. recAttr un ) $  safeHead $ F.toList $ M.filterWithKey (\k _-> not . S.null $ (S.map _relOrigin k) `S.intersection` (S.fromList un) )  $ _kvvalues el
+    didxs un sidx = maybe sidx (F.foldl' (\sidx  (ref,u)  -> G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx ) sidx. recAttr un ) $  safeHead $ F.toList . unkvlist $ kvFilter (\k -> not . S.null $ (S.map _relOrigin k) `S.intersection` (S.fromList un)) el
     el = justError "cant find"$ G.lookup ix l
     eln = apply el elpn
     -- eln = create elpn
@@ -543,7 +543,7 @@ typeCheckPrim i j  = failure ["cant match " ++ show i ++ " with " ++ show j ]
 typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
-typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> mapError (fmap ((show (keyType ._relOrigin <$> rel2)) ++)) (typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i)
+typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  unkvlist k) <*> mapError (fmap ((show (keyType ._relOrigin <$> rel2)) ++)) (typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i)
   where
     ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
     ktype :: KType (Prim KPrim (Text,Text))
@@ -559,14 +559,14 @@ mapError f (Pure i) = Pure i
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
 typeCheckTable c  l
-  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> _kvvalues l)
+  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> unkvlist l)
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname (KV i)  =  kvlist $ liftFieldF  f inf  tname <$> F.toList i
+liftTableF f inf  tname i  =  kvlist $ liftFieldF  f inf  tname <$> unkvlist i
   where
     ta = lookTable inf tname
 
@@ -738,18 +738,16 @@ patchNoRef l =  concat $ attrNoRef <$> l
     attrNoRef (PFun _ _ _) = []
     attrNoRef i = [i]
 
-mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
+mergeCreate (Just i) (Just j) = Just $ mergeKV i j
 mergeCreate Nothing (Just i) = Just i
 mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
-mergeTB1 k  k2
-  = (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2
 
 recComplement :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
 recComplement inf =  filterAttrs []
   where
-    filterAttrs r m e = fmap KV . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (_kvvalues e)  ._kvvalues
+    filterAttrs r m e = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV
       where notPKOnly k =  if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null i then Nothing else Just i
     go r m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = if L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) then Just (FKT l1 rel1 tb1) else  (fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged))
@@ -792,7 +790,7 @@ recPKDesc inf = filterTBData pred inf
 filterTBData :: (KVMetadata Key -> S.Set (Rel Key) -> TB Key a -> Bool) ->  InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
 filterTBData  pred inf =  filterAttrs S.empty
   where
-    filterAttrs l m = KV . fmap (go m) . M.filterWithKey   (\i v -> pred m i v || not  (S.null $ (S.map _relOrigin i `S.intersection` l) )) ._kvvalues
+    filterAttrs l m = mapKV (go m) . kvFilterWith (\i v -> pred m i v || not  (S.null $ (S.map _relOrigin i `S.intersection` l) ))
     go m (FKT l  rel  tb) = FKT l rel $ filterAttrs (S.fromList $ _relTarget <$> rel) m2  <$> tb
       where
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec desc: " <> show (rel ,_kvjoins m))$ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
@@ -808,7 +806,7 @@ allKVRecL :: InformationSchema -> KVMetadata Key ->  FTB (KV Key Showable) -> [F
 allKVRecL inf m = concat . F.toList . fmap (allKVRec' inf m)
 
 allKVRec' :: InformationSchema -> KVMetadata Key -> TBData Key  Showable -> [FTB Showable]
-allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> fmap _relOrigin (F.toList $ fst i) ))  $ M.toList (go  <$> eitherDescPK m e))
+allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> fmap _relOrigin (F.toList $ fst i) ))  . M.toList $ go  <$> unKV (eitherDescPK m e))
   where
     go (FKT l  rel  tb) = allKVRecL  inf m2 tb
       where

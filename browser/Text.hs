@@ -65,11 +65,10 @@ renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " 
 
 renderPrimPatch i = [(0,renderPrim  i)]
 
-renderAttr :: Show a => TB a Showable ->  [(Int,String)]
+renderAttr :: Show k => TB k Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> F.toList (_kvvalues k))  ++ "] => ")] ++  (renderFTB renderTable v)
-
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> unkvlist k)  ++ "] => ")] ++  (renderFTB renderTable v)
 renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB renderPrimPatch v)
 renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ offset 1 i )$  nonEmpty (renderFTB renderTable v)
 

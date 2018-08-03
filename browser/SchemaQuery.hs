@@ -107,7 +107,7 @@ projunion :: Show a=>InformationSchema -> Table -> TBData Key a -> TBData Key a
 projunion inf table = res
   where
     res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
-    transformTable (KV v) =  KV (transformAttr <$> M.filterWithKey (\k _ -> S.isSubsetOf (S.map (keyValue._relOrigin) k) attrs) v)
+    transformTable = mapKV transformAttr . kvFilter (\k -> S.isSubsetOf (S.map (keyValue._relOrigin) k) attrs)
       where
         attrs = S.fromList $ keyValue <$> rawAttrs table
         transformAttr (Fun k l i) = Fun  k l (transformKey (keyType k) (keyType nk) i)

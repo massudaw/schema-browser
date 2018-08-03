@@ -145,7 +145,7 @@ maybeLocal g f = do
   maybe (return Nothing) (\i -> local (const i) g) (g v)
 
 atR ::
-     (KeyString k, MonadReader (TBData k Showable) m)
+     (Ord k, KeyString k, MonadReader (TBData k Showable) m)
   => String
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) a b
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) a b
@@ -239,37 +239,31 @@ idxA l =
         const $
         ask >>=
         (\v ->
-           return . justError ("no value found " <> show (ll, v)) . indexAttr ll $
+           return .  indexAttr ll $
            v))
 
 idxR = idxK
 
-indexAttr l v =
-  M.lookup (S.fromList (iprodRef <$> l)) .
-  M.mapKeys (S.map (keyString . _relOrigin)) . _kvvalues $
-  v
 
-finder l v =
-  justError "no element" .
-  M.lookup (S.fromList (iprodRef <$> l)) .
-  M.mapKeys (S.map (keyString . _relOrigin)) . _kvvalues $
-  v
+indexAttr l =
+  justError (show l) . kvFind (\i -> S.map (keyString . _relOrigin) i == S.fromList (iprodRef <$> l))
+
 
 indexTB1 l v =
-  let i = finder l v
+  let i = indexAttr l v
   in case i of
        Attr _ l -> error "no element"
        FKT l i j -> j
        IT l j -> j
 
 indexTableAttr l v =
-  let i = finder l v
+  let i = indexAttr l v
   in case i of
        Attr k l -> l
        i -> error (show i)
 
 indexTable l v = do
-  let i = finder l v
+  let i = indexAttr l v
   case i of
     Attr k l -> return (k, l)
     FKT v _ _ -> safeHead $ aattr (justError "nohead3" $ safeHead $ unkvlist v)

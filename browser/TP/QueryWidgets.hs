@@ -133,7 +133,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
         inp :: Tidings (Maybe (TBData CoreKey Showable))
         inp = fmap kvlist <$> foldr (liftA2 (liftA2 (:))) (pure (Just [])) (fmap triding elemsIn)
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  unoldItems <*>  inp) (idp,FPlugins n tname aci)
+      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeKV <$>  unoldItems <*>  inp) (idp,FPlugins n tname aci)
 
       let outputs fresh =  attrB (fmap (\v ->  justError ("no key " <> show fresh <> " in " <>  show v ) .fmap snd $ findKV ((== (S.singleton $ Inline fresh)) . index) =<< createIfChange v)  <$> liftedE  )  (genAttr oinf fresh)
           attrB pre a = do

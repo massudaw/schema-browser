@@ -230,8 +230,8 @@ prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
 prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
-          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . M.lookup (S.singleton $ Inline ix) . _kvvalues
-          mk = KV. M.singleton (S.singleton $ Inline ix) . Attr ix
+          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . kvLookup (S.singleton $ Inline ix)
+          mk = kvSingleton . Attr ix
 
 nestJoin :: (Functor f, DecodeTB1 f) =>
   [Rel Text] -> SIso (Union (Reference Text)) (TBData Text Showable)  a ->  SIso (Union (Reference Text ))  (TBData Text Showable) (f a)
@@ -239,9 +239,9 @@ nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
           keyset = S.fromList ix
-          lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). M.lookup keyset . _kvvalues $ v
-          mk = KV. M.singleton keyset . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
-          reflectOp a (Rel i op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (Rel i op l,a)). M.lookup (S.singleton (Inline l)) . _kvvalues <$> a)
+          lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). kvLookup  keyset $ v
+          mk = kvSingleton . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
+          reflectOp a (Rel i op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (Rel i op l,a)). kvLookup (S.singleton (Inline l)) <$> a)
 
 
 nestWith :: (Functor f, DecodeTB1 f) =>
@@ -249,8 +249,8 @@ nestWith :: (Functor f, DecodeTB1 f) =>
 nestWith ix nested = SIso (Many [InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). M.lookup (S.singleton $ Inline ix) . _kvvalues
-          mk = KV. M.singleton (S.singleton $ Inline ix) . IT ix
+          lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). kvLookup (S.singleton $ Inline ix)
+          mk = kvSingleton . IT ix
 
 nest :: (Functor f, DecodeTable a, DecodeTB1 f) =>
   Text -> SIso (Union (Reference Text ))  (TBData Text Showable) (f a)

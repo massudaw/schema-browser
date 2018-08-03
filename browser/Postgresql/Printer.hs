@@ -193,7 +193,7 @@ expandInlineTable meta tb@( _) pre = asNewTable meta (\t->  do
   return $ SQLRSelect cols Nothing Nothing)
 
 expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen SQLRow
-expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta  (\t -> do
+expandInlineArrayTable meta tb pre = asNewTable meta  (\t -> do
   let
     rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
     name =  tableAttr tb
@@ -202,7 +202,7 @@ expandInlineArrayTable meta tb@( KV i) pre = asNewTable meta  (\t -> do
 
 
 expandBaseTable ::  KVMetadata Key -> TBData  Key  () -> Codegen SQLRow
-expandBaseTable meta tb@( KV i) = asNewTable meta (\t -> do
+expandBaseTable meta tb = asNewTable meta (\t -> do
   let
     name = tableAttr tb
   cols <- mapM (aliasKeys t)  name
@@ -268,8 +268,8 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 expandQuery' inf meta left m = atTable meta $ F.foldl'
   (\j i -> do
     v <- j
-    l <- expandJoin inf meta left (F.toList (_kvvalues  m) ) i
-    return (l . v)) (return id) (P.sortBy (P.comparing (relSort. keyattrs )) $  F.toList (_kvvalues  m))
+    l <- expandJoin inf meta left (unkvlist  m) i
+    return (l . v)) (return id) (snd <$> sortedFields m)
 
 expandJoin
   :: InformationSchema
@@ -331,7 +331,7 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 projectTree :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
-projectTree inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf m t )  $ P.sortBy (P.comparing (relSort. keyattrs ))$ F.toList  tb)
+projectTree inf m t = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf m t )  $ snd <$> sortedFields  t)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
