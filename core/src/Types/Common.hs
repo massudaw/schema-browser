@@ -84,7 +84,6 @@ module Types.Common
   , Rel(..)
   , indexerRel
   , _relOrigin
-  , _relRoot
   , _relTarget
   , _relInputs
   , _relOutputs
@@ -316,12 +315,6 @@ _relOrigin (Inline i) = i
 _relOrigin (RelAccess _ i) = _relOrigin i
 _relOrigin (RelFun i _ _) = i
 _relOrigin (RelAlias i _) = i
-
-_relRoot (Rel i _ _) = _relRoot i
-_relRoot (Inline i) = i
-_relRoot (RelAccess _ i) = _relOrigin i
-_relRoot (RelFun i _ _) = i
-_relRoot (RelAlias i _) = i
 
 -- TODO Fix Rel to store proper relaaccess
 _relInputs (Rel i _ _) = Just [_relOrigin i]
