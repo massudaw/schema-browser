@@ -48,7 +48,7 @@ renderTablePatch DropRow  = "DropRow"
 renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
 renderRowPatch i =  concat $ renderPatch  <$> i
 
-renderTable :: Show a => TBData a Showable ->  [(Int,String)]
+renderTable :: (Ord a , Show a) => TBData a Showable ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
 
@@ -65,7 +65,7 @@ renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " 
 
 renderPrimPatch i = [(0,renderPrim  i)]
 
-renderAttr :: Show k => TB k Showable ->  [(Int,String)]
+renderAttr :: (Ord k, Show k) => TB k Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " && " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> unkvlist k)  ++ "] => ")] ++  (renderFTB renderTable v)

@@ -251,10 +251,10 @@ data RowOperation k a
   deriving (Show, Eq,Ord, Functor, Generic)
 
 instance (NFData k, NFData a) => NFData (RowPatch k a)
-instance (Binary k, Binary a) => Binary (RowPatch k a)
+instance (Ord k, Binary k, Binary a) => Binary (RowPatch k a)
 
 instance (NFData k, NFData a) => NFData (RowOperation k a)
-instance (Binary k, Binary a) => Binary (RowOperation k a)
+instance (Ord k, Binary k, Binary a) => Binary (RowOperation k a)
 
 instance (Ord k, Compact v, Show v, Show k, Patch v, Ord v, v ~ Index v) =>
          Compact (RowOperation k v) where

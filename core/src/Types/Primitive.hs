@@ -806,7 +806,7 @@ atTBValue ::
   -> (FTB (TBRef k b) -> f (FTB (TBRef k b)))
   -> (KV k b)
   -> f (KV k b)
-atTBValue l f g h v = traTable (Le.at (Set.fromList l) (traverse modify)) v
+atTBValue l f g h v = alterKV (Set.fromList l) (traverse modify) v
   where
     modify i =
       case i of
