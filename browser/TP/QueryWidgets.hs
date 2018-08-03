@@ -1216,7 +1216,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
         filterNotReflect m = kvFilter (\k -> not $ _relOrigin (justError "no head notreflect" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
         filterReflectKV m = kvFilter (\k -> _relOrigin (justError "no head reflect kv" . safeHead $ F.toList k) `L.elem` fmap _relOrigin reflectRels) m
         nonEmptyTBRef v@(TBRef n) = if  snd n  == mempty then Nothing else Just v
-        relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
+        relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,_relOrigin i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
       inipl <- mapM (ui . currentValue . facts) (snd <$>  plmods)

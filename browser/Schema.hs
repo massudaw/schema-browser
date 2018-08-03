@@ -142,7 +142,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           functionKeys :: Query
           functionKeys = "select table_name,schema_name,column_name,cols,fun from metadata.function_keys where schema_name = ?"
 
-       fks <- liftIO$ M.fromListWith mappend . fmap (\(tp,sc,tc,kp,kc,rel) -> (tp,  pure (FKJoinTable (zipWith3 Rel (lookFk tp kp) (readBinaryOp <$> V.toList rel) (lookRFk sc tc kc)) (sc,tc)))) <$> query conn foreignKeys (Only schema)
+       fks <- liftIO$ M.fromListWith mappend . fmap (\(tp,sc,tc,kp,kc,rel) -> (tp,  pure (FKJoinTable (zipWith3 Rel (Inline <$> lookFk tp kp) (readBinaryOp <$> V.toList rel) (lookRFk sc tc kc)) (sc,tc)))) <$> query conn foreignKeys (Only schema)
 
        functionsRefs <- liftIO$ M.fromListWith mappend . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,  pure (FunctionField tc ( readFun fun) (indexerRel <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text [SqlOperationK Text] )
 

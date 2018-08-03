@@ -481,7 +481,7 @@ childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable
         Nothing -> concat $ convertPatch <$> resScan base
       where
         pkIndex t = justError "no key" $  t `L.elemIndex` pkTable
-        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre (Inline o) ,  [(o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> filter (not . flip S.member set . _relOrigin )rel  )
+        predK = WherePredicate $ AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(_relOrigin o,Left (justError "no ref" $ unSOptional $ fmap create $ justError "no value" $ atMay v (pkIndex t) ,Flip op))] )) <$> filter (not . flip S.member set . _relOrigin )rel  )
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
            fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
         resScan idx =  -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx,predKey ,G.keys idx) $
@@ -1204,7 +1204,7 @@ innerJoin targetM srel alias (origin,pinf,emap)= do
   (target,_,amap ) <- targetM
   inf <- liftIO $ createFresh origin pinf alias (Primitive [] (RecordPrim (schemaName pinf ,target)))
   let
-    rel = (\(Rel i o j ) -> Rel (lookKey inf origin i) o (lookKey inf target j)) <$>  srel
+    rel = (\(Rel i o j ) -> Rel (lookKey inf origin <$> i) o (lookKey inf target j)) <$>  srel
     table = lookTable inf target
     aliask = lookKey inf origin alias
     tar = S.fromList $ _relOrigin <$> rel
@@ -1229,7 +1229,7 @@ joinTable  targetM srel alias (origin,pinf,emap)= do
   (target,_,amap ) <- targetM
   inf <- liftIO $ createFresh origin pinf alias (Primitive [KOptional] (RecordPrim (schemaName pinf ,target)))
   let
-    rel = (\(Rel i o j ) -> Rel (lookKey inf origin i ) o (lookKey inf target j) )<$>  srel
+    rel = (\(Rel i o j ) -> Rel (lookKey inf origin <$> i ) o (lookKey inf target j) )<$>  srel
     table = lookTable inf target
     aliask = lookKey inf origin alias
     tar = S.fromList $ _relOrigin <$> rel
@@ -1366,7 +1366,7 @@ innerJoinR (P j k) (P l n) srel alias
         let origin = sourceTable inf (JoinV j l InnerJoin srel alias)
             target = sourceTable inf l
         let
-          rel = (\(Rel i o j) -> Rel (lkKey origin i) o (lkKey target j)) <$>  srel
+          rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target j)) <$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
           joinFK :: TBData Key Showable ->  Maybe (Column Key Showable)
@@ -1393,7 +1393,7 @@ leftJoinR (P j k) (P l n) srel alias
         let
           origin = sourceTable inf (JoinV j l LeftJoin srel alias)
           target = sourceTable inf l
-          rel = (\(Rel i o j ) -> Rel (lkKey origin i ) o (lkKey target j) )<$>  srel
+          rel = (\(Rel i o j ) -> Rel (lkKey origin <$> i ) o (lkKey target j) )<$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
           joinFK :: TBData Key Showable ->  Column Key Showable

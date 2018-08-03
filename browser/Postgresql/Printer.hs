@@ -399,8 +399,8 @@ indexFieldL inf m e c n@(RelAccess l nt) v =
     Nothing -> concat <$> traverse (\i -> indexFieldL inf m e c i v) l
 
 indexFieldL inf m e c p@(Rel l _ _) v =
-    case findAttr l v of
-      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
+  case findAttr (_relOrigin l) v of
+      Just i -> pure . utlabel  (G.getOp (_relOrigin l) e) c <$> tlabel'  i
       Nothing -> error $ "not attr rel " ++ show (l,v)
 indexFieldL inf m e c i v = error (show (i, v))
 

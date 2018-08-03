@@ -1069,7 +1069,7 @@ mergePFK (PIdx ix i) (PAtom l) = PIdx ix (flip mergePFK (PAtom l) <$> i)
 mergePFK i j = error (show (i, j))
 
 findPRel l (Rel k op j) = do
-  PAttr k v <- L.find (\(PAttr i v) -> i == k) l
+  PAttr k v <- L.find (\(PAttr i v) -> i == _relOrigin k) l
   return $ fmap (PAttr k . PAtom) v
 
 recoverPFK ::

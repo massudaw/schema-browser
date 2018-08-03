@@ -56,7 +56,7 @@ postgresqlRules  = [dropSchema,createSchema,alterSchema,createTableCatalog, drop
 schema_name
   :: Monad m => Text -> PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable)
 schema_name  s
-  = iforeign [(Rel s Equals "name")] (ivalue . irecord $ ifield "name" (ivalue (readV PText)))
+  = iforeign [(Rel (Inline s) Equals "name")] (ivalue . irecord $ ifield "name" (ivalue (readV PText)))
 
 column_type
   :: (Monad m ) =>

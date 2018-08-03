@@ -116,7 +116,6 @@ import qualified Control.Lens as Le
 import Control.Lens.TH
 import Data.Ord
 import Algebra.PartialOrd
-import qualified Data.POSet as PO
 import qualified Data.POMap.Lazy as PM
 import Data.Set (Set)
 import qualified Data.Set as Set
@@ -127,6 +126,7 @@ import Data.Traversable (Traversable, traverse)
 import Debug.Trace
 import GHC.Generics
 import qualified NonEmpty as Non
+import Data.String
 import NonEmpty (NonEmpty(..))
 import Prelude hiding (head)
 import Safe
@@ -157,16 +157,16 @@ newtype MutRec a = MutRec
 
 
 sortedFields
-  :: (P.Poset k ,Show k ,Ord k)
+  :: Ord k
   => KV k a
   -> [(Set (Rel k) , TB k a)]
-sortedFields = P.sortBy (P.comparing (relSort .fst)) . PM.toList . _kvvalues
+sortedFields =  PM.toList . _kvvalues
 
 instance  Ord k => PartialOrd (RelSort k) where
   leq (RelSort inpi outi _ ) (RelSort inpj outj _) = (not (S.null outi ) && not (S.null inpj) && leq outi inpj)
 
 -- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
-instance (Ord k, Show k, P.Poset k) => P.Poset (RelSort k) where
+instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
   compare (RelSort inpi outi i ) (RelSort inpj outj j) =
     case ( comp outi inpj
          , comp outj inpi
@@ -295,7 +295,7 @@ instance NFData BinaryOperator
 
 data Rel k
   = Inline { _relOri :: k }
-  | Rel { _relOri :: k
+  | Rel { _relAccess :: Rel k
         , _relOperator :: BinaryOperator
         , _relTip :: k }
   | RelAlias { _relOri :: k
@@ -311,19 +311,20 @@ _relTarget (Rel _ _ i) = i
 _relTarget (RelAccess _ i) = _relTarget i
 _relTarget i = error (show i)
 
-_relOrigin (Rel i _ _) = i
+_relOrigin (Rel i _ _) = _relOrigin i
 _relOrigin (Inline i) = i
 _relOrigin (RelAccess _ i) = _relOrigin i
 _relOrigin (RelFun i _ _) = i
 _relOrigin (RelAlias i _) = i
 
-_relRoot (Rel i _ _) = i
+_relRoot (Rel i _ _) = _relRoot i
 _relRoot (Inline i) = i
 _relRoot (RelAccess _ i) = _relOrigin i
 _relRoot (RelFun i _ _) = i
 _relRoot (RelAlias i _) = i
 
-_relInputs (Rel i _ _) = Just [i]
+-- TODO Fix Rel to store proper relaaccess
+_relInputs (Rel i _ _) = Just [_relOrigin i]
 _relInputs (Inline i) = Nothing
 _relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relInputs <$> i)
 _relInputs (RelFun _ _ l) = Just $ fmap _relOrigin l
@@ -334,9 +335,9 @@ _relOutputs (Rel _ IntersectOp _) = Nothing
 _relOutputs (Rel _ (Flip IntersectOp) _) = Nothing
 _relOutputs (Rel _ Contains _) = Nothing
 _relOutputs (Rel _ (Flip Contains) _) = Nothing
-_relOutputs (Rel i (AnyOp Equals) _) = Just [i]
-_relOutputs (Rel i Equals _) = Just [i]
-_relOutputs (Rel i (Flip Equals) _) = Just [i]
+_relOutputs (Rel i (AnyOp Equals) _) = _relOutputs i
+_relOutputs (Rel i Equals _) =  _relOutputs i
+_relOutputs (Rel i (Flip Equals) _) = _relOutputs i
 _relOutputs (Rel _ _ _) = Nothing
 _relOutputs (Inline i) = Just [i]
 _relOutputs (RelAccess i _) = Nothing -- Just [i]
@@ -532,8 +533,8 @@ instance Num a => Num (FTB a) where
   fromInteger i = TB1 (fromInteger i)
 
 instance Fractional a => Fractional (FTB a) where
-  fromRational i = TB1 (fromRational i)
-  recip i = fmap recip i
+  fromRational = TB1 . fromRational
+  recip = fmap recip
 
 mapFromTBList :: Ord k => [TB k a] -> PM.POMap (Set (Rel k)) (AValue k a)
 mapFromTBList = PM.fromList . fmap (\i -> (Set.fromList (keyattr i), i))
@@ -609,8 +610,11 @@ merge f g h i (LeftTB1 j) = LeftTB1 $ (\j -> merge f g h i j) <$> j
 merge f g h (ArrayTB1 i) j = ArrayTB1 $ (\i -> merge f g h i j) <$> i
 merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
 
+instance IsString i => IsString (Rel i ) where
+  fromString i = Inline (fromString i)
+
 findRel l (Rel k op j) = do
-  Attr k v <- L.find (\(Attr i v) -> i == k) l
+  Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) l
   return $ fmap (Attr k . TB1) v
 
 

@@ -241,7 +241,7 @@ nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs
           keyset = S.fromList ix
           lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). kvLookup  keyset $ v
           mk = kvSingleton . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
-          reflectOp a (Rel i op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (Rel i op l,a)). kvLookup (S.singleton (Inline l)) <$> a)
+          reflectOp a r@(Rel (Inline i) op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (r,a)). kvLookup (S.singleton (Inline l)) <$> a)
 
 
 nestWith :: (Functor f, DecodeTB1 f) =>

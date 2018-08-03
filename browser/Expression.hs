@@ -100,7 +100,7 @@ joinKType (Primitive l (Primitive  i a)) = Primitive (l ++ i) a
 buildAccess :: Rel Key -> KType (Prim KPrim (Text,Text))
 buildAccess n@(RelAccess i o) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef $ buildAccess <$> i )
 buildAccess (Inline l) = keyType l
-buildAccess (Rel l _ op ) = keyType l
+buildAccess (Rel l _ op ) = buildAccess l
 
 testFFI = do
   conn <-  connectPostgreSQL  "dbname=incendio user=postgres password=jacapodre"
