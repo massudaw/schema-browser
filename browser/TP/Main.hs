@@ -376,6 +376,8 @@ withTable s m w =
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         -- pred = WherePredicate $ lookAccess inf m <$>(AndColl [OrColl [PrimColl (IProd Nothing "scheduled_date",Left (IntervalTB1 (I.interval (I.Finite (TB1 (STime (SDate (utctDay now) ))),True) (I.Finite (TB1 (STime (SDate (utctDay (addUTCTime (3600*24*35) now))))),True)),Flip Contains))]])
         table = lookTable inf m
+    liftIO $ print  table
+    lift $ mapM print (rawFKS table)
     db <- transactionNoLog  inf $ selectFrom m Nothing Nothing [] pred
     i2 <- currentValue (facts $ collectionTid db)
     addClientLogin inf
@@ -384,6 +386,7 @@ withTable s m w =
       -- debug2 i = show <$> G.projectIndex w i
     liftIO $ putStrLn (unlines $ debug i2)
     -- liftIO $ putStrLn (unlines $ debug2 i2)
+    --
                )
 
 testCreate = withInf [] "metadata"

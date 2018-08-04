@@ -565,14 +565,14 @@ type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
 
 
-liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
+liftTableF ::  (Show k ,Show a,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
 liftTableF f inf  tname i  =  kvlist $ liftFieldF  f inf  tname <$> unkvlist i
   where
     ta = lookTable inf tname
 
 
 
-liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
+liftTable' :: Show a => InformationSchema -> Text -> TBData Text a -> TBData Key a
 liftTable' = liftTableF lookupKeyName
 
 
@@ -580,27 +580,27 @@ liftTable' = liftTableF lookupKeyName
 findRefTableKey
   :: (Show t, Ord t) => TableK t -> [Rel t] -> (T.Text, T.Text)
 findRefTableKey ta rel =  tname2
-  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList $ rawFKS  ta)
+  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError ("no fk ref1" <> show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList $ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2
-  where   (FKJoinTable  _ (_,tname2) )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ (_,tname2) )  = unRecRel $ justError ("no fk ref2" <> show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
-liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
+liftFieldF :: (Show k ,Show a,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
 liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (liftFieldF (f,p) inf tname) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
-  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (tname,rel2 ,rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList rel2)  (F.toList$ rawFKS  ta)
+  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError ("no fk ref3" <> show (tname,ref,rel2 ,pathRelRel <$> rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList ( rel2))  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (IT rel tb) = IT (f inf tname  rel) (liftTableF (f,p) inf tname2 <$> tb)
-  where FKInlineTable _ (_,tname2)  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap p) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
+  where FKInlineTable _ (_,tname2)  = unRecRel $ justError ("no fk ref4" <>show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap p) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (Fun  k t v) = Fun (f inf tname k ) (fmap(fmap (f inf tname) )<$> t) v
 
 
 
-liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
+liftField :: Show a=> InformationSchema -> Text -> Column Text a -> Column Key a
 liftField = liftFieldF lookupKeyName
 
 liftRowPatch inf t (RowPatch i) = RowPatch$  liftPatchRow inf t i

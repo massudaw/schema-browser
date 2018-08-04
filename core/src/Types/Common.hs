@@ -317,7 +317,7 @@ _relOrigin (RelFun i _ _) = i
 _relOrigin (RelAlias i _) = i
 
 -- TODO Fix Rel to store proper relaaccess
-_relInputs (Rel i _ _) = Just [_relOrigin i]
+_relInputs (Rel i _ _) = _relInputs i
 _relInputs (Inline i) = Nothing
 _relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relInputs <$> i)
 _relInputs (RelFun _ _ l) = Just $ fmap _relOrigin l

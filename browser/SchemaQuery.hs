@@ -107,7 +107,7 @@ projunion :: Show a=>InformationSchema -> Table -> TBData Key a -> TBData Key a
 projunion inf table = res
   where
     res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
-    transformTable = mapKV transformAttr . kvFilter (\k -> S.isSubsetOf (S.map (keyValue._relOrigin) k) attrs)
+    transformTable = mapKV transformAttr . kvFilter (\k ->  S.isSubsetOf ( S.map (keyValue._relOrigin) k) attrs)
       where
         attrs = S.fromList $ keyValue <$> rawAttrs table
         transformAttr (Fun k l i) = Fun  k l (transformKey (keyType k) (keyType nk) i)
@@ -116,7 +116,7 @@ projunion inf table = res
           where nk = lkKey table (keyValue k)
         transformAttr (IT k i ) = IT k (transformKey (keyType k) (keyType nk) i)
           where nk = lkKey table (keyValue k)
-        transformAttr (FKT r rel v)  = FKT (transformTable r ) rel (transformKeyList ok nk  v)
+        transformAttr (FKT r rel v)  =  FKT (transformTable r ) rel (transformKeyList ok nk  v)
           where ok = mergeFKRef ( keyType. _relOrigin <$> rel)
                 nk = mergeFKRef ( keyType. lkKey table . keyValue . _relOrigin <$> rel)
 
@@ -415,7 +415,7 @@ tableLoader' table  page size presort fixed tbf = do
           go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
           predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
           predicate i  = [i]
-    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
+    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) ( restrictTable nonFK   tbf) page token size presort (unestPred predicate)
     resFKS  <- getFKS inf predicate table res tbf
     let result = fmap resFKS   res
     liftIO $ when (not $ null (lefts result)) $ do

@@ -37,6 +37,7 @@ module Query
 import Data.Tuple(swap)
 import Control.Arrow (first)
 import qualified Control.Lens as Le
+import Debug.Trace
 import qualified NonEmpty as Non
 import Data.Ord
 import qualified Data.Poset as P
@@ -240,8 +241,8 @@ recurseTB invSchema isRec table =
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ fks'
     funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ functionRefs table
     nonFKAttrs =  kvFilter (\i -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
-    fklist = P.sortBy (P.comparing (relSort . pathRelRel)) (fks' <> functionRefs table)
-    pt  = F.foldl (\acc  fk ->
+    fklist = P.sortBy (P.comparing (S.map _relOrigin <$> pathRelRel )) fks' <> functionRefs table
+    pt  = F.foldl' (\acc  fk ->
           let relFk =pathRelRel fk
               lastItem =   L.filter cond isRec
               cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l

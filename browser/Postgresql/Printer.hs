@@ -4,6 +4,7 @@
 module Postgresql.Printer
   (selectQuery
   ,lkTB
+  ,renderRow
   ,codegen
   ,codegent
   ,runCodegenT
@@ -100,9 +101,11 @@ lkKey i = do
 
 lkTB (Attr k _) = do
   a<- lkAttr k
+  v <- get
   return $ case a of
     Just a -> "k" <> T.pack (show a)
-    Nothing -> keyValue  k
+    Nothing ->
+      keyValue k -- error $ "no value: " <> (show (keyValue  k,v))
 -- error (show k)
 
 lkTB (Fun k _ _ ) = do
@@ -304,7 +307,7 @@ expandJoin inf meta left env  (Fun k (ex,a) _) = do
   v <- SQLAInline . replaceexpr ex <$> traverse (\i-> do
     l <- lkKey (AttributeReference (_relOrigin i))
     (_,m) <- snd <$> get
-    return $ T.pack $ "k" <> show (justError (show (i,k,m)) l )) a
+    return $ T.pack $ "k" <> show (justError ("no fun " <> show (i,k,m)) l )) a
   iref  <- newFun  k
   let ref = "k" <> T.pack (show iref)
       sel = SQLRRename (SQLRSelect  [maybe v (SQLAType v) (renderType (keyType k))] Nothing Nothing) ("t" <> ref <> "(" <> ref  <> ")")

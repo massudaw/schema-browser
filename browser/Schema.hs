@@ -3,11 +3,13 @@ module Schema where
 
 import Data.String
 import Serializer
+import Debug.Trace
 import System.Environment
 import Data.Either
 import qualified Data.Aeson as A
 import Postgresql.Sql.Parser
 import Postgresql.Sql.Types
+import qualified Data.Poset as P
 import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -163,7 +165,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
               constraints = fromMaybe [] (fmap ( fmap (lookupKey c )  . V.toList) <$> M.lookup c uniqueConstrMap)
               desc = fromMaybe [] $ M.lookup  c descMap
               tableType = justLook c resTT
-              allfks = fromMaybe []  $ M.lookup c fks
+              allfks = fromMaybe []  $ computeRelReferences <$> M.lookup c fks
            i3lnoFun = fmap createTable res :: [(Text,Table)]
            tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
            addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (fmap liftFun r)) table) ref
@@ -200,6 +202,16 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
 
        var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar  ) (HM.insert schema inf )
        return inf
+
+computeRelReferences l = fst $ foldl transform  ([],M.empty)  $ P.sortBy (P.comparing (S.map _relOrigin . pathRelRel)) l
+  where
+    transform (l, s) (FKJoinTable rels j)
+          = let
+             r = alterRel <$> rels
+            in (FKJoinTable (fst <$> r) j: l ,foldr mappend s (snd <$> r))
+      where alterRel rel@(Rel i j k) =  case M.lookup i s of
+                                Just r ->  (Rel (RelAccess   r i ) j k ,M.empty)
+                                Nothing -> (Rel i j k, M.singleton i rels)
 
 isUnion (Project _ (Union _ )) = True
 isUnion _ = False
