@@ -309,6 +309,8 @@ getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,o
 
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
+        tar = S.fromList $ fmap _relOrigin i
+        refl = S.fromList $ fmap _relOrigin $ filterReflexive i
         rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
         table = lookTable rinf $ snd j
         genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
@@ -323,15 +325,14 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
         localInf (const rinf) $ paginateTable table pred tbf
       Nothing -> return (G.empty)
     let
-        tar = S.fromList $ fmap _relOrigin i
-        refl = S.fromList $ fmap _relOrigin $ filterReflexive i
         inj = S.difference refl old
         joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-        joinFK m  = maybe (Left (taratt,i)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ taratt ) tb2
+        joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
           where
             replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
-            taratt = getAtt tar (tableNonRef m)
-            tarinj = getAtt inj (tableNonRef m)
+            nonRef = tableNonRef m
+            atttar = getAtt tar nonRef
+            attinj = getAtt inj nonRef
         add :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
         add r = addAttr r  . kvFilter (\k -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k)
         joined i = do
@@ -343,7 +344,6 @@ mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
 getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . unkvlist  $ k
-
 
 getFKS
   :: InformationSchemaKV Key Showable
