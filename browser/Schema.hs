@@ -168,7 +168,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
               allfks = fromMaybe []  $ computeRelReferences <$> M.lookup c fks
            i3lnoFun = fmap createTable res :: [(Text,Table)]
            tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
-           addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (fmap liftFun r)) table) ref
+           addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (P.sortBy (P.comparing (relSort . pathRelRel))  $ fmap liftFun r)) table) ref
              where
                ref =  M.lookup (tableName table) functionsRefs
                liftFun (FunctionField k s a) = FunctionField (lookupKey' (sKeyMap ts) tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)

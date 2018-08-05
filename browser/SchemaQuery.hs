@@ -65,7 +65,6 @@ import qualified Data.Interval as Interval
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
-import qualified Data.Poset as P
 import qualified Data.Set as S
 import Data.String (fromString)
 import qualified Data.Text as T
@@ -302,16 +301,18 @@ getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
         joinFK <- getFKS rinf predtop table  refs tbf
-        let joined = alterAtF (S.singleton (Inline r)) (traverse joinFK)
+        let joined = alterAtF (relSort $ S.singleton (Inline r)) (traverse joinFK)
         return (me >=> joined,old <> S.singleton r)
       Nothing ->
         return (me ,old <> S.singleton r)
 
-getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf = do
-  let
-    evalFun :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
-    evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
-  return (me >=> evalFun ,old <> S.singleton a )
+getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
+  | L.any isRelAccess c = do
+    let
+      evalFun :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
+      evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
+    return (me >=> evalFun ,old <> S.singleton a )
+  | otherwise = return (me,old)
 
 getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
 
@@ -365,7 +366,7 @@ getFKS
               (TBData Key Showable))
 getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (refLookup (pathRelRel f) tbf) )) (return (return ,S.empty )) sorted
   where
-    sorted = P.sortBy (P.comparing (relSort . pathRelRel))  (rawFKS table <> functionRefs table)
+    sorted =  sortValues pathRelRel $ rawFKS table <> functionRefs table
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
 
@@ -1003,7 +1004,7 @@ createTableRefs inf re table = do
           dynFork $ forever $ updateTable inf dbref
           let
             -- Collect all nested references and add one per relation avoided duplicated refs
-            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[]) $ P.sortBy (P.comparing (relSort . pathRelRel)) (rawFKS table)
+            childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  snd $ F.foldl' (\(s,l)  fk -> (s <> S.map _relOrigin (pathRelRel fk),l ++ childrenRefsUnique inf id  s (unRecRel fk ))) (S.empty,[])  (rawFKS table)
           -- TODO : Add evaluator for functions What to do when one of the function deps change?
           nestedFKS <- mapM (\((rinf, t),l) -> do
             liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
@@ -1095,7 +1096,7 @@ updateTable inf (DBRef {..})
 
 loadFKSDisk inf targetTable re = do
   let
-    psort = P.sortBy (P.comparing (relSort . pathRelRel)) $ rawFKS targetTable
+    psort = rawFKS targetTable
     (fkSet2,pre) = F.foldl' (\(s,l) i -> ( (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )))  (S.empty , return []) psort
   prefks <- pre
   return (\table ->

@@ -250,7 +250,7 @@ recurseTB invSchema isRec table =
           in if L.length lastItem < 2
                 then i:acc
                 else acc) [] fklist
-  in ( nonFKAttrs <> kvlist  (snd <$> pt))
+  in (nonFKAttrs <> kvlist (snd <$> pt))
 
 mAny f (MutRec i) = L.any f i
 

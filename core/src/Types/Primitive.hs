@@ -806,7 +806,7 @@ atTBValue ::
   -> (FTB (TBRef k b) -> f (FTB (TBRef k b)))
   -> (KV k b)
   -> f (KV k b)
-atTBValue l f g h v = alterKV (Set.fromList l) (traverse modify) v
+atTBValue l f g h v = alterKV (relSort $ Set.fromList l) (traverse modify) v
   where
     modify i =
       case i of
@@ -829,10 +829,6 @@ instance P.Poset (FKey i) where
       EQ -> P.EQ
       LT -> P.LT
       GT -> P.GT
-
-
-
-
 
 keyRef k = Inline k
 

@@ -325,8 +325,8 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     -- search i | traceShow ("search",i) False = undefined
-    search (Inline t) = fmap (fmap _tbattr) . recoverValue . snd $ justError (show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
-    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverValue $ justError (show t) (M.lookup (S.fromList t)  wl)
+    search (Inline t) = fmap (fmap _tbattr) . recoverValue . snd $ justError ("cant find: " <> show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
+    search (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . recoverValue $ justError ("cant find rel" <> show t) (M.lookup (S.fromList t)  wl)
     refs = sequenceA $ search <$> snd rel
     liftType (KOptional :xs) i = Just $ LeftTB1 (join $ liftType xs . Just <$> i)
     liftType [] i = i
@@ -1331,7 +1331,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
             output = diff' <$> oldItems <*> fksel
           ui $ onEventIO (rumors output) (\i -> do
             when (not (L.null reflectRels)) $ do
-              helsel $ (fmap (filterReflect.sourcePRef) i)
+              helsel (filterReflect.sourcePRef <$> i)
               heleditu $ fmap targetPRef i)
           return [getElement itemList]
 

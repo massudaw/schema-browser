@@ -21,6 +21,7 @@ module Types.Common
   , traFAttr
   , traFValue
   , relSort
+  , relSortL
   , keyAttr
   , tbUn
   , unAttr
@@ -74,6 +75,7 @@ module Types.Common
   , attrLookup
   , unkvlist
   , sortedFields
+  , sortValues
   , kvmap
   , kattr
   , aattr
@@ -81,6 +83,7 @@ module Types.Common
   , tableNonRef
   , restrictTable
   , nonFK
+  , isRelAccess
   , Rel(..)
   , indexerRel
   , _relOrigin
@@ -98,6 +101,7 @@ module Types.Common
   ) where
 
 import Control.Applicative
+import Control.Arrow
 import qualified Data.Poset as P
 import Control.DeepSeq
 import Control.Monad
@@ -116,6 +120,7 @@ import Control.Lens.TH
 import Data.Ord
 import Algebra.PartialOrd
 import qualified Data.POMap.Lazy as PM
+import Data.POMap.Internal (chainDecomposition)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Set as S
@@ -134,13 +139,21 @@ import Utils
 
 newtype KV k a
   = KV
-  { _kvvalues :: PM.POMap (Set (Rel k)) (TB k a)
+  { _kvvalues :: PM.POMap (RelSort k) (TB k a)
   } deriving (Eq, Ord, Functor, Foldable, Traversable, Show, Generic)
 
 instance (PartialOrd k , Ord k , Ord v ) => Ord (PM.POMap k v) where
   compare i j = compare (PM.toList i) (PM.toList j)
 
+relSortL :: Ord k  =>  [Rel k ] -> RelSort k
+relSortL = relSort . Set.fromList
+
+originalRel (RelSort _ _  l) = l
+
+relSortMap f (RelSort i j k) = RelSort  ( S.map  f i) (S.map f j) (S.map (fmap f) k)
+
 relSort i = RelSort (inp i)  (out i) i
+
   where
     inp j = norm $ _relInputs <$> F.toList j
     out j = norm $ _relOutputs <$> F.toList j
@@ -148,7 +161,8 @@ relSort i = RelSort (inp i)  (out i) i
 
 data RelSort k =
   RelSort (Set k) (Set k) (S.Set (Rel k))
-  deriving (Eq, Ord,Show)
+  deriving (Eq, Ord,Show,Generic)
+
 
 newtype MutRec a = MutRec
   { unMutRec :: [a]
@@ -156,13 +170,24 @@ newtype MutRec a = MutRec
 
 
 sortedFields
-  :: Ord k
+  :: (P.Poset k ,Show a,Show k,Ord k)
   => KV k a
   -> [(Set (Rel k) , TB k a)]
-sortedFields =  PM.toList . _kvvalues
+sortedFields = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO . _kvvalues
+
+testPM = toAscListPO $  PM.fromList [(relSortL [Inline 1],1),(relSortL [Inline 2],1),(relSortL [Rel (RelAccess [Inline 1] (Inline 1)) Equals 4],3)]
+testPM2 = toAscListPO $  PM.fromList [(S.singleton 2,1),(S.singleton 1,1),(S.fromList [1,2,4],1),(S.fromList [3,2,4],3)]
+isInline (Inline i ) = True
+isInline _ = False
 
 instance  Ord k => PartialOrd (RelSort k) where
-  leq (RelSort inpi outi _ ) (RelSort inpj outj _) = (not (S.null outi ) && not (S.null inpj) && leq outi inpj)
+  leq (RelSort inpi outi i ) (RelSort inpj outj j)
+      | F.all isInline i && F.all isInline j = i <= j
+      | F.all isInline i &&  not (F.all isInline j) = True
+  leq (RelSort inpi outi i ) (RelSort inpj outj j)
+    =  li || i == j  -- || if not (li || lo) then (not (S.null outj) && not (S.null outi) && S.toList outi < S.toList outj) else False
+    where li = not (S.null outi) && not (S.null inpj) && leq outi inpj
+          -- lo = not (S.null inpi) && not (S.null outj) && leq inpi outj
 
 -- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
 instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
@@ -197,10 +222,10 @@ kvlist :: Ord k => [TB k a] -> KV k a
 kvlist = KV . mapFromTBList
 
 kvToMap :: Ord k => KV k a -> Map.Map k (FTB a)
-kvToMap = Map.mapKeys (_relOrigin . L.head .F.toList ) . fmap _tbattr . Map.fromList . PM.toList . _kvvalues
+kvToMap = Map.mapKeys (_relOrigin . L.head .F.toList ) . fmap _tbattr . Map.fromList .fmap (first originalRel).  PM.toList . _kvvalues
 
 kvkeys :: Ord k => KV k a -> [Set (Rel k)]
-kvkeys = PM.keys . _kvvalues
+kvkeys = fmap originalRel . PM.keys . _kvvalues
 
 unkvlist :: KV k a -> [TB k a]
 unkvlist = F.toList . _kvvalues
@@ -208,22 +233,23 @@ unkvlist = F.toList . _kvvalues
 -- unkvlist = fmap (recoverAttr . first F.toList ) . Map.toList . _kvvalues
 -- unkvmap = Map.fromList . fmap (\(i,j) -> (i, recoverAttr  (F.toList i,j))) . Map.toList . _kvvalues
 kvmap :: Ord k => Map.Map (Set (Rel k)) (TB k a) -> KV k a
-kvmap = KV . PM.fromList . Map.toList
+kvmap = KV . PM.fromList . fmap (first relSort ). Map.toList
 
 -- kvmap = KV . fmap valueattr
 unKV :: Ord k => KV k a -> Map.Map (Set (Rel k)) (AValue k a)
-unKV = Map.fromList . PM.toList . _kvvalues
+unKV =  Map.fromList .fmap (first originalRel ) . PM.toList . _kvvalues
 
 mapBothKV :: Ord b => (a -> b) -> (AValue a c -> AValue b d) -> KV a c -> KV b d
-mapBothKV k f (KV n) = KV (PM.mapKeys (S.map (fmap k)) $ fmap f n)
+mapBothKV k f (KV n) = KV (PM.mapKeys (relSortMap k) $ fmap f n)
 
 mapKV f (KV n) = KV (fmap f n)
 
 mergeKV (KV i ) (KV j) = KV $ PM.unionWith const i j
+
 traverseKVWith
   :: Applicative f =>
     (Set (Rel k) -> TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
-traverseKVWith f (KV n) = KV <$> PM.traverseWithKey f n
+traverseKVWith f (KV n) = KV <$> PM.traverseWithKey (\i -> f (originalRel i))  n
 
 
 traverseKV
@@ -237,7 +263,7 @@ filterKV :: (TB k a -> Bool) -> KV k a -> KV k a
 filterKV i (KV n) = KV $ PM.filterWithKey (\k -> i) n
 
 findKV :: (TB k a -> Bool) -> KV k a -> Maybe (Set (Rel k), TB k a)
-findKV i (KV n) = L.find (i . snd) $ PM.toList n
+findKV i (KV n) = fmap (first originalRel) . L.find (i . snd) $ PM.toList n
 
 
 type Column k a = TB k a
@@ -319,8 +345,8 @@ _relOrigin (RelAlias i _) = i
 -- TODO Fix Rel to store proper relaaccess
 _relInputs (Rel i _ _) = _relInputs i
 _relInputs (Inline i) = Nothing
-_relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relInputs <$> i)
-_relInputs (RelFun _ _ l) = Just $ fmap _relOrigin l
+_relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relOutputs <$> i)
+_relInputs (RelFun _ _ l) = nonEmpty $ concat $ catMaybes $ fmap _relOutputs l
 _relInputs (RelAlias i l) = Just $ fmap _relOrigin l
 
 _relOutputs (Rel _ (Flip (AnyOp Equals)) _) = Nothing
@@ -337,10 +363,18 @@ _relOutputs (RelAccess i _) = Nothing -- Just [i]
 _relOutputs (RelFun i _ _) = Just [i]
 _relOutputs (RelAlias i _) = Nothing
 
+sortValues :: (P.Poset k ,Ord k ,Show v,Show k) => (v -> Set (Rel k) ) -> [v] -> [v]
+sortValues f  =  fmap snd . P.sortBy (P.comparing fst) . toAscListPO . PM.fromList .  fmap (\i -> (relSort $ f i ,i))
+
+toAscListPO :: (Show v, Show k, Ord k) => PM.POMap k v -> [(k, v)]
+toAscListPO = concatMap Map.toAscList . chainDecomposition
+
 instance (PartialOrd k ,Binary k , Binary a) => Binary (PM.POMap k a) where
   get = PM.fromList <$> get
   put = put . PM.toList
 
+instance Binary k => Binary (RelSort k )
+instance NFData k => NFData (RelSort k )
 instance (Ord k ,Binary a, Binary k) => Binary (KV k a)
 
 instance Binary k => Binary (Rel k)
@@ -472,7 +506,7 @@ mapKey' f k = firstKV f $ k
 
 firstKV :: Ord k => (c -> k) -> KV c a -> KV k a
 -- firstKV  f (KV m ) = KV . fmap (firstATB f)  . Map.mapKeys (Set.map (fmap f)) $ m
-firstKV f (KV m) = KV . fmap (firstTB f) . PM.mapKeys (Set.map (fmap f)) $ m
+firstKV f (KV m) = KV . fmap (firstTB f) . PM.mapKeys (relSortMap f) $ m
 
 secondKV f (KV m) = KV . fmap (fmap f) $ m
 
@@ -529,8 +563,8 @@ instance Fractional a => Fractional (FTB a) where
   fromRational = TB1 . fromRational
   recip = fmap recip
 
-mapFromTBList :: Ord k => [TB k a] -> PM.POMap (Set (Rel k)) (AValue k a)
-mapFromTBList = PM.fromList . fmap (\i -> (Set.fromList (keyattr i), i))
+mapFromTBList :: Ord k => [TB k a] -> PM.POMap (RelSort k) (AValue k a)
+mapFromTBList = PM.fromList . fmap (\i -> (relSort $ Set.fromList (keyattr i), i))
 
 -- mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),valueattr i))
 keyattr :: TB k a -> [Rel k]
@@ -582,7 +616,7 @@ recoverFK ori rel i
         Attr k <$>
         (fmap join .
          traverse
-           (fmap _tbattr . PM.lookup (S.singleton $ Inline k) . _kvvalues . fst.unTBRef) $
+           (fmap _tbattr . PM.lookup (relSort $ S.singleton $ Inline k) . _kvvalues . fst.unTBRef) $
          i)) <$>
      ori)
     rel
@@ -619,13 +653,14 @@ restrictTable f n =  (rebuildTable . unkvlist) n
 tableNonRef :: Ord k => KV k a -> KV k a
 tableNonRef = restrictTable  nonRefTB
 
+isRelAccess (RelAccess i _ ) = L.any isRelAccess i
+isRelAccess (Rel _ _ _) = True
+isRelAccess _ = False
+
 nonFK :: Ord k => TB k a -> [TB k a]
 nonFK (FKT i _ _) = concat (nonFK <$> _kvvalues i)
 nonFK (IT j k) = [IT j (restrictTable nonFK <$> k)]
-nonFK (Fun _ (_,l)  _) | L.any isRel l = []
-  where isRel (RelAccess i _ ) = L.any isRel i
-        isRel (Rel _ _ _) = True
-        isRel _ = False
+nonFK (Fun _ (_,l)  _) | L.any isRelAccess  l = []
 nonFK i = [i]
 
 nonRefTB :: Ord k => TB k a -> [TB k a]
@@ -676,7 +711,7 @@ instance Ord k => Monoid (KV k a) where
 findFK :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
 findFK l v =
   fmap snd $
-  L.find (\(i, v) -> isFK v && S.map _relOrigin i == (S.fromList l)) $
+    L.find (\(i, v) -> isFK v && S.map _relOrigin (originalRel i) == (S.fromList l)) $
   PM.toList $ _kvvalues $ (v)
   where
     isRel (Rel _ _ _) = True
@@ -696,12 +731,12 @@ findAttr l v = kvLookup (S.singleton . Inline $ l) v <|> findFun l v
 
 
 addAttr :: Ord k => TB k v -> KV k v -> KV k v
-addAttr v i = KV $ PM.insert (S.fromList $ keyattr v) v (_kvvalues i)
+addAttr v i = KV $ PM.insert (relSort $ S.fromList $ keyattr v) v (_kvvalues i)
 
 findFun :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
 findFun l v =
   fmap snd .
-  L.find (((pure . Inline $ l) ==) . fmap mapFunctions . S.toList . fst) $
+  L.find (((pure . Inline $ l) ==) . fmap mapFunctions . S.toList .originalRel. fst) $
   PM.toList $ _kvvalues $ (v)
   where
     mapFunctions (RelFun i _ _) = Inline i
@@ -711,7 +746,7 @@ findFun l v =
 findFKAttr :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
 findFKAttr l v =
   case L.find (\(k, v) -> not $ L.null $ L.intersect l (S.toList k)) $
-       PM.toList $ PM.mapKeys (S.map (_relOrigin)) $ _kvvalues $ (v) of
+       PM.toList $ PM.mapKeys (S.map (_relOrigin).originalRel) $ _kvvalues $ (v) of
     Just (k, FKT a _ _) ->
       L.find
         (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i)
@@ -728,7 +763,7 @@ recLookup n@(RelAccess l nt) v =
 
 kvLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (TB k a)
 -- kvLookup rel  (KV i) = Map.lookup rel i
-kvLookup rel (KV i) = recoverAttr' <$> PM.lookup rel i
+kvLookup rel (KV i) = recoverAttr' <$> PM.lookup (relSort rel) i
 
 relLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (FTB (TBRef k a))
 relLookup rel i = liftFK <$> kvLookup rel i
@@ -797,12 +832,6 @@ renderRel (Rel i Equals k)
 renderRel (Rel i op k) = show i <> renderBinary op <> show k
 
 
-tbUn :: Ord k => Set k -> KV k a -> KV k a
-tbUn un (KV item) = KV $ PM.filterWithKey (\k _ -> pred k) item
-  where
-    pred k = S.isSubsetOf (S.map _relOrigin k) un
-
-
 makeLenses ''KV
 makeLenses ''TB
 
@@ -812,11 +841,11 @@ recOverAttr ::
   => [Set (Rel k)]
   -> TB k a
   -> KV k a -> KV k a
-recOverAttr (k:[]) attr = KV . PM.insert k attr . _kvvalues
+recOverAttr (k:[]) attr = KV . PM.insert (relSort k) attr . _kvvalues
 recOverAttr (k:xs) attr =
   KV . PM.alter
     (fmap (Le.over ifkttable (fmap (recOverAttr xs attr ))))
-    k . _kvvalues
+    (relSort k) . _kvvalues
 
 recOverKV ::
      Ord k => [Set (Rel k )]
@@ -827,18 +856,18 @@ recOverKV tag tar (KV m) = KV $ foldr go m tar
   where
     go (k:[]) =
       PM.alter
-        (fmap (Le.over ifkttable (fmap (recOverAttr tag recv )))) k
+        (fmap (Le.over ifkttable (fmap (recOverAttr tag recv )))) (relSort k)
       where
         recv = gt tag m
     go (k:xs) =
       PM.alter
         (fmap (Le.over ifkttable (fmap (KV . go xs . _kvvalues))))
-        k
-    gt (k:[]) = justError "no key" . PM.lookup k
+        (relSort k)
+    gt (k:[]) = justError "no key" . PM.lookup (relSort k)
     gt (k:xs) =
       gt xs .
       _kvvalues .
-      L.head . F.toList . _fkttable . justError "no key" . PM.lookup k
+        L.head . F.toList . _fkttable . justError "no key" . PM.lookup (relSort k)
 
 replaceRecRel ::
      Ord k => KV k b
@@ -847,7 +876,7 @@ replaceRecRel ::
 replaceRecRel i = foldr (\(MutRec l) v -> foldr (\a -> recOverKV a l) v l) i
 
 kvSingleton  :: Ord k => TB k a -> KV k a
-kvSingleton i = KV $ PM.singleton (S.fromList $ keyattr i ) i
+kvSingleton i = KV $ PM.singleton (relSort $ S.fromList $ keyattr i ) i
 
 kvSize :: Ord k => KV k a ->  Int
 kvSize (KV i) = PM.size i
@@ -856,13 +885,20 @@ kvNull :: Ord k => KV k a ->  Bool
 kvNull (KV i) = PM.null i
 
 kvFind :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  Maybe (TB k a)
-kvFind pred (KV item) = safeHead . F.toList $ PM.filterWithKey (\k _ -> pred k ) item
+kvFind pred (KV item) = safeHead . F.toList $ PM.filterWithKey (\k _ -> pred (originalRel k) ) item
 
 kvFilter :: Ord k =>  (Set (Rel k) -> Bool) -> KV k a ->  KV k a
 kvFilter pred = kvFilterWith (\i _ -> pred i)
 
 kvFilterWith :: Ord k =>  (Set (Rel k) -> TB k a -> Bool) -> KV k a ->  KV k a
-kvFilterWith pred (KV item) = KV $ PM.filterWithKey pred item
+kvFilterWith pred (KV item) = KV $ PM.filterWithKey (\i -> pred (originalRel i)) item
+
+tbUn :: Ord k => Set k -> KV k a -> KV k a
+tbUn un = kvFilter pred
+  where
+    pred k = S.isSubsetOf (S.map _relOrigin k) un
+
+
 
 alterKV k fun (KV i ) = KV <$> (PM.alterF fun k i)
 

@@ -268,11 +268,12 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
         dir Desc = "<"
 
 
+
 expandQuery' inf meta left m = atTable meta $ F.foldl'
   (\j i -> do
     v <- j
-    l <- expandJoin inf meta left (unkvlist  m) i
-    return (l . v)) (return id) (snd <$> sortedFields m)
+    l <- expandJoin inf meta left (unkvlist m) i
+    return (l . v)) (return id) ( snd <$> sortedFields m)
 
 expandJoin
   :: InformationSchema
