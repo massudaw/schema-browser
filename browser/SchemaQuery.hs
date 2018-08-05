@@ -46,6 +46,7 @@ module SchemaQuery
   ) where
 import Control.Arrow
 import Control.Concurrent
+import Text
 import Debug.Trace
 import Serializer
 import Control.Concurrent.STM
@@ -215,7 +216,7 @@ getFrom m b = do
   if isJust comp
     then do
     liftIO . putStrLn $ "Load complete row table : " ++ show (tableName m)
-    liftIO . putStrLn $ "Complement to be loaded: " ++ show (comp)
+    liftIO . putStrLn $ (maybe "" (ident . renderTable ) comp)
     v <- (getEd $ schemaOps inf)  m b
     let
         newRow = toPatch b <$> v

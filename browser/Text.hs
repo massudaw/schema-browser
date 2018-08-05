@@ -35,6 +35,15 @@ import qualified Data.Text as T
 
 -- This module contains text backend printer and parser
 
+class PrettyRender  a where
+  render :: a ->  [(Int,String)]
+
+instance PrettyRender () where
+  render _ = []
+
+instance PrettyRender Showable where
+  render i = [(0,renderPrim  i)]
+
 explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> concat (replicate i depth) ++ j)
 
 ident :: [(Int,String)] -> String
@@ -45,31 +54,30 @@ renderTablePatch (CreateRow i) = "CreateRow " ++ ident (renderTable i)
 renderTablePatch (PatchRow i) = "PatchRow " ++ ident (renderRowPatch i)
 renderTablePatch DropRow  = "DropRow"
 
-renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
+renderRowPatch :: (PrettyRender b,Show a) => TBIdx a b-> [(Int,String)]
 renderRowPatch i =  concat $ renderPatch  <$> i
 
-renderTable :: (Ord a , Show a) => TBData a Showable ->  [(Int,String)]
+renderTable :: (Ord a , Show a,PrettyRender b) => TBData a b ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
 
 offset ix =  fmap (first (+ix))
-renderPatch :: Show a => PathAttr a Showable ->  [(Int,String)]
+renderPatch :: (PrettyRender b ,Show a) => PathAttr a b ->  [(Int,String)]
 renderPatch (PFK rel k v )
   = [(0,L.intercalate " && " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] {")]
   ++  offset 1 (renderFTBPatch renderRowPatch v)++ [(0,"}")]
-renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch renderPrimPatch v))]
+renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch render v))]
 renderPatch (PInline k v ) = [(0,show k ++ " {")] ++ offset 1 (renderFTBPatch renderRowPatch v) ++ [(0,"}")]
-renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch renderPrimPatch v))]
+renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch render v))]
 
 
-renderPrimPatch i = [(0,renderPrim  i)]
 
-renderAttr :: (Ord k, Show k) => TB k Showable ->  [(Int,String)]
+renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " && " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> unkvlist k)  ++ "] => ")] ++  (renderFTB renderTable v)
-renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB renderPrimPatch v)
+renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB render v)
 renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ offset 1 i )$  nonEmpty (renderFTB renderTable v)
 
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
@@ -100,7 +108,8 @@ renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
 
 renderPK (Idex i ) = L.intercalate "," $ renderShowable <$> i
 
-renderShowable = ident . renderFTB renderPrimPatch
+renderShowable :: FTB Showable -> String
+renderShowable = ident . renderFTB render
 
 renderPrim :: Showable -> String
 renderPrim (SText a) = T.unpack a

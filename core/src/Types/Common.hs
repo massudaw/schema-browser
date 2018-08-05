@@ -829,7 +829,7 @@ renderRel (RelAccess i l) =
   L.intercalate "," (renderRel <$> i) ++ "." ++ renderRel l
 renderRel (Rel i Equals k)
   | show i == show k = show i
-renderRel (Rel i op k) = show i <> renderBinary op <> show k
+renderRel (Rel i op k) = renderRel i <> renderBinary op <> show k
 
 
 makeLenses ''KV

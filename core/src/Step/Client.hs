@@ -246,7 +246,7 @@ idxR = idxK
 
 
 indexAttr l =
-  justError (show l) . kvFind (\i -> S.map (keyString . _relOrigin) i == S.fromList (iprodRef <$> l))
+  justError (show ("cant indexAttr ", l)) . kvFind (\i -> S.map (keyString . _relOrigin) i == S.fromList (iprodRef <$> l))
 
 
 indexTB1 l v =

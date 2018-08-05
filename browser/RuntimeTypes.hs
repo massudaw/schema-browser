@@ -618,7 +618,7 @@ liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (
     ta = lookTable inf tname
 liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
   where
-    FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
+    FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show ("liftPatchAttr",rel2 ,rawFKS ta)) $ L.find (\r->  S.map (keyValue ._relOrigin ) (pathRelRel r) == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
     ta = lookTable inf tname
     rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
