@@ -117,9 +117,9 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   b <- flabel # set UI.text (T.unpack n)
   inf <- liftIO $ foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
   let
-      freshKeys :: [([CoreKey],[CoreKey])]
-      freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
-      lookK = lookKey inf tname . fst
+    freshKeys :: [([CoreKey],[CoreKey])]
+    freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
+    lookK = lookKey inf tname . fst
   freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\(l,unoldItems)-> do
       let inputs fresh = attrB   (genAttr oinf fresh)
           attrB a = do
@@ -312,7 +312,6 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
       where frel = filter (\i -> isJust $ kvLookup (S.singleton (Inline (_relOrigin i))) ifk) rel
     convertConstr (f,j) = (f, fmap (\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel ) j)
   fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  nonInjRefs oldItems  i
-
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.map _relOrigin. S.unions  .fst) constr
     iUITableDiff inf restrictConstraint plugItems oldItems i
@@ -321,7 +320,6 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
       tdiv = fmap _tbattr <$> oldItems
       insertT = fmap (PAttr i)
   fmap insertT <$> buildUIDiff (buildPrimitive (keyModifier i)) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
-
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     -- search i | traceShow ("search",i) False = undefined

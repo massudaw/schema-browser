@@ -190,7 +190,7 @@ data DBVar2 v =
 
 
 
-type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, PageTokenF v)
+type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KV k (),PageTokenF v)
 
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k (AccessOp v , FTB v)])
@@ -223,9 +223,9 @@ instance (NFData k,  PatchConstr k Showable) => Patch (TableRep k Showable) wher
   applyUndo = applyTableRep
 
 instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
-  type Index (IndexMetadata k v) =  [(WherePredicateK k ,Int,Int,PageTokenF v)]
+  type Index (IndexMetadata k v) =  [IndexMetadataPatch k v]
   applyUndo i =Right . (,[]). F.foldl' vapply i
-    where vapply (IndexMetadata m) (v,s,i,t) = IndexMetadata $ M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v m
+    where vapply (IndexMetadata m) (v,s,i,p,t) = IndexMetadata $ M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i (p,t) l ))) j  <|> Just (s,M.singleton i (p,t))) v m
 
 instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v) where
   compact i = foldCompact assoc i
@@ -318,8 +318,6 @@ applySecondary (RowPatch (patom,DropRow )) (RowPatch (_,CreateRow v)) (TableRep 
 applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableRep (m,M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = maybe sidx (F.foldl' (\sidx (ref ,u) -> G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u sidx) sidx .recAttr un ) . safeHead .unkvlist $ kvFilter  (\k -> not . S.null $ (S.map _relOrigin k) `S.intersection` (S.fromList un) )   el
-
-
     el = fmap create elp
 applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
   where
@@ -434,7 +432,7 @@ type PageToken = PageTokenF Showable
 deriving instance (Binary v) => Binary (PageTokenF  v)
 deriving instance (NFData v) => NFData (PageTokenF  v)
 
-newtype IndexMetadata k v =  IndexMetadata {unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (PageTokenF v)))} deriving(Show)
+newtype IndexMetadata k v =  IndexMetadata {unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (KV k (),PageTokenF v)))} deriving(Show)
 
 newtype TableRep k v = TableRep (KVMetadata k, M.Map [k] (SecondaryIndex k v), TableIndex k v) deriving(Show)
 

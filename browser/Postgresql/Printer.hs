@@ -335,19 +335,19 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 projectTree :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
-projectTree inf m t = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf m t )  $ snd <$> sortedFields  t)
+projectTree inf m t = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf) $ snd <$> sortedFields  t)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
-projectColumn inf m tb f@(Fun k (ex,a)  _ )
+projectColumn inf f@(Fun k (ex,a)  _ )
   = lkTB f
-projectColumn inf m _ t@(Attr k  _ )
+projectColumn inf t@(Attr k  _ )
   = foldr (=<<) prim (eval <$> kty)
   where
     Primitive kty (AtomicPrim _) = keyType k
     eval _ = return
     prim =  lkTB t
-projectColumn inf m _ t@(IT  k tb  )
+projectColumn inf t@(IT  k tb  )
   = foldr (=<<) prim (eval<$>kty)
   where
    Primitive kty (RecordPrim r) = keyType k

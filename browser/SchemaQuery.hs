@@ -291,7 +291,6 @@ predicate i (WherePredicate l ) =
     removeArray (KArray : i)  (AnyOp o) = o
     removeArray i  o = o
 
--- getFKRef _  _   _  old i j |  traceShow (i,old)  False = undefined
 getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
     let
       rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
@@ -313,7 +312,6 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
       evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
-
 getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
 
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
@@ -370,7 +368,7 @@ getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> mayb
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
 
-mergeToken (TableRef i)  (TableRef j) = TableRef (Interval.hull i  j)
+mergeToken (pi,TableRef i)  (pj,TableRef j) = (pi <> pj,TableRef $ Interval.hull i  j)
 
 type TableChannels k v =  (TChan (IndexMetadataPatch k v), TChan [TableModificationU k v])
 
@@ -406,7 +404,7 @@ tableLoader'
    -> TBData Key ()
    -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
 tableLoader' table  page size presort fixed tbf = do
-  pageTable (\table page token size presort predicate -> do
+  pageTable (\table page token size presort predicate tbf -> do
     inf <- askInf
     let
       unestPred (WherePredicate l) = WherePredicate $ go predicate l
@@ -421,7 +419,7 @@ tableLoader' table  page size presort fixed tbf = do
     let result = fmap resFKS   res
     liftIO $ when (not $ null (lefts result)) $ do
       print ("lefts",tableName table ,lefts result)
-    return (rights  result,x,o )) table page size presort fixed
+    return (rights  result,x,o )) table page size presort fixed tbf
 
 
 readTableFromFile
@@ -509,7 +507,7 @@ childrenRefsUnique  inf pre set (FKJoinTable rel target)  =  [((rinf,targetTable
     pkTable = rawPK targetTable
 
 
-pageTable method table page size presort fixed = do
+pageTable method table page size presort fixed tbf = do
     inf <- askInf
     let mvar = mvarMap inf
         tableU = table
@@ -528,16 +526,14 @@ pageTable method table page size presort fixed = do
       fixedChan = idxChan dbvar
       pageidx =  (fromMaybe 0 page +1) * pagesize
       hasIndex = M.lookup fixedU fixedmap
-      readNew sq = do
-         let
-           predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
+      readNew sq l = do
          (nidx,ndata) <-  if
               ((isNothing hasIndex|| (sq > G.size reso)) -- Tabela é maior que a tabela carregada
               && pageidx  > G.size reso) -- O carregado é menor que a página
            then do
              let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
                  (_,mp) = fromMaybe (0,M.empty ) hasIndex
-             (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+             (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) size sortList fixed tbf
              let res =  resK
                  -- # postFilter fetched results
                  resK = if predNull fixed then resOut else G.filterRows fixed resOut
@@ -548,22 +544,24 @@ pageTable method table page size presort fixed = do
 
                  newRes = catMaybes  $ fmap diffNew resK
              -- Add entry for this query
-             putIdx (idxChan dbvar) (fixedU, estLength page pagesize s, pageidx, token)
+             putIdx (idxChan dbvar) (fixedU, estLength page pagesize s, pageidx, tbf,token)
              -- Only trigger the channel with new entries
              -- TODO: Evaluate if is better to roll the deltas inside the monad instead of applying directly
              traverse (\i ->  putPatch (patchVar dbvar) (FetchData table  <$> i)) $ nonEmpty newRes
              return $ if L.null newRes then
-                (maybe (estLength page pagesize s,M.singleton pageidx token ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx token v)) hasIndex,reso)
+                (maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex,reso)
                     else
-                (maybe (estLength page pagesize s,M.singleton pageidx token ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx token v)) hasIndex,createUn (tableMeta tableU) (rawPK tableU) res <> reso)
+                (maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex,createUn (tableMeta tableU) (rawPK tableU) res <> reso)
            else do
              return (fromMaybe (0,M.empty) hasIndex, reso)
          return $ (M.insert fixedU nidx fixedmap, sidx,ndata )
-    (nidx2,sidx2,ndata2) <-  case hasIndex of
-          Just (sq,idx) -> case  M.lookup pageidx idx of
-             Just v -> return (fixedmap , sidx,reso)
-             Nothing -> readNew sq
-          Nothing -> readNew maxBound
+    (nidx2,sidx2,ndata2) <- case hasIndex of
+      Just (sq,idx) -> case  M.lookup pageidx idx of
+        Just v -> case recComplement inf (tableMeta table) tbf (fst v) of
+          Just i -> readNew sq i
+          Nothing -> return (fixedmap , sidx,reso)
+        Nothing -> readNew sq tbf
+      Nothing -> readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata nidx2 ,TableRep(tableMeta table,sidx2, ndata2)))
 
 cloneDBVar
@@ -584,7 +582,7 @@ readIndex
   => DBRef k v
   -> STM
   (IndexMetadata  k v ,
-     TChan (WherePredicateK k, Int, Int, PageTokenF v))
+     TChan (IndexMetadataPatch k v ))
 readIndex dbvar = do
   ini <- readTVar (idxVar dbvar)
   nchan <- cloneTChan (idxChan dbvar)
@@ -634,7 +632,7 @@ convertChanStepper0
     InformationSchema
     -> TableK Key
     -> IndexMetadata Key v
-    -> TChan (WherePredicateK Key,Int,Int,PageTokenF v)
+    -> TChan (IndexMetadataPatch Key v)
     -> Dynamic
         (Tidings (IndexMetadata Key v ))
 convertChanStepper0  inf table ini nchan = do
