@@ -76,7 +76,9 @@ renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " 
 renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> unkvlist k)  ++ "] => ")] ++  (renderFTB renderTable v)
+  ++ (if L.null ref then [] else [(0,"[" ++ L.intercalate "," ref ++ "] => ")])
+  ++ (renderFTB renderTable v)
+  where ref = concat $ fmap snd .renderAttr <$> unkvlist k
 renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB render v)
 renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ offset 1 i )$  nonEmpty (renderFTB renderTable v)
 

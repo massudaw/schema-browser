@@ -210,30 +210,22 @@ insertFrom  m a   = do
 getFrom m b = do
   inf <- askInf
   let toPatch :: TBData Key Showable -> RowPatch Key  Showable -> TBData Key Showable
-      toPatch b = (\(PatchRow i ) -> justError "no apply getFrom" $ applyIfChange b i).snd .unRowPatch
+      toPatch b = (\(PatchRow i ) -> justError "no apply getFrom" $ applyIfChange b i) . snd . unRowPatch
       allFields = allRec' (tableMap inf) m
       comp = recComplement inf (tableMeta m) b allFields
-  if isJust comp
-    then do
-    liftIO . putStrLn $ "Load complete row table : " ++ show (tableName m)
-    liftIO . putStrLn $ (maybe "" (ident . renderTable ) comp)
-    v <- (getEd $ schemaOps inf)  m b
-    let
-        newRow = toPatch b <$> v
-    case newRow of
-      Just i -> do
-        resFKS  <- traverse (getFKS inf mempty m (maybeToList newRow)) comp
+  join <$> traverse (\comp -> do
+    liftIO $ do
+      putStrLn $ "Load complete row table: " ++ show (tableName m)
+      putStrLn $ ((ident . renderTable ) comp)
+    v <- (getEd $ schemaOps inf) m b
+    let newRow = toPatch b <$> v
+    join <$> traverse (\i -> do
+        resFKS  <- getFKS inf mempty m [i] comp
         let
-          result :: Maybe (TBIdx Key Showable)
-          result = do
-            r <- newRow
-            res <- resFKS
-            res <- either (const Nothing) Just (res r) :: Maybe (TBData Key Showable)
-            return $ patch res
-        traverse (tell . pure . ((mempty,). FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow )) result
-        return result
-      Nothing ->  return Nothing
-    else return Nothing
+          result = either (const Nothing) (Just . patch) (resFKS i)
+        traverse (tell . pure . ((mempty,). FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow)) result
+        return result) newRow
+      ) comp
 
 matchDelete inf m a =
  let
