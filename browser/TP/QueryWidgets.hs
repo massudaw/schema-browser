@@ -1294,7 +1294,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr nonInjRefs plmods  oldItems  prim
               lboxeel <- switchManyLayout (triding navMeta) (M.fromList
                   [("List" , do
                     itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
-                    (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr tdi
+                    (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr (recPKDesc inf (tableMeta targetTable) (allRec' (tableMap inf) targetTable  )) tdi
                     element l # set UI.class_ selSize
                     return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
@@ -1440,7 +1440,7 @@ displayTable inf table envK = do
     pred = WherePredicate $ AndColl $ PrimColl <$> envK
   reftb@(_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
   tb <- UI.div
-  (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (pure Nothing)
+  (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (allRec' (tableMap inf) table) (pure Nothing)
   TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) res
   element tb # set UI.children [offset,cru]
 

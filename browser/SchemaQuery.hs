@@ -19,6 +19,7 @@ module SchemaQuery
   , deleteFrom
   -- Database Read Only Operations
   , selectFrom
+  , selectFromProj
   , getFrom
   , refTable
   , refTables
@@ -148,6 +149,11 @@ refTable  inf table  = do
 
 secondary (TableRep (m,s,g)) = s
 primary (TableRep (m,s,g)) = g
+
+selectFromProj t a b c d p = do
+  inf <- askInf
+  let tb = lookTable inf t
+  tableLoader  tb a b c d p
 
 
 selectFrom t a b c d = do
@@ -306,7 +312,6 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
 getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
-
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
         tar = S.fromList $ fmap _relOrigin i
@@ -551,7 +556,9 @@ pageTable method table page size presort fixed tbf = do
     (nidx2,sidx2,ndata2) <- case hasIndex of
       Just (sq,idx) -> case  M.lookup pageidx idx of
         Just v -> case recComplement inf (tableMeta table) tbf (fst v) of
-          Just i -> readNew sq i
+          Just i -> do
+            liftIO $ putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+            readNew sq i
           Nothing -> return (fixedmap , sidx,reso)
         Nothing -> readNew sq tbf
       Nothing -> readNew maxBound tbf

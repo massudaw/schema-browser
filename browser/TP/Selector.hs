@@ -177,7 +177,7 @@ instance Ord a => Ord (AscDesc a) where
   compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
 
 
-paginateList inf table itemListEl predicate (vpt,gist,_,_) constr tdi =  do
+paginateList inf table itemListEl predicate (vpt,gist,_,_) constr proj tdi =  do
       filterInp <- filterString
       wheel <- fmap negate <$> UI.mousewheel itemListEl
       let
@@ -204,7 +204,7 @@ paginateList inf table itemListEl predicate (vpt,gist,_,_) constr tdi =  do
         idxRequest = (,,) <$> facts vpt <#> predicate<*> triding offset
         loadPage (m,pred,i) = do
           let page = i `div` (opsPageSize (schemaOps inf) `div` pageSize)
-          transactionNoLog inf $ selectFrom (tableName table) (Just page ) Nothing  [] (fromMaybe mempty pred)
+          transactionNoLog inf $ selectFromProj (tableName table) (Just page ) Nothing  [] (fromMaybe mempty pred) proj
       ui $ onEventDyn (rumors idxRequest) loadPage
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> (fmap sortList res3))
       element filterInp # set UI.class_ "col-xs-10"
@@ -219,11 +219,12 @@ multiSelectListUI
   -> Tidings (Maybe WherePredicate)
   -> RefTables
   -> SelTBConstraint
+  -> KV Key ()
   -> Tidings [TBData Key Showable]
   -> UI (Tidings [TBData Key Showable], Element)
-multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_,_) constr tdi = do
+multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_,_) constr proj tdi = do
   let m = tableMeta table
-  (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr (safeHead <$> tdi)
+  (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr proj (safeHead <$> tdi)
   lbox <- multiListBoxEl itemListEl (fmap (G.getIndex m )<$> res4 ) (fmap (G.getIndex m) <$> tdi) (showFKLook inf (tableMeta table) vpt)
   out <- UI.div # set children [fInp,itemListEl]
   return ((\i j -> catMaybes $ fmap (flip G.lookup  j) i) <$> triding lbox <*> vpt ,  out  )
@@ -236,11 +237,12 @@ selectListUI
    -> Tidings (Maybe WherePredicate)
    -> RefTables
    -> SelTBConstraint
+   -> KV Key ()
    -> Tidings (Maybe (TBData Key Showable))
    -> UI (Tidings (Maybe (TBData Key Showable)), Element)
-selectListUI inf table itemListEl predicate ref@(_,vpt,_,_)  constr tdi = do
+selectListUI inf table itemListEl predicate ref@(_,vpt,_,_)  constr proj tdi = do
   let m = tableMeta table
-  (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr tdi
+  (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr proj tdi
   lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just  . G.getIndex m) <$> res4 ) (fmap (Just . G.getIndex m)<$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) vpt)
   out <-  UI.div # set children [fInp,itemListEl]
   return ((\i j -> join $ fmap (flip G.lookup  j) (join i)) <$> triding lbox <*> vpt   ,out)
@@ -250,11 +252,12 @@ multiSelector
      -> TableK Key
      -> RefTables
      -> Tidings (Maybe WherePredicate)
+     -> KV Key ()
      -> Tidings [TBData Key Showable]
      -> UI (TrivialWidget [TBData Key Showable])
-multiSelector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
+multiSelector inf table reftb@(vptmeta,vpt,_,var) predicate proj tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
-  (tds ,el) <- multiSelectListUI inf table itemListEl predicate reftb [] tdi
+  (tds ,el) <- multiSelectListUI inf table itemListEl predicate reftb [] proj tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"
   return (TrivialWidget tds itemSel)
 
@@ -264,11 +267,12 @@ selector
      -> TableK Key
      -> RefTables
      -> Tidings (Maybe WherePredicate)
+     -> KV Key ()
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-selector inf table reftb@(vptmeta,vpt,_,var) predicate tdi = mdo
+selector inf table reftb@(vptmeta,vpt,_,var) predicate proj tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
-  (tds ,el) <- selectListUI inf table itemListEl predicate reftb [] tdi
+  (tds ,el) <- selectListUI inf table itemListEl predicate reftb [] proj tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"
   return (TrivialWidget tds itemSel)
 

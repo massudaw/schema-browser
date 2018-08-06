@@ -110,7 +110,8 @@ viewerMode
   ::
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
-  reftb@(_,vpt,_,_) <- ui $ refTablesProj inf table Nothing mempty (recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table))
+  let desc = (recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table))
+  reftb@(_,vpt,_,_) <- ui $ refTablesProj inf table Nothing mempty  desc
   let
     tdip = listRows inf table <$> cliTid
     tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> facts vpt <#> fmap activeRows tdip
@@ -123,7 +124,7 @@ viewerMode six inf table tix cli cliTid = do
   cru <- switchManyUI (triding nav) $
     M.fromList [
     ("Edit",do
-      itemList <- selector inf table reftb (pure Nothing) (safeHead <$> tdi)
+      itemList <- selector inf table reftb (pure Nothing)  desc (safeHead <$> tdi)
       let
         updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts (triding itemList)<@> rumors vpt
         selection = const <$> rumors (triding itemList)
@@ -137,7 +138,7 @@ viewerMode six inf table tix cli cliTid = do
       TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,title,getElement edit]
     ),
     ("Table",do
-      itemList <- multiSelector inf table reftb (pure Nothing) tdi
+      itemList <- multiSelector inf table reftb (pure Nothing) desc tdi
       let
           tds = triding itemList
           tds2 = (\i j -> catMaybes  $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> triding itemList  <*> vpt
