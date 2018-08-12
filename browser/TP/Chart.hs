@@ -98,7 +98,6 @@ chartWidgetMetadata inf =  do
         ]
     fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (chartDef inf) ()
 
-
 chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     dashes <- chartWidgetMetadata inf
     iday <- liftIO getCurrentTime

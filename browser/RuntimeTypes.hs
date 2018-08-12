@@ -115,7 +115,7 @@ data InformationSchemaKV k v
   -- all tables by name
   , _tableMapL :: HM.HashMap Text Table
   -- Cache storage DB references
-  , mvarMap :: TVar (Map (TableK k) (DBRef Key v ))
+  , mvarMap :: TVar (Map (KVMetadata k) (DBRef Key v ))
   -- Backend state
   , rootconn :: Connection
   -- Imported schema information
@@ -425,7 +425,8 @@ type TableModificationU k u= TableModificationK (TableK k) (RowPatch k u )
 type (|->) a b = IsoArrow  a b
 data IsoArrow a b = IsoArrow { lowerA :: ( a -> b)  , buildA :: (b -> a )}
 
-type TransactionM = RWST (InformationSchema,[TableModification (RowPatch Key Showable)]) [(WherePredicate,TableModification (RowPatch Key Showable))] (M.Map (Table,WherePredicate) (DBRef Key Showable)) R.Dynamic
+type TransactionM = RWST (InformationSchema,[TableModification (RowPatch Key Showable)]) () (M.Map (KVMetadata Key) (DBRef Key Showable,[TableModification (RowPatch Key Showable)],[IndexMetadataPatch Key Showable])) R.Dynamic
+
 
 type PageToken = PageTokenF Showable
 
@@ -746,14 +747,17 @@ recComplement :: InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData 
 recComplement inf =  filterAttrs []
   where
     filterAttrs r m e = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV
-      where notPKOnly k =  if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
+      where notPKOnly k =   if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null i then Nothing else Just i
-    go r m _ (FKT l  rel  tb) (FKT l1  rel1  tb1) = if L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) then Just (FKT l1 rel1 tb1) else  (fmap (FKT l1 rel1) $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged))
+    go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
+      | L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | otherwise =  result
       where
+        result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
         merged = filterAttrs (_relTarget <$> rel) m2 <$> tb <*> tb1
         FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
-    go _ m _ (IT  it tb) ( IT it1 tb1)= fmap (IT it1)  $ if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
         merged = filterAttrs [] ms <$> tb <*> tb1
         ms = lookSMeta inf  k

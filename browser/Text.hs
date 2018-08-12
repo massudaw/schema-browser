@@ -79,8 +79,9 @@ renderAttr (FKT k rel v )
   ++ (if L.null ref then [] else [(0,"[" ++ L.intercalate "," ref ++ "] => ")])
   ++ (renderFTB renderTable v)
   where ref = concat $ fmap snd .renderAttr <$> unkvlist k
-renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB render v)
-renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ offset 1 i )$  nonEmpty (renderFTB renderTable v)
+renderAttr (Attr k v ) = (\i -> [(0,show k ++ " => " ++ ident i)]) (renderFTB render v)
+renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ offset 1 i )  (renderFTB renderTable v)
+renderAttr (Fun i k v) = renderAttr (Attr i v)
 
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
 renderFTBPatch f (PAtom i) = f i

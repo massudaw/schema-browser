@@ -3,18 +3,19 @@ module TP.Widgets where
 
 import PStream
 import Control.Monad.Writer hiding((<>))
+import Debug.Trace
 import Data.Ord
 import qualified Types.Patch as P
-import Reactive.Threepenny
+import Reactive.Threepenny hiding (apply)
 import qualified Graphics.UI.Threepenny as UI
 import Types.Patch
-import Graphics.UI.Threepenny.Core hiding (delete)
+import Graphics.UI.Threepenny.Core hiding (delete,apply)
 import Graphics.UI.Threepenny.Internal (wTimeZone)
 import qualified Data.Map as M
 import qualified Data.Foldable as F
 import qualified Data.Set as S
 import Data.Map (Map)
-import Data.Semigroup
+import Data.Semigroup hiding (diff)
 import Data.Interval (Interval(..))
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
@@ -648,6 +649,21 @@ isNew _ = Nothing
 calmE :: Eq a => Memory a  -> Event a -> Dynamic (Event a)
 calmE ini e =
   filterJust . fmap isNew <$> accumE ini (updateMemory <$> e)
+
+calmD :: (Show (Index a),Patch a )=> Maybe a  -> Event (Maybe a) -> Dynamic (Event (Maybe a))
+calmD ini e =
+  filterJust . fmap isDiff <$> accumE (ini ,patch ini) ((\ i (j,_) -> (i ,diff' i j )) <$> e)
+    where
+      isDiff (_,i) | traceShow i False = undefined
+      isDiff (i,Keep ) = Nothing
+      isDiff (i,_) = Just i
+
+
+calmDiff :: (Show (Index a),Patch a )=> Tidings (Maybe a) -> Dynamic (Tidings (Maybe a) )
+calmDiff t = do
+  current <- currentValue (facts t)
+  eCalm <- calmD current (rumors t)
+  stepperT current eCalm
 
 
 calmT :: Eq a => Tidings a -> Dynamic (Tidings a )
