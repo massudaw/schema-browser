@@ -1234,8 +1234,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
         evtarget = unionWith const eleditu (const Keep <$> rumors oldItems)
 
-      tsel <- ui $ stepperT (sourcePRef <$> inip) evsel
-      tedit <- ui $ stepperT (targetPRef <$> inip) evtarget
+      tsource <- ui $ stepperT (sourcePRef <$> inip) evsel
+      ttarget <- ui $ stepperT (targetPRef <$> inip) evtarget
 
       nav <- openClose dblClickT
       let
@@ -1244,14 +1244,14 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         merge _ Delete = Delete
         merge Keep  (Diff _) = Keep
         merge Delete (Diff _) = Delete
-        tdfk = merge <$> tsel <*> tedit
+        tdfk = merge <$> tsource <*> ttarget
         refs :: Tidings (Maybe [TB Key Showable])
         refs =  fmap (unkvlist . filterNotReflect . fst . unTBRef) <$> ftdi
         predicate = fmap (buildPredicate rel) <$> refs
         sel = liftA2 diff' oldItems ftdi
         selector False = do
           ui $ onEventDyn
-            ((,,,) <$> facts tsel <*> facts oldItems <*> facts tedit <@> rumors (fmap sourcePRef <$> sel))
+            ((,,,) <$> facts tsource <*> facts oldItems <*> facts ttarget <@> rumors (fmap sourcePRef <$> sel))
             (\(oldsel,initial,oldedit,vv) -> do
               when (oldsel /= vv ) $ do
                 liftIO $ helsel vv
@@ -1323,8 +1323,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                       c <- UI.div # set children e
                       return (TrivialWidget (fmap snd <$> l) c)) $ (,) <$> i <*> j
                     el2 <- UI.div  # sink children (pure . getElement <$> facts el)
-                    tsel <- ui $ joinT (triding <$> el)
-                    (\i -> LayoutWidget tsel i (pure (12,1))) <$> UI.div # set children [sel,el2] # set UI.class_ selSize)])
+                    tsource <- ui $ joinT (triding <$> el)
+                    (\i -> LayoutWidget tsource i (pure (12,1))) <$> UI.div # set children [sel,el2] # set UI.class_ selSize)])
 
               onChanges (facts  (getLayout lboxeel)) (liftIO . hlayout)
               element navMeta # set UI.class_ navSize
@@ -1347,7 +1347,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
 
         edit =  do
           let
-            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> tsel
+            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> ttarget
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
@@ -1376,7 +1376,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
             fksel = fmap TBRef . (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
             output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
-          ui $ onEventIO (rumors $ (,,) <$> facts tsel <*> facts tedit <#> output) (\(old,olde,i) -> do
+          ui $ onEventIO (rumors $ (,,) <$> facts tsource <*> facts ttarget <#> output) (\(old,olde,i) -> do
             when (fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
               helsel $ fmap (filterReflect.sourcePRef) i
             when (olde /= fmap targetPRef i) $ do
