@@ -460,9 +460,9 @@ tableConstraints (m ,sgist,gist) preoldItems ftb = constraints
     constraintPred :: [Key]
                       -> Tidings (G.GiST (TBIndex Showable) a)
                       -> ([Set (Rel Key)], Tidings (C.Predicate [TB Key Showable]))
-    constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate . {- fmap traceShowId .-}flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
+    constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate .  flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
     primaryConstraint = constraintPred (_kvpk m) gist
-    secondaryConstraints un = constraintPred  un  ((\i -> {-traceShow (G.keys i)-} i).justError "no un". M.lookup un <$>  sgist)
+    secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un <$>  sgist)
     constraints :: SelPKConstraint
     constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
 
@@ -1227,14 +1227,17 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       let
         inip = maybe Keep (Diff .head) $ nonEmpty $ catMaybes inipl
       (elsel, helsel) <- ui newEvent
+      (elselTarget, helselTarget) <- ui newEvent
       (eleditu, heleditu) <- ui newEvent
       (elayout, hlayout) <- ui newEvent
 
       let
         evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
-        evtarget = unionWith const eleditu (const Keep <$> rumors oldItems)
+        evseltarget = unionWith const elselTarget (const Keep <$> rumors oldItems)
+        evtarget = unionWith const eleditu evseltarget
 
       tsource <- ui $ stepperT (sourcePRef <$> inip) evsel
+      tseltarget <- ui $ stepperT (targetPRef <$> inip) evseltarget
       ttarget <- ui $ stepperT (targetPRef <$> inip) evtarget
 
       nav <- openClose dblClickT
@@ -1242,7 +1245,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         merge (Diff i) (Diff j) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j )
         merge _ Keep = Keep
         merge _ Delete = Delete
-        merge Keep  (Diff _) = Keep
+        merge Keep  (Diff i) = Diff $ PTBRef [] i
         merge Delete (Diff _) = Delete
         tdfk = merge <$> tsource <*> ttarget
         refs :: Tidings (Maybe [TB Key Showable])
@@ -1251,12 +1254,12 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         sel = liftA2 diff' oldItems ftdi
         selector False = do
           ui $ onEventDyn
-            ((,,,) <$> facts tsource <*> facts oldItems <*> facts ttarget <@> rumors (fmap sourcePRef <$> sel))
+            ((,,,) <$> facts tsource <*> facts oldItems <*> facts tseltarget <@> rumors (fmap sourcePRef <$> sel))
             (\(oldsel,initial,oldedit,vv) -> do
               when (oldsel /= vv ) $ do
                 liftIO $ helsel vv
                 pred <- currentValue (facts predicate)
-                reftb@(_,gist,sgist,_) <- refTablesDesc inf targetTable  Nothing  (fromMaybe mempty pred)
+                reftb@(_,gist,sgist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
                 g <- currentValue (facts gist)
                 s <- currentValue (facts sgist)
                 let search  i
@@ -1286,9 +1289,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         selector True = do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,sgist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-          let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems)<*>(fmap sourcePRef <$> sel)
-          tdi <- ui $ cacheTidings ((\g s v -> searchGist rel targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
-          cv <- currentValue (facts tdi)
+          let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*>(fmap sourcePRef <$> sel)
+          tdi <- ui $ calmDiff ((\g s v -> searchGist rel targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           metaMap <- mapWidgetMeta inf
           cliZone <- jsTimeZone
           metaAgenda <- eventWidgetMeta inf
@@ -1334,20 +1336,18 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               ui $ onEventIO esc (\ _ ->hSelector False)
               return (TrivialWidget  loaded elout)
 
-          let nevsel = unionWith const (rumors tdi) (rumors $ triding itemList)
-          tds <- ui $ stepperT cv nevsel
-          let
-            fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$>   tds
-            output = diff' <$> oldItems <*> fksel
-          ui $ onEventIO (rumors output) (\i -> do
-            when (not (L.null reflectRels)) $ do
-              helsel (filterReflect.sourcePRef <$> i)
-              heleditu $ fmap targetPRef i)
+          when (not (L.null reflectRels)) $ do
+            let
+              fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
+              output = diff' <$> oldItems <*> fksel
+            ui $ onEventIO (rumors output) (\i -> do
+                helsel (filterReflect.sourcePRef <$> i)
+                helselTarget $ fmap targetPRef i)
           return [getElement itemList]
 
         edit =  do
           let
-            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef)<$>oldItems) <*> ttarget
+            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
@@ -1359,28 +1359,20 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             projectEdit = fmap (fmap replaceKeyP . join . fmap (maybe Keep Diff . unLeftItensP ))
             projectValue = fmap (fmap replaceKey .join . fmap unLeftItens)
 
-{-
-          prev <- mapM (\r -> do
-            let a = Attr (alterKeyType (\(Primitive i j) -> Primitive [] j  ) $ _relOrigin r) (TB1 ())
-            el <- tbCaseDiff inf targetTable mempty a mempty mempty (join . fmap (M.lookup (S.singleton $ Inline $ _relOrigin r ) ._kvvalues.tableNonRef .fst.unTBRef)  <$> ftdi)
-            v <- labelCaseDiff inf a (triding el)
-            UI.div # set children [getElement v,getElement el] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))) rel
-          inp <- UI.div
-             # set children prev
-             # set UI.class_ "row"
-             # sink  UI.style (noneShow  <$> facts (triding nav))
-             # set style [("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
--}
-          LayoutWidget pretdi celem layout <- dynCrudUITable inf  (triding nav) staticold ((fmap (fmap (fmap targetPRef)) <$> plmods)) targetTable  tdi
+          LayoutWidget pretdi celem layout <- dynCrudUITable inf (triding nav) staticold ((fmap (fmap (fmap targetPRef)) <$> plmods)) targetTable  tdi
           let
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
-            fksel = fmap TBRef . (\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
+            fksel = fmap TBRef .(\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
             output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
-          ui $ onEventIO (rumors $ (,,) <$> facts tsource <*> facts ttarget <#> output) (\(old,olde,i) -> do
-            when (fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
+          ui $ onEventIO (rumors $ (,,,) <$> facts tsource <*> facts tdi <*>facts ttarget <#> output) (\(old,selt,olde,i) -> do
+            -- Only reflect when
+            -- 1. previous target is empty
+            -- 2. has something to reflect
+            -- 3. new diff is different than current
+            when (isNothing selt && fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
               helsel $ fmap (filterReflect.sourcePRef) i
             when (olde /= fmap targetPRef i) $ do
-              heleditu $ (fmap targetPRef i)
+              heleditu  (fmap targetPRef i)
             )
           return (getElement nav,[celem],max (6,1) <$> layout)
 

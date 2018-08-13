@@ -379,4 +379,4 @@ joinRel2 tb ref table
 
 checkGist t un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM t  un pk)
 
-tbpredM m un  = G.notOptionalM . traceShowId . G.getUnique  un
+tbpredM m un  = G.notOptionalM . G.getUnique  un

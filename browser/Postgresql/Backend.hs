@@ -410,27 +410,23 @@ patchMod m pk patch = do
     applyPatch (conn inf) (recoverFields inf <$> m) (pk,patchNoRef $ firstPatch (recoverFields inf) patch)
     return $ rebuild  pk (PatchRow patch)
 
-getRow  :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
-getRow table  values = do
+getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (RowPatch Key Showable)
+getRow table  delayed (G.Idex idx) = do
   inf <- askInf
-  let
-    v = restrictTable nonFK $ allRec' (tableMap inf) table
-    nonRefV = restrictTable nonFK values
-    delayed =  recComplement inf m nonRefV v
-  liftIO $ fmap join $ traverse (check inf nonRefV)  delayed
+  liftIO $ check inf delayed
   where
     m = tableMeta table
-    check inf values delayed = do
+    check inf delayed = do
          let
              (str,namemap) = codegen (getFromQuery inf m delayed)
-             pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . unKV $ tbPK m values
+             pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_kvpk m) idx
              qstr = (fromString $ T.unpack str)
          print  =<< formatQuery (conn  inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
          case is of
-            [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow <$> diff values i
-            [] -> error "empty query"
-            _ -> error "multiple result query"
+           [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow  $ patch i
+           [] -> error "empty query"
+           _ -> error "multiple result query"
 
 selectAll
   ::

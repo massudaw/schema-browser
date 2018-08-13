@@ -459,7 +459,7 @@ data SchemaEditor
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
   , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
-  , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (RowPatch Key Showable))
+  , getEd :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (RowPatch Key Showable)
   , typeTransform :: PGKey -> CoreKey
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , undo :: forall m . MonadIO m => InformationSchema -> RevertModification Table (RowPatch Key Showable)  -> m ()

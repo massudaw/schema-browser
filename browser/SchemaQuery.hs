@@ -222,18 +222,21 @@ getFrom m b = do
       allFields = allRec' (tableMap inf) m
       comp = recComplement inf (tableMeta m) b allFields
   join <$> traverse (\comp -> do
-    liftIO $ do
-      putStrLn $ "Load complete row table: " ++ show (tableName m)
-      putStrLn $ ((ident . renderTable ) comp)
-      putStrLn $ "Existing row table: " ++ show (tableName m)
-      putStrLn $ ((ident . renderTable ) b)
-    v <- (getEd $ schemaOps inf) m b
-    let newRow = toPatch b <$> v
-    join <$> traverse (\i -> do
+    -- liftIO $ do
+      -- putStrLn $ "Load complete row table: " ++ show (tableName m)
+      -- putStrLn $ ((ident . renderTable ) comp)
+      -- putStrLn $ "Existing row table: " ++ show (tableName m)
+      -- putStrLn $ ((ident . renderTable ) b)
+    v <- (getEd $ schemaOps inf) m (restrictTable nonFK comp) (G.getIndex (tableMeta m) b)
+    let newRow = toPatch b $ v
+    (\i -> do
         resFKS  <- getFKS inf mempty m [i] comp
         let
-          result = either (const Nothing) (Just . patch) (resFKS i)
+          result = either (const Nothing) (diff b) (resFKS i)
         traverse (modifyTable (tableMeta m) [] . pure  .(FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow)) result
+        -- liftIO $ do
+          -- putStrLn $ "Delta table: " ++ show (tableName m)
+          -- putStrLn $ (maybe "" (ident . renderRowPatch ) result)
         return result) newRow
       ) comp
 
@@ -663,7 +666,7 @@ convertChanStepper0
         (Tidings (IndexMetadata Key v ))
 convertChanStepper0  inf table ini nchan = do
     e <- convertChanEventIndex inf table nchan
-    accumT  ini (flip apply <$> e)
+    accumT ini (flip apply <$> e)
 
 convertChan
   :: InformationSchema
@@ -719,7 +722,7 @@ convertChanTidings0
 convertChanTidings0 inf table fixed ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed (facts t) nchan
     ti <- liftIO getCurrentTime
-    t <- accumT ini (flip (\i -> either error fst. foldUndo i). (\i -> traceShow (ti,i) i) <$> evdiff)
+    t <- accumT ini (flip (\i -> either error fst. foldUndo i) <$> evdiff)
     return  t
 
 tryTakeMany :: TChan a -> STM [a]
