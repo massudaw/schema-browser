@@ -231,10 +231,6 @@ asyncModification m a = do
   now <- liftIO getCurrentTime
   AsyncTableModification  (lookTable inf (_kvname m) )<$>  return a
 
-wrapModification m a = do
-  inf <- askInf
-  now <- liftIO getCurrentTime
-  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return a
 
 asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 asyncPatches m i =

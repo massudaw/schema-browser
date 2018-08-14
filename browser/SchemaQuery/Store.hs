@@ -6,12 +6,14 @@ module SchemaQuery.Store
   -- Clear in memory cache
     resetCache
   , cloneDBVar
-  , readIndex
-  , readState
+  -- , readIndex
+  -- , readState
   -- Flush to disk in memory DB
   , writeSchema
+  , writeTable
   -- Pointer Only
   , prerefTable
+  , lookDBVar
   , loadFKSDisk
   -- Transaction Operations
   , transactionNoLog
@@ -104,8 +106,6 @@ cloneDBVar pred dbvar@DBRef{..} = do
   return $ ((i,s),clonedVar)
 
 
-
-
 transactionNoLog :: InformationSchema -> TransactionM a -> Dynamic a
 transactionNoLog inf log = do
   (md,s,_)  <- runRWST log (inf ,[]) M.empty
@@ -115,8 +115,6 @@ transactionNoLog inf log = do
     putPatchSTM (patchVar ref) v
     ) (M.toList aggr)
   return md
-
-
 
 prerefTable :: InformationSchema -> Table -> Dynamic (DBRef Key Showable)
 prerefTable  inf table  = do
@@ -325,8 +323,7 @@ updateReference ::
   -> TChan [TableModificationK (TableK k1) (RowPatch k1 v)]
   -> DBRef k1 v
   -> IO ()
-updateReference j var (DBRef {..}) =
-  catchJust
+updateReference j var (DBRef {..}) = catchJust
     notException
     (atomically
        (do let isPatch (RowPatch (_, PatchRow _)) = True
@@ -492,12 +489,5 @@ readTable inf r  t  re = do
   disk <- loadFKSDisk inf t re
   let v = createUn (tableMeta t) (rawPK t) $ (\f -> disk  f) <$> prev
   return (m,v)
-
-
-
-wrapModification m a = do
-  inf <- askInf
-  now <- liftIO getCurrentTime
-  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return a
 
 

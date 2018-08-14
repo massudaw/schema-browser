@@ -881,6 +881,11 @@ filterfixedS table fixed (s,v)
        then v
        else queryCheckSecond (fixed ,rawPK table) (TableRep (tableMeta table,s,v))
 
+wrapModification m a = do
+  inf <- askInf
+  now <- liftIO getCurrentTime
+  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return a
+
 
 
 data TableModificationK k p
