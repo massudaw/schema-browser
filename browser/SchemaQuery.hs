@@ -161,7 +161,7 @@ selectFromProj t a b c d p = do
 selectFrom t a b c d = do
   inf <- askInf
   let tb = lookTable inf t
-  tableLoader  tb a b c d (allRec' (tableMap inf) tb)
+  tableLoader  tb a b c d (allFields inf tb)
 
 matchUpdate inf m a =
  let
@@ -215,30 +215,19 @@ insertFrom  m a   = do
   return  v
 
 
-getFrom m b = do
+getFrom table allFields b = do
   inf <- askInf
-  let toPatch :: TBData Key Showable -> RowPatch Key  Showable -> TBData Key Showable
-      toPatch b = (\(PatchRow i ) -> justError "no apply getFrom" $ applyIfChange b i) . snd . unRowPatch
-      allFields = allRec' (tableMap inf) m
-      comp = recComplement inf (tableMeta m) b allFields
+  let
+    m = tableMeta table
+    comp = recComplement inf m b allFields
   join <$> traverse (\comp -> do
-    -- liftIO $ do
-      -- putStrLn $ "Load complete row table: " ++ show (tableName m)
-      -- putStrLn $ ((ident . renderTable ) comp)
-      -- putStrLn $ "Existing row table: " ++ show (tableName m)
-      -- putStrLn $ ((ident . renderTable ) b)
-    v <- (getEd $ schemaOps inf) m (restrictTable nonFK comp) (G.getIndex (tableMeta m) b)
-    let newRow = toPatch b $ v
-    (\i -> do
-        resFKS  <- getFKS inf mempty m [i] comp
-        let
-          result = either (const Nothing) (diff b) (resFKS i)
-        traverse (modifyTable (tableMeta m) [] . pure  .(FetchData m .RowPatch. (G.getIndex (tableMeta m) b,).PatchRow)) result
-        -- liftIO $ do
-          -- putStrLn $ "Delta table: " ++ show (tableName m)
-          -- putStrLn $ (maybe "" (ident . renderRowPatch ) result)
-        return result) newRow
-      ) comp
+    v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
+    let newRow = apply b  v
+    resFKS  <- getFKS inf mempty table  [newRow] comp
+    let
+      result = either (const Nothing) (diff b) (resFKS newRow)
+    traverse (modifyTable m [] . pure . (FetchData table .RowPatch. (G.getIndex m b,).PatchRow)) result
+    return result ) comp
 
 
 modifyTable :: KVMetadata Key ->  [IndexMetadataPatch Key Showable] -> [TableModification (RowPatch Key Showable)] -> TransactionM ()
@@ -274,6 +263,7 @@ deleteFrom  m a   = do
 
 
 paginateTable table pred tbf = do
+  inf <- askInf
   (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll  table  (Just 0) Nothing [] pred (Just tbf)
   let
     check ix (i,tb2) = do
@@ -282,7 +272,7 @@ paginateTable table pred tbf = do
           next = ix +1
           -- Check if estimated size exist and if is bigger then the next page size (next * pagesize)
           -- or the current is already bigger or euqals the estimated
-          cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * 400 )  (lookIndexMetadata pred i)
+          cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * (opsPageSize $ schemaOps inf))  (lookIndexMetadata pred i)
         output <- if cond
             then  do
               (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll  table  (Just next  ) Nothing []  pred (Just tbf)
@@ -403,9 +393,6 @@ tableLoader (Project table  (Union l)) page size presort fixed  tbf = do
 tableLoader  table page size presort fixed tbf = do
   liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
   ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page size presort fixed tbf
-  let
-    tableU = table
-    fixedU = fixed
 
   inf <- askInf
   vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
@@ -543,55 +530,64 @@ createTable fixed m = do
 pageTable method table page size presort fixed tbf = do
     inf <- askInf
     let
-        tableU = table
-        m = tableMeta table
-        fixedU = fixed
-        defSort = fmap (,Desc) $  rawPK table
-        sortList  = if L.null presort then defSort else  presort
-        pagesize = maybe (opsPageSize $ schemaOps inf) id size
+      m = tableMeta table
+      defSort = fmap (,Desc) $  rawPK table
+      sortList  = if L.null presort then defSort else  presort
+      pagesize = maybe (opsPageSize $ schemaOps inf) id size
     ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
-      <- createTable fixed (tableMeta tableU)
+      <- createTable fixed (tableMeta table)
     let
       nchan = patchVar dbvar
       fixedChan = idxChan dbvar
       pageidx =  (fromMaybe 0 page +1) * pagesize
-      hasIndex = M.lookup fixedU fixedmap
+      hasIndex = M.lookup fixed fixedmap
       readNew sq l = do
-         (nidx,ndata) <-  if
-              ((isNothing hasIndex|| (sq > G.size reso)) -- Tabela é maior que a tabela carregada
-              && pageidx  > G.size reso) -- O carregado é menor que a página
-           then do
-             let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
-                 (_,mp) = fromMaybe (0,M.empty ) hasIndex
-             (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) size sortList fixed tbf
-             let res =  resK
-                 -- # postFilter fetched results
-                 resK = if predNull fixed then resOut else G.filterRows fixed resOut
-                 -- # removeAlready fetched results
-                 diffNew i = case G.lookup (G.getIndex (tableMeta table) i) reso of
-                             Just v -> patchRowM' (tableMeta table) v i
-                             Nothing -> Just $ createRow' (tableMeta table) i
+         let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
+             (_,mp) = fromMaybe (maxBound,M.empty ) hasIndex
+         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) size sortList fixed tbf
+         let
+             -- # postFilter fetched results
+             resK = if predNull fixed then resOut else G.filterRows fixed resOut
+             -- # removeAlready fetched results
+             diffNew i
+                = case G.lookup (G.getIndex (tableMeta table) i) reso of
+                   Just v -> patchRowM' (tableMeta table) v i
+                   Nothing -> Just $ createRow' (tableMeta table) i
+             newRes = catMaybes  $ fmap diffNew resK
+         -- Only trigger the channel with new entries
+         modifyTable (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)] . fmap (FetchData table) $ newRes
+         let nidx = maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex
+         if L.null newRes
+            then do
+              liftIO $ putStrLn $ "No new fields";
+              return (nidx,reso)
+            else return (nidx,createUn (tableMeta table) (rawPK table) resK <> reso)
+    (nidx,ndata) <- case hasIndex of
+      Just (sq,idx) ->
+        if (sq > G.size reso)
+        then case  M.lookup pageidx idx of
+          Just v -> case recComplement inf (tableMeta table) (fst v) tbf of
+            Just i -> do
+              liftIO $ putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+              readNew sq i
+            Nothing -> do
+              liftIO $ putStrLn $ "Empty complement: " <> show (fst v)
+              return ((sq,idx), reso)
+          Nothing -> do
+            liftIO $ putStrLn $ "No page: " <> show (pageidx)
+            readNew sq tbf
+        else  do
+          when (sq < G.size reso) $ do
+            -- TODO : Fix invalid size for plugin_code
+            modifyTable (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
+            liftIO $print (tableName table,fixed,G.keys reso)
+          liftIO $ putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
+          return ((max (G.size reso) sq,idx), reso)
+      Nothing -> do
+        liftIO $ putStrLn $ "No index: " <> show (fixed)
+        readNew maxBound tbf
+    return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
 
-                 newRes = catMaybes  $ fmap diffNew resK
-             -- Only trigger the channel with new entries
-             modifyTable (tableMeta table) [(fixedU, estLength page pagesize s, pageidx, tbf,token)] . fmap (FetchData table) $ newRes
-             return $ if L.null newRes then
-                (maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex,reso)
-                    else
-                (maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex,createUn (tableMeta tableU) (rawPK tableU) res <> reso)
-           else do
-             return (fromMaybe (0,M.empty) hasIndex, reso)
-         return $ (M.insert fixedU nidx fixedmap, sidx,ndata )
-    (nidx2,sidx2,ndata2) <- case hasIndex of
-      Just (sq,idx) -> case  M.lookup pageidx idx of
-        Just v -> case recComplement inf (tableMeta table) tbf (fst v) of
-          Just i -> do
-            liftIO $ putStrLn $ "Load complement: " <> (ident . renderTable $ i)
-            readNew sq i
-          Nothing -> return (fixedmap , sidx,reso)
-        Nothing -> readNew sq tbf
-      Nothing -> readNew maxBound tbf
-    return ((fixedChan,nchan) ,(IndexMetadata nidx2 ,TableRep(tableMeta table,sidx2, ndata2)))
 
 cloneDBVar
   :: (NFData k ,Show k,Ord k)
@@ -746,7 +742,7 @@ createRow (RowPatch (_,PatchRow i)) = create i
 
 tableLoaderAll table  page size presort fixed tbf = do
   inf <- askInf
-  tableLoader'  table page size presort fixed (fromMaybe (allRec' (tableMap inf) table ) tbf)
+  tableLoader'  table page size presort fixed (fromMaybe (allFields inf table ) tbf)
 
 recInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
 recInsert k1  v1 = do
@@ -754,7 +750,7 @@ recInsert k1  v1 = do
    ret <- traverseKV (tbInsertEdit k1) v1
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
-   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf k1 (allRec' (tableMap inf) tb)))
+   (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf k1 (allFields inf tb)))
    if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
         tb  <- insertFrom k1 ret
@@ -777,7 +773,6 @@ itRefFun = (id,id,noEdit,noInsert)
 asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 asyncPatches m i =
   modifyTable m [] =<< mapM (asyncModification m) i
-  --tell =<< mapM (fmap (mempty,) . asyncModification m) i
 
 tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 tellPatches m i =
@@ -857,7 +852,7 @@ tbEditRef fun@(funi,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse (fmap funo 
       let
         tb  = lookTable inf (_kvname m2)
         overloadedRules = (rules $ schemaOps inf)
-      (_,(_,TableRep(_,_,g))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf m2 (allRec' (tableMap inf) tb)))
+      (_,(_,TableRep(_,_,g))) <- tableLoaderAll  tb Nothing Nothing [] mempty (Just (recPK inf m2 (allFields inf tb)))
       if (isNothing $ (flip G.lookup g) =<< G.tbpredM m2 l) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema m2 ,_kvname m2) overloadedRules))
          then return (TBInsert l)
          else return (TBNoop l)
@@ -932,7 +927,7 @@ refTablesProj inf table page pred proj = do
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTablesDesc inf table page pred = do
-  ref  <-  transactionNoLog inf $ tableLoader  table page Nothing []  pred (recPKDesc inf (tableMeta table) $ allRec' (tableMap inf) table)
+  ref  <-  transactionNoLog inf $ tableLoader  table page Nothing []  pred (recPKDesc inf (tableMeta table) $ allFields inf table)
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTables' inf table page pred = do

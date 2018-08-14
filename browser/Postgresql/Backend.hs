@@ -410,7 +410,7 @@ patchMod m pk patch = do
     applyPatch (conn inf) (recoverFields inf <$> m) (pk,patchNoRef $ firstPatch (recoverFields inf) patch)
     return $ rebuild  pk (PatchRow patch)
 
-getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (RowPatch Key Showable)
+getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
 getRow table  delayed (G.Idex idx) = do
   inf <- askInf
   liftIO $ check inf delayed
@@ -424,7 +424,7 @@ getRow table  delayed (G.Idex idx) = do
          print  =<< formatQuery (conn  inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
          case is of
-           [i] ->return $ RowPatch . (G.getIndex m i,).PatchRow  $ patch i
+           [i] ->return $ patch i
            [] -> error "empty query"
            _ -> error "multiple result query"
 

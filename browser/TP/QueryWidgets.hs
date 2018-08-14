@@ -82,7 +82,7 @@ genAttr inf k =
          RecordPrim (s,t) ->
            let table =  lookTable sch t
                sch = fromMaybe inf (HM.lookup s (depschema inf))
-            in IT k $ kfold ty $  TB1 $ allRec' (tableMap sch) table
+            in IT k $ kfold ty $  TB1 $ allFields sch table
   where
     kfold l = F.foldl' (.) id (kgen <$> l)
     kgen :: KTypePrim -> FTB a -> FTB a
@@ -478,7 +478,7 @@ batchUITable
 batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <- ui $ loadItems inf table  preoldItems2
+  preoldItems <- ui $ loadItems inf table  ftb preoldItems2
   let arraySize = 30
       index = flip atMay
       constraints = tableConstraints (m,sgist,gist) preoldItems ftb
@@ -635,9 +635,10 @@ loadItems
   :: Traversable t =>
      InformationSchema
      -> Table
+     -> TBData CoreKey ()
      -> Tidings (t (TBData CoreKey Showable))
      -> Dynamic (Tidings (t (TBData CoreKey Showable)))
-loadItems inf table preoldItems
+loadItems inf table tbf preoldItems
   = mapTidingsDyn
     (traverse
       (\i -> do
@@ -645,7 +646,7 @@ loadItems inf table preoldItems
         return $ maybe i (justError "cant apply" . applyIfChange i) v))
     preoldItems
   where
-    getItem v = getFrom table v
+    getItem v = getFrom table tbf v
 
 crudUITable
    :: InformationSchema
@@ -659,7 +660,7 @@ crudUITable
 crudUITable inf table reftb@(_,gist ,sgist,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <-  ui $ loadItems inf table  =<< calmDiff preoldItems2
+  preoldItems <-  ui $ loadItems inf table ftb =<< calmDiff preoldItems2
   let
     constraints = tableConstraints (m,sgist,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
@@ -692,7 +693,7 @@ dynCrudUITable inf nav refs pmods table preoldItems = do
   switchUILayout delta UI.div nav
       (do
         reftb@(_,gist,sgist,_) <- ui $ refTables inf   table
-        crudUITable inf table reftb refs pmods (allRec' (tableMap inf) table) preoldItems)
+        crudUITable inf table reftb refs pmods (allFields inf table) preoldItems)
     where delta = compactPlugins preoldItems pmods
 
 mergePatches i j = join $ (liftA2 applyIfChange i j)<|> (createIfChange <$> j) <|> Just i
@@ -1166,7 +1167,7 @@ inlineTableUI
   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 inlineTableUI inf constr pmods oldItems (RecordPrim na) = do
     let
-      tablefields = allRec' (tableMap inf) table
+      tablefields = allFields inf table
       convertConstr (_,j) =  (\i -> ([index i], C.contramap (\v -> kvlist (fmap addDefault (L.delete i attrs) ++ v)) <$> j )) <$> attrs
         where attrs = F.toList $ unKV tablefields
       table = lookTable rinf (snd na)
@@ -1188,9 +1189,9 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
-          where
-            prim (Attr k v) = buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
-            buildPrim o rel = PrimColl (keyRef (_relTarget rel),[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
+        where
+          prim (Attr k v) = buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
+          buildPrim o rel = PrimColl (keyRef (_relTarget rel),[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
 
 fkUITablePrim ::
   InformationSchema
@@ -1215,6 +1216,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       (eSelector,hSelector) <- ui newEvent
       selectT <- ui $ calmT =<< stepperT False  eSelector
       let
+        fields = allFields inf targetTable
         reflectRels = filter (isJust. _relOutputs) rel
         matchReflect k = isJust $ L.find (\(Rel i _ _ )  -> S.singleton i == k) reflectRels
         filterReflect m = filter  (matchReflect.index) m
@@ -1290,7 +1292,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,sgist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*>(fmap sourcePRef <$> sel)
-          tdi <- ui $ calmDiff ((\g s v -> searchGist rel targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
+          tdi <- ui $ calmT ((\g s v -> searchGist rel targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
           metaMap <- mapWidgetMeta inf
           cliZone <- jsTimeZone
           metaAgenda <- eventWidgetMeta inf
@@ -1308,7 +1310,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                 (M.fromList
                   [("List" , do
                     itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
-                    (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr (recPKDesc inf (tableMeta targetTable) (allRec' (tableMap inf) targetTable  )) tdi
+                    (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr (recPKDesc inf (tableMeta targetTable) fields) tdi
                     element l # set UI.class_ selSize
                     return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
@@ -1332,7 +1334,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               element navMeta # set UI.class_ navSize
               elout <- UI.div # set children [getElement navMeta ,getElement lboxeel]
               esc <- onEsc elout
-              loaded <- ui $ loadItems inf targetTable (triding lboxeel)
+              loaded <- ui $ loadItems inf targetTable fields (triding lboxeel)
               ui $ onEventIO esc (\ _ ->hSelector False)
               return (TrivialWidget  loaded elout)
 
@@ -1375,7 +1377,6 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               heleditu  (fmap targetPRef i)
             )
           return (getElement nav,[celem],max (6,1) <$> layout)
-
 
       layoutT <- ui $ stepperT (6,1) elayout
       selEls <- traverseUI selector selectT
@@ -1442,8 +1443,8 @@ displayTable inf table envK = do
     pred = WherePredicate $ AndColl $ PrimColl <$> envK
   reftb@(_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
   tb <- UI.div
-  (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (allRec' (tableMap inf) table) (pure Nothing)
-  TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) res
+  (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (allFields inf table) (pure Nothing)
+  TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allFields inf table) res
   element tb # set UI.children [offset,cru]
 
 filterPatchSet :: Show a => (Int -> Bool) -> PathFTB a -> Maybe (PathFTB a)

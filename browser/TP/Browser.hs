@@ -110,7 +110,7 @@ viewerMode
   ::
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
-  let desc = (recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table))
+  let desc = recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table)
   reftb@(_,vpt,_,_) <- ui $ refTablesProj inf table Nothing mempty  desc
   let
     tdip = listRows inf table <$> cliTid

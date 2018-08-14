@@ -459,7 +459,7 @@ data SchemaEditor
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
   , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
-  , getEd :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (RowPatch Key Showable)
+  , getEd :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
   , typeTransform :: PGKey -> CoreKey
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , undo :: forall m . MonadIO m => InformationSchema -> RevertModification Table (RowPatch Key Showable)  -> m ()
@@ -470,6 +470,7 @@ data SchemaEditor
 
 typeTrans inf = typeTransform (schemaOps inf)
 
+allFields inf = allRec' (tableMap inf)
 
 argsToState  [h,ph,d,u,p,s,m,t,o] = BrowserState h ph d  u p (Just s) (Just t ) (Just ( Non.fromList . fmap (fmap (T.drop 1) . T.break (=='=') )$ T.split (==',') (T.pack o)))
 argsToState  [h,ph,d,u,p,s,m,t] = BrowserState h ph d  u p (Just s) (Just t ) Nothing

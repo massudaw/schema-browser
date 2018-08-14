@@ -9,6 +9,8 @@ module TP.Main where
 import TP.Selector
 import TP.Extensions
 import ClientAccess
+
+import Query
 import Safe
 import GHC.IO.Unsafe
 import PrimEditor
@@ -374,7 +376,6 @@ withTable s m w =
   withInf [] s (\inf -> runDynamic $ do
     now <- liftIO getCurrentTime
     let pred = (WherePredicate $ lookAccess inf m <$> w)
-        -- pred = WherePredicate $ lookAccess inf m <$>(AndColl [OrColl [PrimColl (IProd Nothing "scheduled_date",Left (IntervalTB1 (I.interval (I.Finite (TB1 (STime (SDate (utctDay now) ))),True) (I.Finite (TB1 (STime (SDate (utctDay (addUTCTime (3600*24*35) now))))),True)),Flip Contains))]])
         table = lookTable inf m
     liftIO $ print  table
     lift $ mapM print (rawFKS table)
@@ -387,6 +388,23 @@ withTable s m w =
     liftIO $ putStrLn (unlines $ debug i2)
     -- liftIO $ putStrLn (unlines $ debug2 i2)
     --
+               )
+
+
+testPartialLoading s t = do
+  withInf [] s (\inf -> runDynamic $ do
+    let desc = recPKDescIndex inf (tableMeta table)  all
+        pk = recPK inf (tableMeta table)  all
+        all = allRec' (tableMap inf) table
+        table  = lookTable inf t
+    liftIO $print ("Load desc" ,desc)
+    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty desc
+    liftIO $print ("Load pk" ,pk)
+    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty pk
+    liftIO $ print ("Load all" ,all)
+    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty all
+    liftIO $print ("Load pk" ,pk)
+    transactionNoLog  inf $ selectFromProj t Nothing (Just 1 ) [] mempty pk
                )
 
 testCreate = withInf [] "metadata"
