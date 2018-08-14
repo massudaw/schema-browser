@@ -871,6 +871,9 @@ data RevertModification k p
                        }
   deriving (Eq, Show, Functor, Generic)
 
+secondary (TableRep (m,s,g)) = s
+primary (TableRep (m,s,g)) = g
+
 data TableModificationK k p
   = TableModification { tableId :: Maybe Int
                       , tableTime :: UTCTime
