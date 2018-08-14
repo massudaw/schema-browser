@@ -3,12 +3,8 @@
   #-}
 module SchemaQuery.Read
   (
-  -- Clear in memory cache
-   resetCache
-  -- Flush to disk in memory DB
-  , writeSchema
   -- Create fresh variables
-  , createFresh
+   createFresh
   -- Database Read Only Operations
   , selectFrom
   , selectFromProj
@@ -36,9 +32,8 @@ module SchemaQuery.Read
   ) where
 import Control.Arrow
 import Control.Concurrent
+import SchemaQuery.Store
 import Text
-import Debug.Trace
-import Serializer
 import Control.Concurrent.STM
 import Control.DeepSeq
 import Control.Exception (throw)
@@ -50,7 +45,6 @@ import Control.Monad.Trans.Maybe
 import qualified Data.Binary as B
 import Data.Either
 import qualified Data.Foldable as F
-import qualified Data.GiST.BTree as G
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Interval as Interval
 import qualified Data.List as L
@@ -61,9 +55,7 @@ import Data.String (fromString)
 import qualified Data.Text as T
 import Data.Time
 import qualified Data.Traversable as Tra
-import Environment
 import Expression
-import qualified NonEmpty as Non
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -85,14 +77,7 @@ lookDBVar inf mmap table =
 
 estLength page size est = fromMaybe 0 page * size  +  est
 
-resetCache :: InformationSchema -> IO ()
-resetCache inf = atomically $ modifyTVar (mvarMap inf) (const M.empty)
 
-
-prerefTable :: InformationSchema -> Table -> Dynamic (DBRef Key Showable)
-prerefTable  inf table  = do
-  mmap <- liftIO $  readTVarIO (mvarMap inf)
-  lookDBVar inf mmap (tableMeta table)
 
 projunion :: Show a=>InformationSchema -> Table -> TBData Key a -> TBData Key a
 projunion inf table = res
@@ -367,12 +352,6 @@ readTableFromFile  inf r t = do
       else return Nothing
 
 
-predNull (WherePredicate i) = L.null i
-
-filterfixedS table fixed (s,v)
-  = if predNull fixed
-       then v
-       else queryCheckSecond (fixed ,rawPK table) (TableRep (tableMeta table,s,v))
 
 
 -- TODO : Remove recjoin hack and add state to ignore recursive inline tables without foreign keys
@@ -506,46 +485,6 @@ pageTable method table page size presort fixed tbf = do
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
 
 
-cloneDBVar
-  :: (NFData k ,Show k,Ord k)
-  => (WherePredicateK k,[k])
-  -> DBRef k Showable
-  -> STM ((IndexMetadata k Showable, TableRep k Showable), DBRef k Showable)
-cloneDBVar pred dbvar@DBRef{..} = do
-  ix <- readTVar refSize
-  (i,idxchan) <- readIndex dbvar
-  (s,statechan) <- readState pred dbvar
-  let clonedVar = DBRef dbRefTable  (ix+1) refSize statechan idxVar idxchan collectionState
-  return $ ((i,s),clonedVar)
-
-
-readIndex
-  :: (Show k,Ord k,Show v)
-  => DBRef k v
-  -> STM
-  (IndexMetadata  k v ,
-     TChan (IndexMetadataPatch k v ))
-readIndex dbvar = do
-  ini <- readTVar (idxVar dbvar)
-  nchan <- cloneTChan (idxChan dbvar)
-  patches <- tryTakeMany nchan
-  return (justError "no apply readIndex" $applyIfChange ini patches,nchan)
-
-readState
-  :: (Show k ,Ord k ,NFData k)
-      => (TBPredicate k Showable, [k])
-      -> DBRef k Showable
-      -> STM (TableRep k Showable , TChan [TableModificationU k Showable])
-readState fixed dbvar = do
-  TableRep (m,s,v) <-readTVar (collectionState dbvar)
-  chan <- cloneTChan (patchVar dbvar)
-  patches <- tryTakeMany chan
-  let
-    filterPred = filter (checkPatch  fixed)
-    fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result=either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
-  return (result,chan)
-
 
 tableCheck
   :: (Show t, Show a) =>
@@ -661,17 +600,6 @@ tableLoaderAll table  page size presort fixed tbf = do
 tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 tellPatches m i =
   modifyTable m [] =<< mapM (wrapModification m ) i
-
-transactionNoLog :: InformationSchema -> TransactionM a -> Dynamic a
-transactionNoLog inf log = do
-  (md,s,_)  <- runRWST log (inf ,[]) M.empty
-  let aggr = s
-  liftIO $ atomically $ traverse (\(k,(ref,v,ix)) -> do
-    mapM (putIdxSTM (idxChan ref)) ix
-    putPatchSTM (patchVar ref) v
-    ) (M.toList aggr)
-  return md
-
 
 withDynamic :: (forall b . IO b -> IO b) -> Dynamic a -> Dynamic a
 withDynamic  f i =  do
@@ -907,90 +835,6 @@ updateTable inf (DBRef {..})
               ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
             return ())  (\e -> atomically ( readTChan patchVar ) >>= printException e )
 
-loadFKSDisk inf targetTable re = do
-  let
-    psort = rawFKS targetTable
-    (fkSet2,pre) = F.foldl' (\(s,l) i -> ( (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )))  (S.empty , return []) psort
-  prefks <- pre
-  return (\table ->
-    let
-      items = unKV $ table
-      fks = catMaybes $  ($ table) <$>  prefks
-      fkSet:: S.Set Key
-      fkSet =    S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  psort
-      nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]
-      nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
-   in kvlist  (fmap snd nonFKAttrs <> fks ))
-
-loadFKDisk :: InformationSchema ->  S.Set Key -> [MutRec [[Rel Key]]] ->  SqlOperation -> Dynamic (TBData Key Showable -> Maybe (Column Key Showable))
-loadFKDisk inf old re (FKJoinTable rel (st,tt) ) = do
-  let
-    targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
-    targetTable = lookTable targetSchema tt
-  ((_,mtable ),_) <- createTableRefs targetSchema re targetTable
-  return (\table ->  do
-    let
-      relSet = S.fromList $ _relOrigin <$> relU
-      refl = S.fromList $ _relOrigin <$> filterReflexive rel
-      relU = rel
-      tb  = F.toList (M.filterWithKey (\k l -> not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef $ table))
-      fkref = joinRel2 (tableMeta targetTable) (replaceRel relU <$> tb) mtable
-    case fkref of
-      Nothing ->
-        if F.any (isKOptional.keyType . _relOrigin) rel
-          then Just $ FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
-          else Nothing
-      i -> FKT (kvlist $ filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU <$> i )
-loadFKDisk inf old re (FKInlineTable ori (st,tt)) = do
-  let targetTable = lookTable targetSchema tt
-      targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
-  loadVtPre <- loadFKSDisk inf  targetTable re
-  return (\table ->
-    let v = do
-          IT rel vt  <- M.lookup ( (S.singleton. Inline )   ori) (unKV $ table)
-          let loadVt = loadVtPre  <$> vt
-          return $ IT rel loadVt
-    in case v of
-        Nothing ->  if  (isKOptional .keyType) ori
-                      then  Just (IT (ori ) (LeftTB1 Nothing))
-                      else  Nothing
-        v -> v)
-
-loadFKDisk  inf old  re (RecJoin i l)
-  | L.elem i re = do
-    return  (const Nothing)
-  | otherwise = do
-    loadFKDisk inf old (i:re) l
-loadFKDisk  _ _ _ _  = return (const Nothing)
-
-
-writeSchema (schema,schemaVar) = do
-  varmap <- atomically $ M.toList <$>  readTVar (mvarMap schemaVar)
-  putStrLn $ "Dumping Schema: " ++ T.unpack schema
-  let sdir = "dump/"<> (fromString $ T.unpack schema)
-  hasDir <- doesDirectoryExist sdir
-  when (not hasDir ) $  do
-    putStrLn $ "Create directory : " <> sdir
-    createDirectory sdir
-  mapM_ (uncurry (writeTable schemaVar sdir)) varmap
-
-
-
-writeTable :: InformationSchema -> String -> KVMetadata Key -> DBRef Key Showable -> IO ()
-writeTable inf s t v = do
-  let tname = s <> "/" <> (fromString $ T.unpack (_kvname t))
-  putStrLn("Dumping Table: " <> tname)
-  (TableRep (_,_,iv),_) <- atomically $ readState mempty  v
-  (IndexMetadata iidx ,_)<- atomically $ readIndex v
-  let
-    sidx = first (mapPredicate keyFastUnique)  <$> M.toList iidx
-    sdata = traverse (\i ->  fmap (mapKey' keyFastUnique) .  typecheck (typeCheckTable (_kvschema t,_kvname t)) .tableNonRef $ i) $  iv
-  either (putStrLn .unlines ) (\sdata ->  do
-    when (not (L.null sdata) )$
-      B.encodeFile  tname (sidx, G.toList sdata)) sdata
-  return ()
-
-
 readTable :: InformationSchema -> T.Text -> Table -> [MutRec [[Rel Key]]] -> Dynamic (Collection Key Showable)
 readTable inf r  t  re = do
   let
@@ -1093,7 +937,5 @@ wrapModification m a = do
   inf <- askInf
   now <- liftIO getCurrentTime
   TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return a
-
-lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
 

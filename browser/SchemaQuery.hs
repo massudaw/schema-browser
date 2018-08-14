@@ -6,9 +6,11 @@ module SchemaQuery
     module SchemaQuery.Edit
   , module SchemaQuery.Read
   , module SchemaQuery.Arrow
+  , module SchemaQuery.Store
   , revertModification
   ) where
 
+import SchemaQuery.Store
 import SchemaQuery.Edit
 import SchemaQuery.Read
 import SchemaQuery.Arrow
@@ -19,9 +21,7 @@ import Types.Primitive
 import qualified Types.Index as G
 import qualified Data.Foldable as F
 import Control.Monad.IO.Class
-import Environment
 import Step.Common
-import Safe
 import Utils
 import Serializer
 import qualified Data.Text as T

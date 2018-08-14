@@ -41,6 +41,7 @@ library
     SchemaQuery.Read
     SchemaQuery.Edit
     SchemaQuery.Arrow
+    SchemaQuery.Store
     ClientAccess
     TP.Main
     TP.Browser

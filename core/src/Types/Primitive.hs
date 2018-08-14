@@ -853,6 +853,7 @@ newKey table name ty =
   let un = maximum (keyPosition <$> rawAttrs table) + 1
   in  Key name Nothing [FRead,FWrite] un Nothing (tableUnique table) ty
 
+lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l

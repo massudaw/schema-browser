@@ -47,7 +47,7 @@ import Postgresql.Types
 import Query
 import RuntimeTypes
 import Step.Host (findAttr)
-import Types
+import Types hiding(lkKey)
 import qualified Types.Index as G
 import Types.Inference
 import Utils

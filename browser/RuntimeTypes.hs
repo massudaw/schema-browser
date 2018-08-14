@@ -874,6 +874,15 @@ data RevertModification k p
 secondary (TableRep (m,s,g)) = s
 primary (TableRep (m,s,g)) = g
 
+predNull (WherePredicate i) = L.null i
+
+filterfixedS table fixed (s,v)
+  = if predNull fixed
+       then v
+       else queryCheckSecond (fixed ,rawPK table) (TableRep (tableMeta table,s,v))
+
+
+
 data TableModificationK k p
   = TableModification { tableId :: Maybe Int
                       , tableTime :: UTCTime

@@ -37,7 +37,6 @@ whereR
   -> DatabaseM (View T.Text T.Text)  [(Rel T.Text , AccessOp Showable)] (G.GiST (TBIndex Showable) (TBData Key Showable))
 whereR (P i k) m  = P (WhereV i m) (proc i -> k -< (i ++ m))
 
-lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
 sourceTable inf (JoinV t  j jty _ l ) = alterTable nt
   where path =  FKInlineTable k $ inlineName  ty
