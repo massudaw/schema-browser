@@ -38,6 +38,9 @@ library
     Environment
     Schema
     SchemaQuery
+    SchemaQuery.Read
+    SchemaQuery.Edit
+    SchemaQuery.Arrow
     ClientAccess
     TP.Main
     TP.Browser

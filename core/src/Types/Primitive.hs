@@ -849,6 +849,11 @@ accesRelGen' (Inline i) = IProd Nothing i
 accesRelGen' (RelAccess l m) =
   Nested (_relOrigin <$> Non.fromList l) (Many [(accesRelGen' m)])
 
+newKey table name ty =
+  let un = maximum (keyPosition <$> rawAttrs table) + 1
+  in  Key name Nothing [FRead,FWrite] un Nothing (tableUnique table) ty
+
+
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l
 relAccesGen (Nested l (Many [m])) =

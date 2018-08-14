@@ -3,13 +3,15 @@
   #-}
 module SchemaQuery
   (
-    module SchemaQuery.SchemaEdit
-  , module SchemaQuery.SchemaRead
+    module SchemaQuery.Edit
+  , module SchemaQuery.Read
+  , module SchemaQuery.Arrow
   , revertModification
   ) where
 
-import SchemaQuery.SchemaEdit
-import SchemaQuery.SchemaRead
+import SchemaQuery.Edit
+import SchemaQuery.Read
+import SchemaQuery.Arrow
 import RuntimeTypes
 import Types.Patch
 import Types.Common

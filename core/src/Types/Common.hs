@@ -47,6 +47,7 @@ module Types.Common
   , kvNull
   , kvSingleton
   , kvSize
+  , getAtt
   -- ,recoverAttr', firstATB ,traFAValue,AValue(..),TBAttr
   , FTB(..)
   , unTB1
@@ -899,6 +900,8 @@ tbUn un = kvFilter pred
     pred k = S.isSubsetOf (S.map _relOrigin k) un
 
 
+
+getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . unkvlist  $ k
 
 alterKV k fun (KV i ) = KV <$> (PM.alterF fun k i)
 

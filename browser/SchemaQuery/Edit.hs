@@ -26,7 +26,7 @@ import qualified NonEmpty as Non
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
-import SchemaQuery.SchemaRead
+import SchemaQuery.Read
 import Types
 import qualified Types.Index as G
 import Types.Patch
