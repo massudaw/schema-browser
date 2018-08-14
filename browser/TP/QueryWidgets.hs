@@ -341,7 +341,7 @@ recoverValue (i,j) = liftA2 (\i j -> join (applyIfChange i j) <|> (join $ create
 
 select table  = do
   inf <-askInf
-  (_,(_,TableRep (_,_,evMap ))) <- tableLoaderAll (lookTable inf table) Nothing Nothing [] mempty Nothing
+  (_,(_,TableRep (_,_,evMap ))) <- tableLoaderAll (lookTable inf table) Nothing mempty Nothing
   return (decodeT . mapKey' keyValue <$> evMap)
 
 loadPlugins :: InformationSchema -> Dynamic [Plugins]
@@ -818,7 +818,7 @@ processPanelTable lbox inf reftb@(res,gist,_,_) inscrudp table oldItemsi = do
     inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
     m = tableMeta table
     authPred =  [(keyRef "grantee",Left ( int $ usernameId inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-  auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
+  auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing authPred)
   let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ usernameId inf)]))  <$> collectionTid auth
 
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist

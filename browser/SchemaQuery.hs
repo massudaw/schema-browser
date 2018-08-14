@@ -30,7 +30,7 @@ getRow (G.Idex ix) table =  do
   liftIO . putStrLn $ "Load complete row table : " ++ show (ix,table)
   inf <- askInf
   let pred = AndColl $ zipWith (\v i -> PrimColl (Inline i ,[(i,Left (v,Equals))])) ix (rawPK table)
-  (ref,(nidx,rep)) <-  tableLoaderAll table  Nothing Nothing [] (WherePredicate pred) Nothing
+  (ref,(nidx,rep)) <-  tableLoaderAll table  Nothing (WherePredicate pred) Nothing
   return $safeHead (G.toList $ primary rep)
 
 revertModification :: Int ->  TransactionM ()
@@ -38,7 +38,7 @@ revertModification idx = do
   inf <- askInf
   let table = lookTable (meta inf) "undo_modification_table"
       pred = [(keyRef "modification_id",Left (int idx,Equals))]
-  (ref,(nidx,TableRep (_,_,ndata))) <- localInf (const (meta inf)) $ tableLoaderAll table  (Just 0) Nothing [] (tablePredicate (meta inf) (tableName table) pred) Nothing
+  (ref,(nidx,TableRep (_,_,ndata))) <- localInf (const (meta inf)) $ tableLoaderAll table  (Just 0) (tablePredicate (meta inf) (tableName table) pred) Nothing
   let
     mod :: RevertModification (T.Text,T.Text) (RowPatch T.Text Showable)
     mod@(RevertModification source delta)  = decodeT (mapKey' keyValue $ justError "row not found" $ safeHead $ F.toList ndata)

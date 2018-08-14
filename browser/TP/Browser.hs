@@ -76,7 +76,7 @@ chooserTable six inf bset cliTid cli = do
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   translationDb <- ui $ transactionNoLog  (meta inf)
-        (selectFromTable "table_name_translation" Nothing Nothing []  pred2 )
+        (selectFromTable "table_name_translation" Nothing pred2 )
   w <- askWindow
   iniTable <- currentValue (facts cliTid)
   el <- ui $ accumDiffCounterIni  (maybe 0 (length .table_selection)  iniTable) (\ix -> runUI w . (\table-> do

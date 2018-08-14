@@ -46,7 +46,7 @@ plugs :: TVar DatabaseSchema -> t1 -> t -> [PrePlugins] -> IO [Plugins]
 plugs schm authmap db plugs = do
   inf <- metaInf schm
   regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
-      db <- selectFrom "plugins"  Nothing Nothing [] mempty
+      db <- selectFrom "plugins"  Nothing mempty
       t <- currentState db
       let
         regplugs = catMaybes $ findplug <$> plugs
@@ -82,7 +82,7 @@ poller schmRef authmap user db plugs is_test = do
 
   let conn = rootconn metas
   (dbpol,polling) <- closeDynamic $ do
-    v <- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] mempty
+    v <- transactionNoLog metas $ selectFrom "polling" Nothing mempty
     i <- currentState v
     return (v,i)
   let
@@ -114,19 +114,19 @@ poller schmRef authmap user db plugs is_test = do
                   let intervalsec = intervalms `div` 10^3
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                      let fetchSize = 200
+                      let
                           pred =  WherePredicate $ fixrel . first(liftRel inf a) <$> AndColl ( catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
                           predFullIn =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (fst f)
                           predFullOut =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (snd f)
-                      l <- currentIndex =<< (transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred)
+                      l <- currentIndex =<< (transactionNoLog inf $ selectFrom a  (Just 0)   pred)
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  (unIndexMetadata l)
                           lengthPage s pageSize  =   res
                             where
                               res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          listResAll <- currentState =<< (transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred)
-                          let listRes = L.take fetchSize . G.toList $  listResAll
+                          listResAll <- currentState =<< (transactionNoLog inf $ selectFrom a  (Just ix) pred)
+                          let listRes = L.take 400 . G.toList $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
                               table = (lookTable inf a)
@@ -147,7 +147,7 @@ poller schmRef authmap user db plugs is_test = do
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i
-                          ) [0..(lengthPage (fst sizeL) fetchSize -1)]
+                          ) [0..(lengthPage (fst sizeL) 400-1)]
                       end <- liftIO getCurrentTime
                       liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                       let

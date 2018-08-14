@@ -102,8 +102,8 @@ list = justError "empty union list " . list'
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
-  (_,(_,TableRep(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoaderAll (lookTable (meta metaschema) "plugins") Nothing Nothing [] mempty Nothing
-  dbstats <- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
+  (_,(_,TableRep(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoaderAll (lookTable (meta metaschema) "plugins") Nothing mempty Nothing
+  dbstats <- transactionNoLog metaschema $ selectFrom plugins Nothing mempty
   (event,handle) <- R.newEvent
   let mk = tableMeta $ lookTable (meta metaschema) "plugins"
       m = fmap keyValue mk

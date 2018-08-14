@@ -160,7 +160,7 @@ taskWidget (incrementT,resolutionT) sel inf = do
               mapM (\(_,table,fields,proj) -> do
                 let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
                     fieldKey (TB1 (SText v))=   v
-                v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing Nothing [] mempty
+                v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing mempty
                 width <- primEditor (pure (Just 1000))
                 height <- primEditor (pure (Just 500))
                 hideDone <- fmap fromJust <$> primEditor (pure (Just True))

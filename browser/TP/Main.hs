@@ -222,8 +222,8 @@ setup smvar bstate plugList w = void $ do
 
 listDBS ::  InformationSchema -> Tidings (Maybe Int) -> Text -> Dynamic (Tidings (M.Map Text (Int,Text)))
 listDBS metainf userId db = do
-  dbvar <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
-  privileges <- transactionNoLog metainf (selectFrom "catalog_schema_privileges"  Nothing Nothing []  mempty)
+  dbvar <- transactionNoLog metainf $  selectFrom "schema2" Nothing mempty
+  privileges <- transactionNoLog metainf (selectFrom "catalog_schema_privileges"  Nothing mempty)
   let
     schemas schemasTB =  M.fromList $  liftA2 (,) sname  (liftA2 (,) sid stype) <$> F.toList  schemasTB
       where
@@ -270,7 +270,7 @@ loadSchema smvar schemaN user auth plugList =
 
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
-  cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing Nothing [] mempty
+  cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing mempty
   let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) m) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  loginCookie
@@ -279,7 +279,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   loadE <- UI.click logInB
   login <- UI.div # set children widE # set UI.class_ "row"
   authBox <- UI.div # set children [login ,logInB]
-  orddb  <- ui $ transactionNoLog metainf (selectFromTable "schema_ordering"  Nothing Nothing []  mempty )
+  orddb  <- ui $ transactionNoLog metainf (selectFromTable "schema_ordering"  Nothing mempty )
   let
     ordRow map orderMap inf =  do
         schId <- M.lookup inf map
@@ -379,7 +379,7 @@ withTable s m w =
         table = lookTable inf m
     liftIO $ print  table
     lift $ mapM print (rawFKS table)
-    db <- transactionNoLog  inf $ selectFrom m Nothing Nothing [] pred
+    db <- transactionNoLog  inf $ selectFrom m Nothing pred
     i2 <- currentValue (facts $ collectionTid db)
     addClientLogin inf
     let
@@ -398,13 +398,13 @@ testPartialLoading s t = do
         all = allRec' (tableMap inf) table
         table  = lookTable inf t
     liftIO $print ("Load desc" ,desc)
-    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty desc
+    transactionNoLog  inf $ selectFromProj t Nothing mempty desc
     liftIO $print ("Load pk" ,pk)
-    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty pk
+    transactionNoLog  inf $ selectFromProj t Nothing mempty pk
     liftIO $ print ("Load all" ,all)
-    transactionNoLog  inf $ selectFromProj t Nothing Nothing [] mempty all
+    transactionNoLog  inf $ selectFromProj t Nothing mempty all
     liftIO $print ("Load pk" ,pk)
-    transactionNoLog  inf $ selectFromProj t Nothing (Just 1 ) [] mempty pk
+    transactionNoLog  inf $ selectFromProj t Nothing mempty pk
                )
 
 testCreate = withInf [] "metadata"

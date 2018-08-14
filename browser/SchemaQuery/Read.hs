@@ -110,18 +110,26 @@ refTable  inf table  = do
   return (DBVar2 ref idxTds  (primary <$> dbTds) (secondary <$>dbTds) )
 
 
+selectFromTable
+ :: T.Text
+ -> Maybe Int
+ -> [(Rel T.Text , AccessOp Showable )]
+ -> TransactionM DBVar
+selectFromTable t a p = do
+  inf  <- askInf
+  selectFrom t a (tablePredicate inf t p)
 
-selectFromProj t a b c d p = do
+
+selectFromProj t a d p = do
   inf <- askInf
   let tb = lookTable inf t
-  tableLoader  tb a b c d p
+  tableLoader tb a  d p
 
 
-selectFrom t a b c d = do
+selectFrom t a d = do
   inf <- askInf
   let tb = lookTable inf t
-  tableLoader  tb a b c d (allFields inf tb)
-
+  tableLoader tb a  d (allFields inf tb)
 
 
 getFrom table allFields b = do
@@ -155,7 +163,7 @@ modifyTable t ix p = do
 
 paginateTable table pred tbf = do
   inf <- askInf
-  (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll  table  (Just 0) Nothing [] pred (Just tbf)
+  (ref,(nidx,TableRep (_,_,ndata))) <-  tableLoaderAll table (Just 0) pred (Just tbf)
   let
     check ix (i,tb2) = do
         let
@@ -166,7 +174,7 @@ paginateTable table pred tbf = do
           cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * (opsPageSize $ schemaOps inf))  (lookIndexMetadata pred i)
         output <- if cond
             then  do
-              (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll  table  (Just next  ) Nothing []  pred (Just tbf)
+              (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll table (Just next) pred (Just tbf)
               -- Check if nothing has changed  or no more data to load
               if G.size ndata == G.size tb2
                  then return iempty
@@ -270,19 +278,19 @@ mergeToken (pi,TableRef i)  (pj,TableRef j) = (pi <> pj,TableRef $ Interval.hull
 
 type TableChannels k v =  (TChan (IndexMetadataPatch k v), TChan [TableModificationU k v])
 
-tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TBData Key ()
+tableLoader :: Table -> Maybe Int ->  WherePredicate -> TBData Key ()
     -> TransactionM DBVar
-tableLoader (Project table  (Union l)) page size presort fixed  tbf = do
+tableLoader (Project table  (Union l)) page fixed  tbf = do
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     inf <- askInf
     let
       dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure G.empty, pure (M.fromList $ (,G.empty)<$> _rawIndexes table) ) (mapDBVar inf table <$>i )
       dbvar (l,i,j,p) = DBVar2 (justError "head5" $ safeHead l) i j p
-    i <- mapM (\t -> tableLoader t page size presort (rebaseKey inf t  fixed) (projunion inf t tbf)) l
+    i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
     return $ dbvar (dbvarMerge i)
-tableLoader  table page size presort fixed tbf = do
+tableLoader  table page fixed tbf = do
   liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
-  ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page size presort fixed tbf
+  ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page fixed tbf
 
   inf <- askInf
   vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
@@ -293,12 +301,10 @@ tableLoader  table page size presort fixed tbf = do
 tableLoader'
   :: Table
    -> Maybe Int
-   -> Maybe Int
-   -> [(Key,Order)]
    -> WherePredicate
    -> TBData Key ()
    -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
-tableLoader' table  page size presort fixed tbf = do
+tableLoader' table  page fixed tbf = do
   pageTable (\table page token size presort predicate tbf -> do
     inf <- askInf
     let
@@ -309,12 +315,12 @@ tableLoader' table  page size presort fixed tbf = do
           go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
           predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
           predicate i  = [i]
-    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) ( restrictTable nonFK   tbf) page token size presort (unestPred predicate)
+    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) ( restrictTable nonFK  tbf) page token size presort (unestPred predicate)
     resFKS  <- getFKS inf predicate table res tbf
     let result = fmap resFKS   res
     liftIO $ when (not $ null (lefts result)) $ do
       print ("lefts",tableName table ,lefts result)
-    return (rights  result,x,o )) table page size presort fixed tbf
+    return (rights  result,x,o )) table page fixed tbf
 
 
 
@@ -334,13 +340,12 @@ createTable fixed m = do
       return ([],[])
   return ((either error fst $ applyUndo fixedmap logix,either error fst $ foldUndo table log ),dbvar)
 
-pageTable method table page size presort fixed tbf = do
+pageTable method table page fixed tbf = do
     inf <- askInf
     let
       m = tableMeta table
-      defSort = fmap (,Desc) $  rawPK table
-      sortList  = if L.null presort then defSort else  presort
-      pagesize = maybe (opsPageSize $ schemaOps inf) id size
+      sortList = fmap (,Desc) $  rawPK table
+      pagesize = (opsPageSize $ schemaOps inf)
     ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable fixed (tableMeta table)
     let
@@ -351,7 +356,7 @@ pageTable method table page size presort fixed tbf = do
       readNew sq l = do
          let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
              (_,mp) = fromMaybe (maxBound,M.empty ) hasIndex
-         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) size sortList fixed tbf
+         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf
          let
              -- # postFilter fetched results
              resK = if predNull fixed then resOut else G.filterRows fixed resOut
@@ -503,9 +508,9 @@ takeMany mvar = go . (:[]) =<< readTChan mvar
 
 
 
-tableLoaderAll table  page size presort fixed tbf = do
+tableLoaderAll table  page fixed tbf = do
   inf <- askInf
-  tableLoader'  table page size presort fixed (fromMaybe (allFields inf table ) tbf)
+  tableLoader'  table page fixed (fromMaybe (allFields inf table ) tbf)
 
 tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 tellPatches m i =
@@ -536,7 +541,7 @@ loadFK :: TBData Key Showable -> SqlOperation -> TransactionM (Maybe (Column Key
 loadFK table (FKJoinTable rel (st,tt) )  = do
   inf <- askInf
   let targetTable = lookTable inf tt
-  (i,(_,TableRep (_,_,mtable ))) <- tableLoaderAll targetTable Nothing Nothing [] mempty Nothing
+  (i,(_,TableRep (_,_,mtable ))) <- tableLoaderAll targetTable Nothing mempty Nothing
   let
     relSet = S.fromList $ _relOrigin <$> rel
     tb  = F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef $ table))
@@ -553,41 +558,28 @@ loadFK table (FKInlineTable ori to )   = do
 loadFK  _ _ = return Nothing
 
 refTablesProj inf table page pred proj = do
-  ref  <-  transactionNoLog inf $ tableLoader  table page Nothing [] pred proj
+  ref  <-  transactionNoLog inf $ tableLoader table page pred proj
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTablesDesc inf table page pred = do
-  ref  <-  transactionNoLog inf $ tableLoader  table page Nothing []  pred (recPKDesc inf (tableMeta table) $ allFields inf table)
+  ref  <-  transactionNoLog inf $ tableLoader table page pred (recPKDesc inf (tableMeta table) $ allFields inf table)
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTables' inf table page pred = do
-  ref  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
+  ref  <-  transactionNoLog inf $ selectFrom (tableName table) page pred
   return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 refTables inf table = refTables' inf table Nothing mempty
 
 projectRec :: T.Text
  -> Maybe Int
- -> Maybe Int
- -> [(Key, Order)]
  -> [(Rel T.Text , AccessOp Showable )]
  -> TransactionM
       DBVar
-projectRec t a b c p = do
+projectRec t a p = do
   inf  <- askInf
-  selectFrom  t a b c (tablePredicate inf t p)
+  selectFrom t a (tablePredicate inf t p)
 
-
-selectFromTable :: T.Text
- -> Maybe Int
- -> Maybe Int
- -> [(Key, Order)]
- -> [(Rel T.Text , AccessOp Showable )]
- -> TransactionM
-      DBVar
-selectFromTable t a b c p = do
-  inf  <- askInf
-  selectFrom  t a b c (tablePredicate inf t p)
 
 tableDiffs (BatchedAsyncTableModification _ i) = concat $ tableDiffs <$> i
 tableDiffs i = [tableDiff i]
@@ -601,7 +593,7 @@ printException e d = do
 
 fromTable origin whr = do
   inf <- askInf
-  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing Nothing [] (tablePredicate inf origin whr) Nothing
+  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing (tablePredicate inf origin whr) Nothing
   return (origin,inf,primary rep)
 
 

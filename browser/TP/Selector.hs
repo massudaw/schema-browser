@@ -114,9 +114,9 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
     tablePred =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
     authPred = [(keyRef "grantee",Left ( int $ usernameId inf ,Equals))] <> tablePred
   (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
-      (,,) <$> selectFromTable "ordering" Nothing Nothing [] tablePred
-           <*> selectFromTable "authorization" Nothing Nothing [] authPred
-           <*> selectFromTable "table_name_translation" Nothing Nothing [] tablePred
+      (,,) <$> selectFromTable "ordering" Nothing tablePred
+           <*> selectFromTable "authorization" Nothing authPred
+           <*> selectFromTable "table_name_translation" Nothing tablePred
   let
     ordRow orderMap pkset = field
       where
@@ -204,7 +204,7 @@ paginateList inf table itemListEl predicate (vpt,gist,_,_) constr proj tdi =  do
         idxRequest = (,,) <$> facts vpt <#> predicate<*> triding offset
         loadPage (m,pred,i) = do
           let page = i `div` (opsPageSize (schemaOps inf) `div` pageSize)
-          transactionNoLog inf $ selectFromProj (tableName table) (Just page ) Nothing  [] (fromMaybe mempty pred) proj
+          transactionNoLog inf $ selectFromProj (tableName table) (Just page ) (fromMaybe mempty pred) proj
       ui $ onEventDyn (rumors idxRequest) loadPage
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize)) <$> triding offset <*> (fmap sortList res3))
       element filterInp # set UI.class_ "col-xs-10"
