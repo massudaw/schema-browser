@@ -168,7 +168,8 @@ instance Patch b => Patch (Maybe b) where
   patch i = maybe Delete (Diff . patch) i
   applyUndo i = recoverEditChange i
 
-data PTBRef k s = PTBRef { sourcePRef :: (TBIdx k s) , targetPRef :: (TBIdx k s) }  deriving(Show,Eq,Ord,Functor,Generic)
+-- Investigate adding a new field for target Edit
+data PTBRef k s = PTBRef { sourcePRef :: TBIdx k s , targetPRef :: TBIdx k s {-, targetPRefEdit :: TBIdx k s-} }  deriving(Show,Eq,Ord,Functor,Generic)
 
 nonRefPatch (PFK rel i j) = i
 nonRefPatch i = [i]
@@ -528,7 +529,6 @@ instance (Ord a, Show a, Patch a) => Patch (FTB a) where
 instance Semigroup Showable where
   i <> j = j
 
-
 instance Patch () where
   type Index () = ()
   patch = id
@@ -553,10 +553,11 @@ instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
 
 
 instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
-  compact i = zipWith PTBRef f s
+  compact i = zipWith PTBRef f s -- t
     where
       f = compact (sourcePRef <$> i)
       s = compact (targetPRef <$> i)
+      -- t = compact (targetPRefEdit <$> i)
 
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = PTBRef Key Showable
@@ -595,12 +596,12 @@ data PValue k a
 
 data PathAttr k a
   = PAttr k
-          (PathFTB a)
+        (PathFTB a)
   | PFun k
-         (Expr, [Rel k])
-         (PathFTB a)
+        (Expr, [Rel k])
+        (PathFTB a)
   | PInline k
-            (PathFTB (TBIdx k a))
+        (PathFTB (TBIdx k a))
   | PFK [Rel k]
         [PathAttr k a]
         (PathFTB (TBIdx k a))

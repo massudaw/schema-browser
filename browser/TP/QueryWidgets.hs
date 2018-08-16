@@ -1228,10 +1228,11 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       inipl <- mapM (ui . currentValue . facts) (snd <$>  plmods)
       let
         inip = maybe Keep (Diff .head) $ nonEmpty $ catMaybes inipl
+
       (elsel, helsel) <- ui newEvent
       (elselTarget, helselTarget) <- ui newEvent
       (eleditu, heleditu) <- ui newEvent
-      (elayout, hlayout) <- ui newEvent
+
 
       let
         evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
@@ -1241,6 +1242,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       tsource <- ui $ stepperT (sourcePRef <$> inip) evsel
       tseltarget <- ui $ stepperT (targetPRef <$> inip) evseltarget
       ttarget <- ui $ stepperT (targetPRef <$> inip) evtarget
+
+      (elayout, hlayout) <- ui newEvent
+      layoutT <- ui $ stepperT (6,1) elayout
 
       nav <- openClose dblClickT
       let
@@ -1258,7 +1262,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           ui $ onEventDyn
             ((,,,) <$> facts tsource <*> facts oldItems <*> facts tseltarget <@> rumors (fmap sourcePRef <$> sel))
             (\(oldsel,initial,oldedit,vv) -> do
-              when (oldsel /= vv ) $ do
+              when (oldsel /= vv  && maybe False ((L.length rel ==) .kvSize) (join $ applyIfChange (fst .unTBRef <$> initial) vv)) $ do
+                -- liftIO $ print("Source",oldsel,vv)
                 liftIO $ helsel vv
                 pred <- currentValue (facts predicate)
                 reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
@@ -1270,7 +1275,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     newsel =  applyIfChange (fst .unTBRef<$> initial) vv
                     newEdit = maybe oldedit searchDiff newsel
                 when (oldedit /=  newEdit) $ do
-                  liftIO $  helsel newEdit
+                  -- liftIO $ print ("Target",oldedit,newEdit)
+                  liftIO $  helselTarget newEdit
                 return ()
               )
           pan <- UI.div
@@ -1337,18 +1343,19 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               ui $ onEventIO esc (\ _ ->hSelector False)
               return (TrivialWidget  loaded elout)
 
-          when (not (L.null reflectRels)) $ do
-            let
-              fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
-              output = diff' <$> oldItems <*> fksel
-            ui $ onEventIO (rumors output) (\i -> do
+          let
+            fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
+            output = diff' <$> oldItems <*> fksel
+          ui $ onEventIO (rumors output)
+            (\i -> do
+              when (not (L.null reflectRels)) $ do
                 helsel (filterReflect.sourcePRef <$> i)
-                helselTarget $ fmap targetPRef i)
+              helselTarget $ fmap targetPRef i)
           return [getElement itemList]
 
         edit =  do
+          tdi <- ui $  calmDiff $ fmap join $ (\i j ->  applyIfChange  i j )<$>  (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
           let
-            tdi = fmap join $ applyIfChange <$>  (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
@@ -1365,19 +1372,21 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist [])else Nothing
             fksel = fmap TBRef .(\box -> (,) <$> ((reflectFK reflectRels  =<< box) <|> serialRef ) <*> box ). join <$> (applyIfChange <$> tdi <*> pretdi)
             output = (\i j -> diff' i (j <|> i)) <$> oldItems <*> fksel
-          ui $ onEventIO (rumors $ (,,,) <$> facts tsource <*> facts tdi <*>facts ttarget <#> output) (\(old,selt,olde,i) -> do
+          ui $ onEventIO ((,,,) <$> facts tsource <*> facts tdi <*> facts ttarget <@> rumors output)
+            (\(old,selt,olde,i) -> do
             -- Only reflect when
             -- 1. previous target is empty
             -- 2. has something to reflect
             -- 3. new diff is different than current
             when (isNothing selt && fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
+              liftIO $ print ("SourceE",tableName targetTable,fmap filterReflect old ,fmap filterReflect (fmap sourcePRef i) )
               helsel $ fmap (filterReflect.sourcePRef) i
             when (olde /= fmap targetPRef i) $ do
+              liftIO $ print ("TargetE",tableName targetTable,olde,fmap targetPRef i)
               heleditu  (fmap targetPRef i)
             )
           return (getElement nav,[celem],max (6,1) <$> layout)
 
-      layoutT <- ui $ stepperT (6,1) elayout
       selEls <- traverseUI selector selectT
       element top
         # sink children (facts selEls)

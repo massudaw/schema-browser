@@ -338,9 +338,7 @@ instance Eq (FKey a) where
 instance Ord (FKey a) where
   compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
-instance Show a => Show (FKey a)
-  -- show = T.unpack . showKey
-                               where
+instance Show a => Show (FKey a) where
   show k = T.unpack $ maybe (keyValue k) id (keyTranslation k)
 
 showKey k =

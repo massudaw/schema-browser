@@ -154,7 +154,6 @@ originalRel (RelSort _ _  l) = l
 relSortMap f (RelSort i j k) = RelSort  ( S.map  f i) (S.map f j) (S.map (fmap f) k)
 
 relSort i = RelSort (inp i)  (out i) i
-
   where
     inp j = norm $ _relInputs <$> F.toList j
     out j = norm $ _relOutputs <$> F.toList j
@@ -176,8 +175,8 @@ sortedFields
   -> [(Set (Rel k) , TB k a)]
 sortedFields = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO . _kvvalues
 
-testPM = toAscListPO $  PM.fromList [(relSortL [Inline 1],1),(relSortL [Inline 2],1),(relSortL [Rel (RelAccess [Inline 1] (Inline 1)) Equals 4],3)]
-testPM2 = toAscListPO $  PM.fromList [(S.singleton 2,1),(S.singleton 1,1),(S.fromList [1,2,4],1),(S.fromList [3,2,4],3)]
+testPM = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO $ PM.fromList [(relSortL [Inline 1],1),(relSortL [Inline 2],1),(relSortL [Rel (RelAccess [Inline (3 :: Int)] (Inline 3)) (Flip Contains) 4],3 ::Int), (relSortL [Inline 4],1),(relSortL [Inline 3],1)]
+
 isInline (Inline i ) = True
 isInline _ = False
 
@@ -185,6 +184,7 @@ instance  Ord k => PartialOrd (RelSort k) where
   leq (RelSort inpi outi i ) (RelSort inpj outj j)
       | F.all isInline i && F.all isInline j = i <= j
       | F.all isInline i &&  not (F.all isInline j) = True
+      | F.all isInline j &&  not (F.all isInline j) = False
   leq (RelSort inpi outi i ) (RelSort inpj outj j)
     =  li || i == j  -- || if not (li || lo) then (not (S.null outj) && not (S.null outi) && S.toList outi < S.toList outj) else False
     where li = not (S.null outi) && not (S.null inpj) && leq outi inpj
@@ -193,22 +193,24 @@ instance  Ord k => PartialOrd (RelSort k) where
 -- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
 instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
   compare (RelSort inpi outi i ) (RelSort inpj outj j) =
-    case ( comp outi inpj
+    case (  inline i j
+        , comp outi inpj
          , comp outj inpi
          , P.compare inpi inpj
          , P.compare outi outj)
             -- Reverse order
           of
-      (_, P.LT, _, _) ->
-        if S.size outj == L.length j
-          then P.GT
-          else P.EQ
-            -- Right order
-      (P.LT, _, _, _) -> P.LT
-            -- No intersection  between elements sort by inputset
-      (_, _, P.EQ, o) -> o
-      (_, _, i, _) -> i
+      (p, i, j, k, l) -> p <> i <> flipO j  <> k <> l
     where
+      flipO P.GT = P.LT
+      flipO P.LT = P.GT
+      flipO i = i
+
+      inline i j
+        -- | F.all isInline i && F.all isInline j = P.compare i j
+        | F.all isInline i && not (F.all isInline j) = P.LT
+        | F.all isInline j && not (F.all isInline i) = P.GT
+        | otherwise = P.EQ
       comp i j
         | S.null (S.intersection i j) = P.EQ
       comp i j
