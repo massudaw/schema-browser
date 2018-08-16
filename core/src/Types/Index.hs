@@ -15,6 +15,7 @@ module Types.Index
   , Affine(..)
   , Predicate(..)
   , DiffShowable(..)
+  , IndexConstr
   , TBIndex(..)
   , toList
   , lookup
@@ -353,6 +354,10 @@ indexParam = (4,8)
 -- Attr List Predicate
 
 
+type IndexConstr k a = (Ord k, Ord a, Ord (Tangent a), Show a, Show k,
+      Semigroup (Tangent a), Positive (Tangent a), Affine a,
+       Range a, Fractional a)
+
 checkPredId
   :: (Ord k, Ord a, Ord (Tangent a), Show a, Show k,
       Semigroup (Tangent a), Positive (Tangent a), Affine a,
@@ -422,7 +427,7 @@ indexPredIx (n@(RelAccess nk nt ) ,eq) r
     Nothing -> Nothing
     Just i ->  fmap (PathForeign nk . fmap (Many . pure) ) $ recPred $ allRefs <$> i
   where
-    allRefs (TBRef (_,v))= indexPredIx (nt, eq ) v
+    allRefs (TBRef (i,v))= indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v
     recPred (TB1 i ) = TipPath <$> i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i

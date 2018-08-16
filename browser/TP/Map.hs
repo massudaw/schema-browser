@@ -119,7 +119,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                 let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                     fieldKey (TB1 (SText v))=  v
                 reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-                let v = reftb ^. _2
+                let v = primary <$> reftb ^. _2
                 let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
                 onEvent evsel (liftIO . hselg)
 

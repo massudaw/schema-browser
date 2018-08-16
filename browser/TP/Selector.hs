@@ -126,10 +126,10 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
   filterInp <- filterString
   let
     -- Table Description
-    lookDescT =  flip (lookDesc inf) <$> collectionTid translation
+    lookDescT =  flip (lookDesc inf) . primary <$> collectionTid translation
     -- Authorization
     autho_pk t = idex (meta inf) "authorization" [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ usernameId inf)]
-    authorize =  (\autho t -> isJust $ G.lookup (autho_pk t) autho) <$> collectionTid authorization
+    authorize =  (\autho t -> isJust $ G.lookup (autho_pk t) autho) .primary <$> collectionTid authorization
     -- Text Filter
     filterLabel = (\j d i -> T.isInfixOf (T.toLower (T.pack j)) (T.toLower  $ d i)) <$> triding filterInp <*> lookDescT
   all <- checkedWidget (pure False)
@@ -148,7 +148,7 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
     iniT <- ui $ stepperT iniValue  iniEvent
     checkDivSetTGen
       tables
-      (ordRow <$>  collectionTid orddb)
+      (ordRow . primary <$>  collectionTid orddb)
       iniT
       buttonString
       ((\lg desc visible i j -> if (visible i) then Just (maybe UI.div return =<<  lg (desc i) i j) else Nothing  )
@@ -177,7 +177,7 @@ instance Ord a => Ord (AscDesc a) where
   compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
 
 
-paginateList inf table itemListEl predicate (vpt,gist,_,_) constr proj tdi =  do
+paginateList inf table itemListEl predicate (vpt,gist,_) constr proj tdi =  do
       filterInp <- filterString
       wheel <- fmap negate <$> UI.mousewheel itemListEl
       let
@@ -187,7 +187,7 @@ paginateList inf table itemListEl predicate (vpt,gist,_,_) constr proj tdi =  do
           where s = maybe 0 fst $  M.lookup (fromMaybe mempty predicate) fixmap
         sortList = reverse . L.sortOn (G.getIndex (tableMeta table))
 
-      presort <- ui $ cacheTidings ( G.toList <$> gist)
+      presort <- ui $ cacheTidings ( G.toList . primary <$> gist)
       -- Filter and paginate
       (offset,res3)<- do
         let
@@ -222,12 +222,12 @@ multiSelectListUI
   -> KV Key ()
   -> Tidings [TBData Key Showable]
   -> UI (Tidings [TBData Key Showable], Element)
-multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_,_) constr proj tdi = do
+multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_) constr proj tdi = do
   let m = tableMeta table
   (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr proj (safeHead <$> tdi)
-  lbox <- multiListBoxEl itemListEl (fmap (G.getIndex m )<$> res4 ) (fmap (G.getIndex m) <$> tdi) (showFKLook inf (tableMeta table) vpt)
+  lbox <- multiListBoxEl itemListEl (fmap (G.getIndex m )<$> res4 ) (fmap (G.getIndex m) <$> tdi) (showFKLook inf (tableMeta table) (primary <$> vpt))
   out <- UI.div # set children [fInp,itemListEl]
-  return ((\i j -> catMaybes $ fmap (flip G.lookup  j) i) <$> triding lbox <*> vpt ,  out  )
+  return ((\i j -> catMaybes $ fmap (flip G.lookup  (primary j)) i) <$> triding lbox <*> vpt ,  out  )
 
 
 selectListUI
@@ -240,12 +240,12 @@ selectListUI
    -> KV Key ()
    -> Tidings (Maybe (TBData Key Showable))
    -> UI (Tidings (Maybe (TBData Key Showable)), Element)
-selectListUI inf table itemListEl predicate ref@(_,vpt,_,_)  constr proj tdi = do
+selectListUI inf table itemListEl predicate ref@(_,vpt,_)  constr proj tdi = do
   let m = tableMeta table
   (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr proj tdi
-  lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just  . G.getIndex m) <$> res4 ) (fmap (Just . G.getIndex m)<$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) vpt)
+  lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just  . G.getIndex m) <$> res4 ) (fmap (Just . G.getIndex m)<$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) (primary <$> vpt))
   out <-  UI.div # set children [fInp,itemListEl]
-  return ((\i j -> join $ fmap (flip G.lookup  j) (join i)) <$> triding lbox <*> vpt   ,out)
+  return ((\i j -> join $ fmap (flip G.lookup  (primary j)) (join i)) <$> triding lbox <*> vpt   ,out)
 
 multiSelector
   :: InformationSchema
@@ -255,7 +255,7 @@ multiSelector
      -> KV Key ()
      -> Tidings [TBData Key Showable]
      -> UI (TrivialWidget [TBData Key Showable])
-multiSelector inf table reftb@(vptmeta,vpt,_,var) predicate proj tdi = mdo
+multiSelector inf table reftb@(vptmeta,vpt,var) predicate proj tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
   (tds ,el) <- multiSelectListUI inf table itemListEl predicate reftb [] proj tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"
@@ -270,7 +270,7 @@ selector
      -> KV Key ()
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-selector inf table reftb@(vptmeta,vpt,_,var) predicate proj tdi = mdo
+selector inf table reftb@(vptmeta,vpt,var) predicate proj tdi = mdo
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
   (tds ,el) <- selectListUI inf table itemListEl predicate reftb [] proj tdi
   itemSel <- UI.div # set children [el] # set UI.class_ "col-xs-12"

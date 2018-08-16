@@ -144,7 +144,7 @@ accountWidget (incrementT,resolutionT) sel inf = do
                         header = UI.tr # set items (sequence [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ])
                         row i = UI.tr # set items (sequence [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)])
                         body = fmap row dat <> if L.null dat then [] else [totalrow totalval]
-                        dat =  concatMap (catMaybes.proj)  $ G.toList i
+                        dat =  concatMap (catMaybes.proj)  $ G.toList (primary i)
 
                         totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
                           where

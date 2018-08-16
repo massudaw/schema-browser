@@ -187,7 +187,7 @@ taskWidget (incrementT,resolutionT) sel inf = do
                           = mpProject p <> [  show  c, show  t, show  pro,show dur]
                         row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) (values v) )
                         body = row <$> (either (const []) (tail . subprojectsDeep) figure)
-                        dat =  catMaybes $ fmap proj  $ G.toList i
+                        dat =  catMaybes $ fmap proj  $ G.toList (primary i)
                         figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\(_,Progress p,_,_) -> (if done then p < 1 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
 
                     t <- UI.table # set items (sequence $ caption:header:body)

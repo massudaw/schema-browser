@@ -51,7 +51,7 @@ plugs schm authmap db plugs = do
       let
         regplugs = catMaybes $ findplug <$> plugs
         findplug :: PrePlugins -> Maybe Plugins
-        findplug p = (,p). round . unTB1 . flip index1 (liftRel inf "plugins" $ keyRef "oid") . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
+        findplug p = (,p). round . unTB1 . flip index1 (liftRel inf "plugins" $ keyRef "oid") . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) (primary t))
           where
             pred :: TBPredicate Key Showable
             pred = WherePredicate $ AndColl [PrimColl $ fixrel (liftRel inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
@@ -93,11 +93,11 @@ poller schmRef authmap user db plugs is_test = do
         TB1 (SNumeric intervalms) = index1 tb (lrel "poll_period_ms")
         TB1 (SText p) = index2 tb (liftRel metas "polling" $ RelAccess [keyRef "plugin"] (keyRef "name"))
         pid = index1 tb (lrel "plugin")
-    enabled = G.toList polling
+    enabled = G.toList (primary polling)
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
-          indexRow polling = justError (show (tbpred tb )) $ G.lookup (tbpred tb) polling
+          indexRow polling = justError (show (tbpred tb )) $ G.lookup (tbpred tb) (primary polling)
           tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
       schm <- atomically $ readTVar schmRef
@@ -126,7 +126,7 @@ poller schmRef authmap user db plugs is_test = do
                               res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
                           listResAll <- currentState =<< (transactionNoLog inf $ selectFrom a  (Just ix) pred)
-                          let listRes = L.take 400 . G.toList $  listResAll
+                          let listRes = L.take 400 . G.toList .primary $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
                               table = (lookTable inf a)

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE RankNTypes #-}
@@ -62,7 +63,6 @@ module Types.Patch
   , RowOperation(..)
   , RowPatch(..)
   ) where
-
 import Control.DeepSeq
 import qualified Control.Lens as Le
 import Control.Monad.Reader
@@ -84,15 +84,11 @@ import Data.Tuple
 import GHC.Generics
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty)
--- import Warshal
 import Types
 import qualified Types.Index as G
 import Types.Index (PathTID(..))
 import Utils
-
 import Debug.Trace
-import GHC.Stack
-
 import Control.Applicative
 import qualified Data.List as L
 import qualified Data.Map as Map
@@ -101,10 +97,9 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Exts
 
-
 newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
 
-instance (Compact (Index a ),Patch a ) => Patch (Atom a) where
+instance (Compact (Index a ),Patch a) => Patch (Atom a) where
   type Index (Atom a) = [Index a]
   createIfChange l =  do
     n <- safeHead (compact l)
@@ -242,6 +237,8 @@ data RowPatch k a
   = RowPatch   { unRowPatch :: (G.TBIndex a, RowOperation k a) }
   | BatchPatch { targetRows :: [G.TBIndex a]
                , operation  :: RowOperation k a }
+  | PredicatePatch { targetPredicate :: TBPredicate k a
+               , operation  :: RowOperation k a }
   deriving (Show, Eq, Functor, Generic)
 
 data RowOperation k a
@@ -318,7 +315,7 @@ checkPatch fixed@(WherePredicate b, pk) d =
     isPK = fmap WherePredicate $ G.splitIndexPK b pk
 
 indexFilterR ::
-     (Show k, Ord k) => [k] -> WherePredicateK k -> RowPatch k Showable -> Bool
+     (Patch a,a ~Index a,G.IndexConstr k a ,Show k, Ord k) => [k] -> TBPredicate k a -> RowPatch k a -> Bool
 indexFilterR table j (BatchPatch i l) =  F.any (\ix -> indexFilterR table j (RowPatch (ix ,l) )) i
 
 indexFilterR table j (RowPatch (ix, i)) = case  i of
@@ -334,9 +331,9 @@ indexFilterP (WherePredicate p) v = go p
     go (PrimColl l) = indexFilterPatch l v
 
 indexFilterPatch ::
-     (Show k, Ord k)
-  => (Rel k, [(k, AccessOp Showable)])
-  -> TBIdx k Showable
+     (Patch a ,a ~ Index a,G.IndexConstr k a ,Show k, Ord k)
+  => (Rel k, [(k, AccessOp a)])
+  -> TBIdx k a
   -> Bool
 indexFilterPatch (Inline l, ops) lo =
   case L.find ((Set.singleton (Inline l) ==) . index) lo
@@ -346,11 +343,14 @@ indexFilterPatch (Inline l, ops) lo =
       case i
         --  PPrim f -> G.match op (Right $ (create f :: FTB Showable))
             of
-        PAttr k f -> G.match op (Right $ (create f :: FTB Showable))
+        PAttr k f -> matching f
         i -> True
     Nothing -> True
   where
-    op = G.getOp l ops
+    create' :: (Index a ~ a,Patch a ,Show a,Ord a) => PathFTB (Index a) -> FTB a
+    create'  = create
+    matching f = G.match (G.getOp l ops) (Right (create' f))
+
 indexFilterPatch (RelAccess l n, op) lo =
   case L.find ((Set.fromList l ==) . index) lo of
     Just i ->
@@ -364,9 +364,9 @@ indexFilterPatch (RelAccess l n, op) lo =
 indexFilterPatch i o = error (show (i, o))
 
 indexFilterPatchU ::
-     (Show k, Ord k)
-  => (Rel k, [(k, AccessOp Showable)])
-  -> TBIdx k Showable
+     ( Patch a,a ~ Index a,G.IndexConstr k a,Show k, Ord k)
+  => (Rel k, [(k, AccessOp a )])
+  -> TBIdx k a
   -> Bool
 indexFilterPatchU (n, op) o = indexFilterPatch (n, op) o
 
@@ -528,11 +528,14 @@ instance (Ord a, Show a, Patch a) => Patch (FTB a) where
 instance Semigroup Showable where
   i <> j = j
 
-instance Monoid Showable where
 
 instance Patch () where
   type Index () = ()
   patch = id
+  diff _ _ = Nothing
+  createIfChange  = Just
+  applyUndo _ _ = Left "no difference"
+
 
 instance Patch Showable where
   type Index Showable = Showable
@@ -659,7 +662,6 @@ compactAttr i = catMaybes . fmap recover . groupSplit2 projectors pathProj $ i
       (join . fmap compactPatches $ nonEmpty sn)
       where
         (fs, sn) = unzip $ lefts $ rights l
-    recover i = error $ "no item"
 
 unPAtom (PAtom i) = i
 

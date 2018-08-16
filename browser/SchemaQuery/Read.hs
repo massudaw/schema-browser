@@ -38,7 +38,7 @@ import Control.Concurrent.STM
 import Control.Exception (throw)
 import qualified Control.Lens as Le
 import Control.Monad.Catch
--- import Debug.Trace
+import Debug.Trace
 import Control.Monad.RWS
 import Control.Monad.Trans.Maybe
 import Data.Either
@@ -95,19 +95,20 @@ lookIndexMetadata pred (IndexMetadata i ) = M.lookup pred i
 mapIndexMetadata f (IndexMetadata v ) = IndexMetadata $ M.mapKeys (mapPredicate f )  v
 mapIndexMetadataPatch f (i,j,k,l) = (mapPredicate f i,j,k,l)
 
-mapDBVar inf table (DBVar2 e i j l  )
-  = ([e], mapIndex inf table <$> i, createUn (tableMeta table)  (rawPK table) . fmap (projunion inf table) . G.toList <$> j, l)
+mapDBVar :: InformationSchema -> Table -> DBVar2 Showable -> ([DBRef Key Showable],Tidings (IndexMetadata Key Showable),Tidings (M.Map [Key] (SecondaryIndex Key Showable),TableIndex Key Showable ))
+mapDBVar inf table (DBVar2 e i l  )
+  = ([e], mapIndex inf table <$> i,  (\(TableRep (_,i,j)) -> (i,createUn (tableMeta table)  (rawPK table) . fmap (projunion inf table) . G.toList $ j)) <$> l)
 
 mergeDBRef  (IndexMetadata j,i) (IndexMetadata m,l) = (IndexMetadata $ M.unionWith (\(a,b) (c,d) -> (a+c,M.unionWith mergeToken b d))  j  m , i <>  l )
 
-mergeDBRefT  (ref1,j ,i,o) (ref2,m ,l,p) = (ref1 <> ref2 ,liftA2 (\(IndexMetadata a) (IndexMetadata b) -> IndexMetadata $ M.unionWith (\(a,b) (c,d) -> (a+c,M.unionWith mergeToken  b d)) a b)  j  m , liftA2 (<>) i l , liftA2 (M.intersectionWith (<>)) o p )
+mergeDBRefT  (ref1,j ,i) (ref2,m ,l) = (ref1 <> ref2 ,liftA2 (\(IndexMetadata a) (IndexMetadata b) -> IndexMetadata $ M.unionWith (\(a,b) (c,d) -> (a+c,M.unionWith mergeToken  b d)) a b)  j  m , liftA2 (\(i,j) (i2,j2)-> (M.intersectionWith (<>)i i2 ,  j <> j2))  i l   )
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
   ref <-lookDBVar inf mmap (tableMeta table)
   (idxTds,dbTds ) <- convertChan inf table mempty ref
-  return (DBVar2 ref idxTds  (primary <$> dbTds) (secondary <$>dbTds) )
+  return (DBVar2 ref idxTds  dbTds )
 
 
 selectFromTable
@@ -123,13 +124,13 @@ selectFromTable t a p = do
 selectFromProj t a d p = do
   inf <- askInf
   let tb = lookTable inf t
-  tableLoader tb a  d p
+  tableLoader tb a d p
 
 
 selectFrom t a d = do
   inf <- askInf
   let tb = lookTable inf t
-  tableLoader tb a  d (allFields inf tb)
+  tableLoader tb a d (allFields inf tb)
 
 
 getFrom table allFields b = do
@@ -278,14 +279,18 @@ mergeToken (pi,TableRef i)  (pj,TableRef j) = (pi <> pj,TableRef $ Interval.hull
 
 type TableChannels k v =  (TChan (IndexMetadataPatch k v), TChan [TableModificationU k v])
 
-tableLoader :: Table -> Maybe Int ->  WherePredicate -> TBData Key ()
+tableLoader
+    :: Table
+    -> Maybe Int
+    -> WherePredicate
+    -> TBData Key ()
     -> TransactionM DBVar
 tableLoader (Project table  (Union l)) page fixed  tbf = do
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     inf <- askInf
     let
-      dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure G.empty, pure (M.fromList $ (,G.empty)<$> _rawIndexes table) ) (mapDBVar inf table <$>i )
-      dbvar (l,i,j,p) = DBVar2 (justError "head5" $ safeHead l) i j p
+      dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _rawIndexes table,G.empty )) (mapDBVar inf table <$>i )
+      dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (tableMeta table , i,j) :: TableRep Key Showable) <$> j)
     i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
     return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
@@ -296,7 +301,7 @@ tableLoader  table page fixed tbf = do
   vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
   idxTds <- lift $ convertChanStepper0 inf table nidx fixedChan
   dbvar <- lift $ prerefTable inf table
-  return (DBVar2 dbvar idxTds (fmap primary vpt) (fmap secondary vpt))
+  return (DBVar2 dbvar idxTds vpt)
 
 tableLoader'
   :: Table
@@ -419,8 +424,8 @@ dynFork a = do
 convertChanEventIndex inf table nchan = do
     (e,h) <- newEvent
     dynFork $ forever $ catchJust notException ( do
-      a <- atomically $ takeMany nchan
-      h ( a )) (\e -> atomically (takeMany nchan) >>= (\d ->  putStrLn $ show ("error convertChanStep"  ,e :: SomeException,d)<>"\n"))
+      h =<<  atomically (takeMany nchan)
+      ) (\e -> atomically (takeMany nchan) >>= (\d ->  putStrLn $ show ("error convertChanStep"  ,e :: SomeException,d)<>"\n"))
     return e
 
 convertChanStepper0
@@ -487,10 +492,10 @@ convertChanTidings0
   -> TChan [TableModificationU Key Showable]
   -> Dynamic (Tidings (TableRep Key Showable))
 convertChanTidings0 inf table fixed ini nchan = mdo
-    evdiff <-  convertChanEvent inf table  fixed (facts t) nchan
+    evdiff <-  convertChanEvent inf table  fixed (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
-    t <- accumT ini (flip (\i -> either error fst. foldUndo i) <$> evdiff)
-    return  t
+    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
+    return  (snd <$> t)
 
 tryTakeMany :: TChan a -> STM [a]
 tryTakeMany mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar
@@ -559,15 +564,15 @@ loadFK  _ _ = return Nothing
 
 refTablesProj inf table page pred proj = do
   ref  <-  transactionNoLog inf $ tableLoader table page pred proj
-  return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
+  return (idxTid ref,collectionTid ref,patchVar $ iniRef ref)
 
 refTablesDesc inf table page pred = do
   ref  <-  transactionNoLog inf $ tableLoader table page pred (recPKDesc inf (tableMeta table) $ allFields inf table)
-  return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
+  return (idxTid ref,collectionTid ref,patchVar $ iniRef ref)
 
 refTables' inf table page pred = do
-  ref  <-  transactionNoLog inf $ selectFrom (tableName table) page pred
-  return (idxTid ref,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
+  ref  <-  transactionNoLog inf $ tableLoader table page pred (allFields inf  table)
+  return (idxTid ref,collectionTid ref,patchVar $ iniRef ref)
 
 refTables inf table = refTables' inf table Nothing mempty
 

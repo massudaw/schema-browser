@@ -19,6 +19,7 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (apply, delete, get)
 import Query
 import RuntimeTypes
+import Safe
 import Schema
 import SchemaQuery
 import TP.QueryWidgets
@@ -48,7 +49,7 @@ layoutSel' keyword list = do
   next <- mdo
     let
       initial = Vertical
-      next c = styles !! ((current c + 1) `mod` length styles)
+      next c = justError"no style" $ atMay styles ((current c + 1) `mod` length styles)
         where current = fromJust . flip L.elemIndex styles
       ev = const next <$> alt
     bh <- ui $ accumB initial ev
@@ -82,7 +83,7 @@ chooserTable six inf bset cliTid cli = do
   el <- ui $ accumDiffCounterIni  (maybe 0 (length .table_selection)  iniTable) (\ix -> runUI w . (\table-> do
     header <- UI.h4
         # set UI.class_ "header"
-        # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
+        # sink0 text (facts $ T.unpack . lookDesc inf table .primary <$> collectionTid translationDb)
     let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
     body <-
       if L.null (rawUnion table)
@@ -111,8 +112,9 @@ viewerMode
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
   let desc = recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table)
-  reftb@(_,vpt,_,_) <- ui $ refTablesProj inf table Nothing mempty  desc
+  reftb@(_,trep,_) <- ui $ refTablesProj inf table Nothing mempty  desc
   let
+    vpt = primary <$> trep
     tdip = listRows inf table <$> cliTid
     tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> facts vpt <#> fmap activeRows tdip
 

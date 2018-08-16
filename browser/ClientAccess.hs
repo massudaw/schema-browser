@@ -203,8 +203,8 @@ getClient metainf clientId ccli = G.lookup (idex metainf "clients"  [("id",num c
 
 lookClient :: Int -> InformationSchema ->  Dynamic (Tidings (Maybe ClientState))
 lookClient clientId metainf = do
-  (_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
-  return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId <$> clientState)
+  (_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
+  return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId .primary<$> clientState)
 
 indexTable inf (tix,table) = (lookT =<<)
   where

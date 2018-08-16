@@ -120,7 +120,7 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                 let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
                     fieldKey (TB1 (SText v))=   v
                 reftb <- ui $ refTables' inf t Nothing pred
-                let v = reftb ^. _2
+                let v = primary <$> reftb ^. _2
                 traverseUI
                   (\i -> do
                     chartAddSource charts chart t (renderShowable <$> fields ) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap proj $ L.sortOn (G.getIndex (tableMeta t)) $ G.toList i)

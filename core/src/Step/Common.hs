@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  ,GeneralizedNewtypeDeriving,TupleSections #-}
+{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, GeneralizedNewtypeDeriving,DeriveGeneric,DeriveFunctor  ,GeneralizedNewtypeDeriving,TupleSections #-}
 module Step.Common (
   PluginTable,Parser(..),
   Access(..),
@@ -38,8 +38,14 @@ type WherePredicateK k = TBPredicate k Showable
 type WherePredicate = WherePredicateK Key
 
 newtype TBPredicate k a
-  = WherePredicate (BoolCollection (Rel k ,[(k,AccessOp a )]))
+  = WherePredicate (BoolCollection (Rel k,[(k,AccessOp a )]))
   deriving (Show,Eq,Ord,Generic)
+
+leftMap f (Left i) = (Left $ f i)
+leftMap f  (Right i)  = Right i
+
+instance Functor (TBPredicate k ) where
+  fmap f (WherePredicate i ) = WherePredicate ( fmap (fmap (fmap (leftMap (first (fmap f))) ))<$> i  )
 
 instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)

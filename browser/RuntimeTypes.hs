@@ -184,8 +184,7 @@ data DBVar2 v =
   DBVar2
   { iniRef :: DBRef Key v
   , idxTid :: R.Tidings (IndexMetadata Key v)
-  , collectionTid :: R.Tidings (TableIndex Key v)
-  , collectionSecondaryTid :: R.Tidings (Map [Key] (SecondaryIndex Key v))
+  , collectionTid :: R.Tidings (TableRep Key Showable )
   }
 
 
@@ -201,8 +200,7 @@ instance (Show k ,Show v) => Patch (InformationSchemaKV  k v )  where
 
 
 type RefTables = ( R.Tidings (IndexMetadata CoreKey Showable)
-                 , R.Tidings (TableIndex CoreKey Showable)
-                 , R.Tidings (M.Map [Key] (SecondaryIndex Key Showable))
+                 , R.Tidings (TableRep CoreKey Showable)
                  , TChan [TableModificationU Key Showable] )
 
 type PKConstraint = C.Predicate [Column CoreKey Showable]

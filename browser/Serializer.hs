@@ -227,7 +227,7 @@ data Reference k
 
 prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
   k -> SIso (Union (Reference k))  (TBData k Showable) (f a)
-prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
+prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (onlyLast . execWriter . fsp) ) (fmap (bsp. Last. Just) . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
           lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . kvLookup (S.singleton $ Inline ix)
@@ -328,73 +328,77 @@ instance DecodeTable (TableModificationK (Text, Text) (RowPatch Text Showable ))
 class DecodeShowable a where
   decodeS :: Showable -> a
   encodeS :: a -> Showable
-  isoS :: SIso KPrim Showable a
+  isoS :: SIso KPrim (Last Showable) a
+
+
+onlyLast :: Last a -> a
+onlyLast = justError "no element" . getLast
 
 instance DecodeShowable Showable where
-  isoS = SIso (PDynamic "showable") tell id
+  isoS = SIso (PDynamic "showable") (tell . pure ) onlyLast
 
 instance  DecodeShowable Bool where
   decodeS (SBoolean i) =  i
   encodeS i = SBoolean  i
-  isoS = SIso PBoolean (tell . encodeS) decodeS
+  isoS = SIso PBoolean (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance  DecodeShowable BS.ByteString  where
   decodeS (SBinary i) =  i
   encodeS i = SBinary i
-  isoS = SIso PBinary (tell. encodeS) decodeS
+  isoS = SIso PBinary (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance  DecodeShowable BSL.ByteString  where
   decodeS (SBinary i) = BSL.fromStrict i
   encodeS i = SBinary (BSL.toStrict i)
-  isoS = SIso PBinary (tell . encodeS) decodeS
+  isoS = SIso PBinary (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance B.Binary a => DecodeShowable (Binary a) where
   decodeS (SBinary i) = Binary $ B.decode (BSL.fromStrict i)
   encodeS (Binary i) = SBinary (BSL.toStrict $ B.encode i)
-  isoS = SIso PBinary (tell. encodeS ) decodeS
+  isoS = SIso PBinary (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable Int where
   decodeS (SNumeric i) = i
   encodeS = SNumeric
-  isoS = SIso (PInt 8) (tell . encodeS) decodeS
+  isoS = SIso (PInt 8) (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable Double where
   decodeS (SDouble i) = i
   encodeS = SDouble
-  isoS = SIso PDouble (tell . encodeS) decodeS
+  isoS = SIso PDouble  (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable Text where
   decodeS (SText i) = i
   encodeS = SText
-  isoS = SIso PText (tell . encodeS) decodeS
+  isoS = SIso PText (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable UTCTime where
   decodeS (STime (STimestamp i)) = i
   encodeS i = STime (STimestamp i)
-  isoS = SIso (PTime (PTimestamp Nothing) ) (tell . encodeS) decodeS
+  isoS = SIso (PTime (PTimestamp Nothing) )(tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable (FTB Showable)  where
-  isoS = SIso (PDynamic "ftb_showable") (tell . encodeS) decodeS
+  isoS = SIso (PDynamic "ftb_showable") (tell . pure .encodeS ) (decodeS. onlyLast )
     where
       encodeS i  = SDynamic (HDynamic  (toDyn i))
       decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
 
 
 instance DecodeShowable [TBIndex Showable]  where
-  isoS = SIso (PDynamic "row_index") (tell . encodeS) decodeS
+  isoS = SIso (PDynamic "row_index") (tell . pure . encodeS) (decodeS.onlyLast)
     where
       encodeS i  = SDynamic (HDynamic  (toDyn i))
       decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
 
 instance DecodeShowable (RowOperation Text Showable) where
-  isoS = SIso (PDynamic "row_operation") (tell . encodeS) decodeS
+  isoS = SIso (PDynamic "row_operation") (tell . pure . encodeS) (decodeS.onlyLast)
     where
       encodeS i  = SDynamic (HDynamic  (toDyn i))
       decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i
 
 
 instance DecodeShowable PrePlugins where
-  isoS = SIso (PDynamic "plugin") (tell . encodeS) decodeS
+  isoS = SIso (PDynamic "plugin") (tell . pure . encodeS) (decodeS.onlyLast)
     where
       encodeS i  = SDynamic (HDynamic  $toDyn i)
       decodeS (SDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i

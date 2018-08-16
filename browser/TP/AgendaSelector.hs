@@ -151,12 +151,12 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
                 unPred (WherePredicate i) = i
             reftb <- ui $ refTables' inf t Nothing pred
             let v = reftb ^. _2
-            let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk j else Nothing  ) <$> facts v <@>  evc
+            let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts v <@>  evc
             tdib <- ui $ stepper Nothing evsel
             let tdi = tidings tdib evsel
             ui $ onEventIO evsel hselg
             traverseUI
-              (\i ->calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList i)) v
+              (\i ->calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList (primary i))) v
                                   ) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
@@ -189,7 +189,7 @@ addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
     reftb <- ui $ refTables' inf t Nothing pred
     let v = reftb ^. _2
     traverseUI
-      (\i -> calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList i)) v
+      (\i -> calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList (primary i))) v
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

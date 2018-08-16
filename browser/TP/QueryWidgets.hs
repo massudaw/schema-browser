@@ -452,17 +452,16 @@ deleteCurrentUn  un l e =  foldl' (\l e -> G.delete (G.getUnique un e) G.indexPa
 tableConstraints
   :: Foldable f =>
      (KVMetadata Key,
-      Tidings (Map [Key] (G.GiST (TBIndex Showable) a1)),
-      Tidings (G.GiST (TBIndex Showable) a3))
+      Tidings (TableRep Key Showable))
      -> Tidings (f (TBData Key Showable)) -> KV Key a -> SelPKConstraint
-tableConstraints (m ,sgist,gist) preoldItems ftb = constraints
+tableConstraints (m ,gist) preoldItems ftb = constraints
   where
     constraintPred :: [Key]
                       -> Tidings (G.GiST (TBIndex Showable) a)
                       -> ([Set (Rel Key)], Tidings (C.Predicate [TB Key Showable]))
     constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate .  flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
-    primaryConstraint = constraintPred (_kvpk m) gist
-    secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un <$>  sgist)
+    primaryConstraint = constraintPred (_kvpk m) (primary <$> gist)
+    secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un .secondary<$>  gist)
     constraints :: SelPKConstraint
     constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
 
@@ -475,13 +474,13 @@ batchUITable
    -> TBData CoreKey ()
    -> Tidings [TBData CoreKey Showable]
    -> UI (TrivialWidget [Editor (TBIdx CoreKey Showable)])
-batchUITable inf table reftb@(_, gist ,sgist,tref) refs pmods ftb  preoldItems2 = do
+batchUITable inf table reftb@(_, gist ,tref) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
   preoldItems <- ui $ loadItems inf table  ftb preoldItems2
   let arraySize = 30
       index = flip atMay
-      constraints = tableConstraints (m,sgist,gist) preoldItems ftb
+      constraints = tableConstraints (m,gist) preoldItems ftb
       unIndexEl ix =  index ix <$> preoldItems
       dyn = dynHandlerPatch  (\ix valix plix ->do
         (listBody,tablebdiff) <- rowTableDiff inf table constraints refs pmods ftb ix valix
@@ -657,12 +656,12 @@ crudUITable
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
-crudUITable inf table reftb@(_,gist ,sgist,_) refs pmods ftb  preoldItems2 = do
+crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
   preoldItems <-  ui $ loadItems inf table ftb =<< calmDiff preoldItems2
   let
-    constraints = tableConstraints (m,sgist,gist) preoldItems ftb
+    constraints = tableConstraints (m,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
   (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
@@ -692,7 +691,7 @@ dynCrudUITable
 dynCrudUITable inf nav refs pmods table preoldItems = do
   switchUILayout delta UI.div nav
       (do
-        reftb@(_,gist,sgist,_) <- ui $ refTables inf   table
+        reftb@(_,gist,_) <- ui $ refTables inf   table
         crudUITable inf table reftb refs pmods (allFields inf table) preoldItems)
     where delta = compactPlugins preoldItems pmods
 
@@ -813,14 +812,15 @@ processPanelTable
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element,Event [String])
-processPanelTable lbox inf reftb@(res,gist,_,_) inscrudp table oldItemsi = do
+processPanelTable lbox inf reftb@(res,trep,_) inscrudp table oldItemsi = do
   let
     inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
     m = tableMeta table
     authPred =  [(keyRef "grantee",Left ( int $ usernameId inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing authPred)
-  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ usernameId inf)]))  <$> collectionTid auth
+  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ usernameId inf)])). primary   <$> collectionTid auth
 
+  gist <- ui $ cacheTidings $ primary <$>  trep
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist
   (diffEdit,editB) <-     editCommand lbox inf table oldItemsi inscrudp inscrud authorize gist
   (diffMerge,mergeB) <-   mergeCommand lbox inf table inscrudp inscrud authorize gist
@@ -1261,9 +1261,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               when (oldsel /= vv ) $ do
                 liftIO $ helsel vv
                 pred <- currentValue (facts predicate)
-                reftb@(_,gist,sgist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-                g <- currentValue (facts gist)
-                s <- currentValue (facts sgist)
+                reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
+                TableRep (_,s,g) <- currentValue (facts gist)
                 let search  i
                       | kvSize i /= L.length rel =  Nothing
                       | otherwise = searchGist rel targetTable  g s i
@@ -1290,9 +1289,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           return [nav,pan,hidden]
         selector True = do
           pred <- ui $ currentValue (facts predicate)
-          reftb@(_,gist,sgist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
+          reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*>(fmap sourcePRef <$> sel)
-          tdi <- ui $ calmT ((\g s v -> searchGist rel targetTable g s =<< v) <$> gist  <*> sgist <*> newSel)
+          tdi <- ui $ calmT ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<< v) <$> gist  <*> newSel)
           metaMap <- mapWidgetMeta inf
           cliZone <- jsTimeZone
           metaAgenda <- eventWidgetMeta inf
@@ -1441,7 +1440,7 @@ displayTable :: InformationSchema -> Table -> [(Rel Key ,[(Key,AccessOp Showable
 displayTable inf table envK = do
   let
     pred = WherePredicate $ AndColl $ PrimColl <$> envK
-  reftb@(_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
+  reftb@(_,vpt,_) <- ui $ refTables' inf   table Nothing  pred
   tb <- UI.div
   (res,offset) <- paginateList inf table tb (pure $ Just pred) reftb  [] (allFields inf table) (pure Nothing)
   TrivialWidget pretdi cru <- batchUITable inf table reftb M.empty [] (allFields inf table) res
