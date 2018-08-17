@@ -345,6 +345,9 @@ createTable fixed m = do
       return ([],[])
   return ((either error fst $ applyUndo fixedmap logix,either error fst $ foldUndo table log ),dbvar)
 
+-- TODO: Could we derive completeness information from bounds
+-- or have some negative information about explored empty bounds
+
 pageTable method table page fixed tbf = do
     inf <- askInf
     let
@@ -407,13 +410,20 @@ pageTable method table page fixed tbf = do
                 match (AndColl l) = product $ match <$> l
                 match (OrColl l) =  sum $ match <$> l
                 match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
-        liftIO $ print (isComplete fixed,G.size reso)
+            complements = catMaybes $ (\i -> recComplement inf (tableMeta table) i tbf) <$> G.toList reso
         if isComplete fixed == G.size reso
            then
-            case L.all (\i -> isNothing $ recComplement inf (tableMeta table) i tbf) reso  of
-              True -> return ((G.size reso ,M.empty), reso)
-              False -> readNew maxBound tbf
-           else readNew maxBound tbf
+            case L.null complements of
+              True -> do
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (G.size reso)
+                return ((G.size reso ,M.empty), reso)
+              False -> do
+                if L.length  complements  == 1
+                   then readNew maxBound (head complements)
+                   -- TODO: Compute the max of complements for now just use all required
+                   else readNew maxBound tbf
+           else do
+             readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
 
 
