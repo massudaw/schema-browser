@@ -404,10 +404,11 @@ pageTable method table page fixed tbf = do
         let m = rawPK table
             isComplete (WherePredicate i) = match i
               where
-                match (AndColl l) = L.all match  l
-                match (OrColl l) = False
-                match (PrimColl (i,_)) = L.elem (_relOrigin i) m
-        if isComplete fixed && G.size reso == 1
+                match (AndColl l) = product $ match <$> l
+                match (OrColl l) =  sum $ match <$> l
+                match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
+        liftIO $ print (isComplete fixed,G.size reso)
+        if isComplete fixed == G.size reso
            then
             case L.all (\i -> isNothing $ recComplement inf (tableMeta table) i tbf) reso  of
               True -> return ((G.size reso ,M.empty), reso)
