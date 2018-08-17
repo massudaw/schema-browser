@@ -1260,28 +1260,22 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         sel = liftA2 diff' oldItems ftdi
         selector False = do
           ui $ onEventDyn
-            ((,,,) <$> facts tsource <*> facts oldItems <*> facts tseltarget <@> rumors (fmap sourcePRef <$> sel))
-            (\(oldsel,initial,oldedit,vv) -> do
-              when (oldsel /= vv  ) $ do
-                -- liftIO $ print("Source",oldsel,vv)
-                liftIO $ helsel vv
-                if (maybe False ((L.length rel ==) .kvSize) (join $ applyIfChange (fst .unTBRef <$> initial) vv))
+            ((,,) <$> facts tsource <*> facts oldItems <@> rumors (fmap sourcePRef <$> sel))
+            (\(oldsel,initial,newdiff) -> do
+              -- If newdiff is different than old diff update
+              when (oldsel /= newdiff) $ do
+                let newsel = (join $ applyIfChange (fst .unTBRef <$> initial) newdiff)
+                -- Just fetch if the arguments for all relations are present
+                out <- if (maybe False ((L.length rel ==) .kvSize) newsel )
                   then do
                     pred <- currentValue (facts predicate)
                     reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
                     TableRep (_,s,g) <- currentValue (facts gist)
-                    let search  i
-                          | kvSize i /= L.length rel =  Nothing
-                          | otherwise = searchGist rel targetTable  g s i
-                        searchDiff i = diff' (snd .unTBRef<$> initial) (search =<< i)
-                        newsel =  applyIfChange (fst .unTBRef<$> initial) vv
-                        newEdit = maybe oldedit searchDiff newsel
-                    when (oldedit /=  newEdit) $ do
-                      -- liftIO $ print ("Target",oldedit,newEdit)
-                      liftIO $  helselTarget newEdit
+                    return $ searchGist rel targetTable  g s =<< newsel
                   else do
-                    liftIO $  helselTarget  Delete
-
+                    return Nothing
+                liftIO $ void $ traverse helselTarget (diff (snd .unTBRef<$> initial) out)
+                liftIO $ helsel newdiff
                 return ()
               )
           pan <- UI.div
@@ -1384,10 +1378,10 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             -- 2. has something to reflect
             -- 3. new diff is different than current
             when (isNothing selt && fmap filterReflect old /= fmap filterReflect (fmap sourcePRef i) && not (L.null reflectRels)) $ do
-              liftIO $ print ("SourceE",tableName targetTable,fmap filterReflect old ,fmap filterReflect (fmap sourcePRef i) )
+              -- liftIO $ print ("SourceE",tableName targetTable,fmap filterReflect old ,fmap filterReflect (fmap sourcePRef i) )
               helsel $ fmap (filterReflect.sourcePRef) i
             when (olde /= fmap targetPRef i) $ do
-              liftIO $ print ("TargetE",tableName targetTable,olde,fmap targetPRef i)
+              -- liftIO $ print ("TargetE",tableName targetTable,olde,fmap targetPRef i)
               heleditu  (fmap targetPRef i)
             )
           return (getElement nav,[celem],max (6,1) <$> layout)

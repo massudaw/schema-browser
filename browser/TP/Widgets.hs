@@ -654,7 +654,7 @@ calmD :: (Show (Index a),Patch a )=> Maybe a  -> Event (Maybe a) -> Dynamic (Eve
 calmD ini e =
   filterJust . fmap isDiff <$> accumE (ini ,patch ini) ((\ i (j,_) -> (i ,diff' i j )) <$> e)
     where
-      isDiff (_,i) | traceShow i False = undefined
+      -- isDiff (_,i) | traceShow i False = undefined
       isDiff (i,Keep ) = Nothing
       isDiff (i,_) = Just i
 

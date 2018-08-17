@@ -401,7 +401,18 @@ pageTable method table page fixed tbf = do
           return ((max (G.size reso) sq,idx), reso)
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)
-        readNew maxBound tbf
+        let m = rawPK table
+            isComplete (WherePredicate i) = match i
+              where
+                match (AndColl l) = L.all match  l
+                match (OrColl l) = False
+                match (PrimColl (i,_)) = L.elem (_relOrigin i) m
+        if isComplete fixed && G.size reso == 1
+           then
+            case L.all (\i -> isNothing $ recComplement inf (tableMeta table) i tbf) reso  of
+              True -> return ((G.size reso ,M.empty), reso)
+              False -> readNew maxBound tbf
+           else readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
 
 

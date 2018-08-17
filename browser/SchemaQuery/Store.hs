@@ -189,7 +189,7 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
             WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(_relOrigin o,Left (pkIndex t ,Flip op))])) <$> outputs)
         predScanOut = {-(\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $  -}
             WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess rel o) ,  [(_relOrigin o,Left (pkIndex t ,Flip op))] )) <$> outputs)
-        predScanIn = (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
+        predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
             WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(_relOrigin o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
