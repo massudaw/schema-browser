@@ -425,10 +425,10 @@ indexPredIx (n@(RelAccess [Inline key] nt ) ,eq) r
 indexPredIx (n@(RelAccess nk nt ) ,eq) r
   = case  relLookup (Set.fromList nk) r of
     Nothing -> Nothing
-    Just i ->  fmap (PathForeign nk . fmap (Many . pure) ) $ recPred $ allRefs <$> i
+    Just i ->  PathForeign nk  <$> recPred i
   where
-    allRefs (TBRef (i,v))= indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v
-    recPred (TB1 i ) = TipPath <$> i
+    allRefs (TBRef (i,v))= Many . pure <$> (indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v)
+    recPred (TB1 i ) = TipPath <$> allRefs i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = error (show ("IndexPredIx",i))
