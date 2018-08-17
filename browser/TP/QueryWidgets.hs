@@ -1147,14 +1147,14 @@ buildPrim fm tdi i
 oneInput :: [FieldModifier] -> KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
 oneInput fm i tdi = do
     v <- currentValue (facts tdi)
-    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
+    inputUI <- UI.input # sink UI.value (maybe "" renderPrim <$> facts tdi) # set UI.style [("min-width","30px"),("max-width","250px"),("width","100%")]
     when (fm ==  [FRead]) . void $ do
       element inputUI # set UI.enabled False
     onCE <- UI.onChangeE inputUI
     let pke = unionWith const  (decode <$> onCE) (Right <$> rumors tdi)
         decode v = maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
     pkt <- ui $ stepperT (Right v) pke
-    element inputUI # sinkDiff UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> pkt)
+    element inputUI # sink UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> facts pkt)
     return $ TrivialWidget (either (const Nothing) id <$> pkt) inputUI
 
 
@@ -1262,21 +1262,26 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           ui $ onEventDyn
             ((,,,) <$> facts tsource <*> facts oldItems <*> facts tseltarget <@> rumors (fmap sourcePRef <$> sel))
             (\(oldsel,initial,oldedit,vv) -> do
-              when (oldsel /= vv  && maybe False ((L.length rel ==) .kvSize) (join $ applyIfChange (fst .unTBRef <$> initial) vv)) $ do
+              when (oldsel /= vv  ) $ do
                 -- liftIO $ print("Source",oldsel,vv)
                 liftIO $ helsel vv
-                pred <- currentValue (facts predicate)
-                reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-                TableRep (_,s,g) <- currentValue (facts gist)
-                let search  i
-                      | kvSize i /= L.length rel =  Nothing
-                      | otherwise = searchGist rel targetTable  g s i
-                    searchDiff i = diff' (snd .unTBRef<$> initial) (search =<< i)
-                    newsel =  applyIfChange (fst .unTBRef<$> initial) vv
-                    newEdit = maybe oldedit searchDiff newsel
-                when (oldedit /=  newEdit) $ do
-                  -- liftIO $ print ("Target",oldedit,newEdit)
-                  liftIO $  helselTarget newEdit
+                if (maybe False ((L.length rel ==) .kvSize) (join $ applyIfChange (fst .unTBRef <$> initial) vv))
+                  then do
+                    pred <- currentValue (facts predicate)
+                    reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
+                    TableRep (_,s,g) <- currentValue (facts gist)
+                    let search  i
+                          | kvSize i /= L.length rel =  Nothing
+                          | otherwise = searchGist rel targetTable  g s i
+                        searchDiff i = diff' (snd .unTBRef<$> initial) (search =<< i)
+                        newsel =  applyIfChange (fst .unTBRef<$> initial) vv
+                        newEdit = maybe oldedit searchDiff newsel
+                    when (oldedit /=  newEdit) $ do
+                      -- liftIO $ print ("Target",oldedit,newEdit)
+                      liftIO $  helselTarget newEdit
+                  else do
+                    liftIO $  helselTarget  Delete
+
                 return ()
               )
           pan <- UI.div
