@@ -25,7 +25,7 @@ indexLabel p@(IProd b l) v =
       Just i -> i
       Nothing -> error "no fk"
 indexLabel p@(Nested l m) v =
-  case findFK (F.toList l) v of
+  case findFK (_relOrigin <$> F.toList l) v of
     Just (IT k (TB1 a)) -> indexLabelU m a
     Just (IT k (LeftTB1 (Just (TB1 a)))) -> indexLabelU m a
     Nothing -> error "no fk"

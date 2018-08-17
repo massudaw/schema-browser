@@ -296,6 +296,9 @@ mapField (SIso p  i j ) (SIso (Many [(InlineTable (Primitive k ki) v l )]) a b )
 mapIsoArrow (IsoArrow f g ) = IsoArrow (fmap f ) (fmap g)
 
 
+instance DecodeShowable (Rel Text) where
+  isoS = isoMap (IsoArrow Inline _relOrigin ) isoS
+
 instance DecodeTable (Access Text) where
   isoTable = itotal $ isplit (IsoArrow build destroy)
       (nestWith "nested" (iassoc id (prim "ref") ( nest "nest"))) (prim "iprod" )

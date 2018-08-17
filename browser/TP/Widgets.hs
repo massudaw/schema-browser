@@ -650,16 +650,17 @@ calmE :: Eq a => Memory a  -> Event a -> Dynamic (Event a)
 calmE ini e =
   filterJust . fmap isNew <$> accumE ini (updateMemory <$> e)
 
-calmD :: (Show (Index a),Patch a )=> Maybe a  -> Event (Maybe a) -> Dynamic (Event (Maybe a))
+calmD :: (Show a,Show (Index a),Patch a )=> Maybe a  -> Event (Maybe a) -> Dynamic (Event (Maybe a))
 calmD ini e =
-  filterJust . fmap isDiff <$> accumE (ini ,patch ini) ((\ i (j,_) -> (i ,diff' i j )) <$> e)
+  filterJust . fmap isDiff <$> accumE (ini ,Just(patch ini)) ((\ i (j,_) -> (i , diff j i )) <$> e)
     where
       -- isDiff (_,i) | traceShow i False = undefined
-      isDiff (i,Keep ) = Nothing
+      isDiff (i,Nothing) = Just i
+      isDiff (i,Just Keep ) = Nothing
       isDiff (i,_) = Just i
 
 
-calmDiff :: (Show (Index a),Patch a )=> Tidings (Maybe a) -> Dynamic (Tidings (Maybe a) )
+calmDiff :: (Show a,Show (Index a),Patch a )=> Tidings (Maybe a) -> Dynamic (Tidings (Maybe a) )
 calmDiff t = do
   current <- currentValue (facts t)
   eCalm <- calmD current (rumors t)

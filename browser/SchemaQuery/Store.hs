@@ -342,7 +342,7 @@ updateReference j var (DBRef {..}) = catchJust
            ls <- filter isPatch . concat . fmap tableDiffs . concat <$> takeMany var
            when (not $ L.null ls) $ do
              state <- readTVar collectionState
-             let patches = traceShowId . compact . concat $ (\f -> f ls state) <$> j
+             let patches = compact . concat $ (\f -> f ls state) <$> j
              when (not $ L.null patches) $
                writeTChan patchVar (FetchData dbRefTable <$> patches)))
     (\e -> atomically (readTChan var) >>= printException e)

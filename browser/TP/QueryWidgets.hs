@@ -181,7 +181,7 @@ pluginUI inf oldItems pl@(idp,FPlugins n t p) =
       return (headerP, (out,  pgOut ))
     uipure = do
       headerP <- headerUI
-      pgOut <- ui $mapTEventDyn (liftIO . execute inf t pl) tdInput
+      pgOut <- ui $ mapTEventDyn (liftIO . execute inf t pl) tdInput
       return (headerP, (out,   pgOut ))
 
 
@@ -202,7 +202,7 @@ checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
       predOut =  WherePredicate . fmap fixrel <$> genPredicateFullU True out
       tdOutput = join . fmap (checkPredFull predOut)  <$> oldItems
       checkPredFull pred i
-          =  if maybe False (G.checkPred i) pred then  Just i else Nothing
+        =  if maybe False (G.checkPred i)  pred then  Just i else Nothing
 
 prodRef = IProd Nothing
 
@@ -557,10 +557,9 @@ rowTableDiff
   -> Int
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
-rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
+rowTableDiff inf table constr refs plmods ftb@k ix oldItems= do
   ixE <- UI.div # set text (show ix) # set UI.class_ "col-xs-1"
   operation <- UI.div # set UI.class_ "col-xs-1"
-  oldItems <- ui $ cacheTidings preOldItems
   plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
@@ -583,7 +582,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix preOldItems = do
   let out = output
 
   reftb <- ui $ refTables inf table
-  (outI ,_)<- processPanelTable listBody inf reftb  out table preOldItems
+  (outI ,_)<- processPanelTable listBody inf reftb  out table oldItems
   element operation #  set children (fmap fst res <> [outI])
   return (listBody , out)
 
@@ -596,8 +595,7 @@ eiTableDiff
   -> TBData CoreKey ()
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
-eiTableDiff inf table constr refs plmods ftb@k preOldItems = do
-  oldItems <- ui $ cacheTidings preOldItems
+eiTableDiff inf table constr refs plmods ftb@k oldItems = do
   plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
@@ -961,9 +959,11 @@ buildUIDiff f (Primitive l prim) = go l
                 unInterval _ i = error (show i)
                 unfinp (Interval.Finite i) = Just i
                 unfinp i = Nothing
+                plugtdi i  (PatchSet l ) = PatchSet . Non.fromList <$> nonEmpty ( catMaybes $ Non.toList $ fmap (plugtdi i) l)
                 plugtdi i (PInter j l)
                   | i == j  =  unfinp $ fst l
                   | otherwise = Nothing
+                plugtdi i j = error (show (i,j))
             composed <-  UI.div
             subcomposed <- UI.div # set UI.children [composed]
             inf <- go ti (fmap ( fmap (join . fmap (plugtdi True))) <$> plug) (join.fmap (unInterval inf' ) <$> tdi)

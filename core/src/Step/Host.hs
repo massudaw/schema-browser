@@ -53,7 +53,7 @@ indexField p@(IProd b l) v =
            l)
         Nothing -> findFKAttr [l] v
     i -> i
-indexField n@(Nested ix nt) v = findFK (F.toList ix) v
+indexField n@(Nested ix nt) v = findFK (F.toList (_relOrigin <$> ix)) v
 indexField i _ = error (show i)
 
 joinFTB (LeftTB1 i) = LeftTB1 $ fmap joinFTB i
@@ -67,10 +67,10 @@ indexFieldRecU p@(Many [l]) v = indexFieldRec l v
 indexFieldRec :: Access Key -> TBData Key Showable -> Maybe (FTB Showable)
 indexFieldRec p@(IProd b l) v = _tbattr <$> findAttr l v
 indexFieldRec n@(Nested l (Many [nt])) v =
-  join $ fmap joinFTB . traverse (indexFieldRec nt) . _fkttable <$> findFK (F.toList l) v
+  join $ fmap joinFTB . traverse (indexFieldRec nt) . _fkttable <$> findFK (F.toList (_relOrigin <$>  l)) v
 indexFieldRec n@(Nested l nt) v =
   join $
-    fmap joinFTB . traverse (indexFieldRecU nt) . _fkttable <$> findFK (F.toList l) v
+    fmap joinFTB . traverse (indexFieldRecU nt) . _fkttable <$> findFK (F.toList (_relOrigin <$> l)) v
 indexFieldRec n v = error (show (n, v))
 
 hasProd :: (Access Key -> Bool) -> Union (Access Key) -> Bool
@@ -80,7 +80,7 @@ findProd :: (Access Key -> Bool) -> Union (Access Key) -> Maybe (Access Key)
 findProd p i = F.find p i
 
 isNested :: [Access Key] -> Access Key -> Bool
-isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (F.toList l)
+isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (F.toList (_relOrigin <$> l))
 isNested p i = False
 
 uNest :: Access Key -> Union (Access Key)
@@ -89,7 +89,7 @@ uNest (Nested pn i) = i
 indexer :: Text -> [Access Text]
 indexer field =
   foldr
-    (\i j -> [Nested (Non.fromList i) (Many (j))])
+    (\i j -> [Nested (Non.fromList (Inline <$> i)) (Many (j))])
     (IProd Nothing <$> last vec)
     (init vec)
   where

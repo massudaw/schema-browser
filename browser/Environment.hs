@@ -203,7 +203,7 @@ iforeign ::
        (Monad m ,Patch s ,Show s ,Show (Index s) ,Show k ,Ord k) => [Rel k]
        -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(_relOrigin <$> Non.fromList s) (Many []))   ) ). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(Non.fromList s) (Many []))   ) ). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 

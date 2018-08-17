@@ -347,7 +347,6 @@ createTable fixed m = do
 
 -- TODO: Could we derive completeness information from bounds
 -- or have some negative information about explored empty bounds
-
 pageTable method table page fixed tbf = do
     inf <- askInf
     let
@@ -411,7 +410,7 @@ pageTable method table page fixed tbf = do
                 match (OrColl l) =  sum $ match <$> l
                 match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
             complements = catMaybes $ (\i -> recComplement inf (tableMeta table) i tbf) <$> G.toList reso
-        if isComplete fixed == G.size reso
+        if fixed /= mempty && isComplete fixed == G.size reso
            then
             case L.null complements of
               True -> do

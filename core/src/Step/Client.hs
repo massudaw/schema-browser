@@ -76,10 +76,10 @@ atP k (P (fsum, ssum) (Kleisli a)) =
   where
     nest (Many []) = Many []
     nest (ISum []) = Many []
-    nest ls = Many [Nested (iprodRef <$> Non.fromList ind) ls]
+    nest ls = Many [Nested (Non.fromList (Inline .iprodRef <$> ind)) ls]
     ind = splitIndex (Just $ Not IsNull) k
 
-nest :: [Text] -> Union (Access Text) -> Union (Access Text)
+nest :: [Rel Text] -> Union (Access Text) -> Union (Access Text)
 nest ind (Many []) = Many []
 nest ind (Many [(Rec ix i)]) = Many [Nested (Non.fromList ind) $ Many [Rec ix i]]
 nest ind j = Many [Nested (Non.fromList ind) j]
@@ -91,7 +91,7 @@ atMA ::
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) t [t1]
 atMA i (P s (Kleisli j)) =
   P
-    (BF.second (nest (iprodRef <$> ind)) . BF.first (nest (iprodRef <$> ind)) $
+    (BF.second (nest (Inline . iprodRef <$> ind)) . BF.first (nest (Inline . iprodRef <$> ind)) $
      s)
     (Kleisli
        (\i ->
@@ -110,7 +110,7 @@ atRA ::
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) t [t1]
 atRA i (P s (Kleisli j)) =
   P
-    (BF.second (nest (iprodRef <$> ind)) . BF.first (nest (iprodRef <$> ind)) $
+    (BF.second (nest (Inline . iprodRef <$> ind)) . BF.first (nest (Inline . iprodRef <$> ind)) $
      s)
     (Kleisli
        (\i ->
@@ -129,8 +129,8 @@ unLeftTB1 v =
 
 at b i (P s (Kleisli j)) =
   P
-    (BF.second (nest (iprodRef <$> ind b)) .
-     BF.first (nest (iprodRef <$> ind b)) $
+    (BF.second (nest (Inline . iprodRef <$> ind b)) .
+      BF.first (nest (Inline . iprodRef <$> ind b)) $
      s)
     (Kleisli (\i -> onlyLocal (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i)))
   where
@@ -157,8 +157,8 @@ atMR = at notNull
   where
     at b i (P s (Kleisli j)) =
       P
-        (BF.second (nest (iprodRef <$> ind Nothing)) .
-         BF.first (nest (iprodRef <$> ind b)) $
+        (BF.second (nest (Inline . iprodRef <$> ind Nothing)) .
+          BF.first (nest (Inline . iprodRef <$> ind b)) $
          s)
         (Kleisli
            (\i -> maybeLocal (fmap unTB1 . unLeftTB1 . (indexTB1 (ind b))) (j i)))

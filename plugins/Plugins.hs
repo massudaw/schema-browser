@@ -244,10 +244,9 @@ preparoInsumo = FPlugins pname tname $ PurePlugin  url
     url :: ArrowReaderM Identity
     url = proc t -> do
       plant <- idxK "producao"  -< ()
-      poly <- atR "insumo" (idxK "periodo_preparo" ) -< ()
+      poly <- atR "insumo" (idxK "periodo_preparo") -< ()
       odxR "previsao_preparo" -< ()
       returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> kvlist [Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 ((\(TB1 i) -> TB1 $ STime  .SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
-
 
 
 areaDesign = FPlugins pname tname $ PurePlugin  url

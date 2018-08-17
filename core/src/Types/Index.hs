@@ -459,12 +459,10 @@ indexPred (n@(RelAccess k nt ) ,eq) r
     recPred (ArrayTB1 i) = any recPred i
     recPred i = error (show ("RecPred",i))
 indexPred (a@(Inline key),eqs) r =
-  case attrLookup (Set.singleton $ a)(tableNonRef  r) of
+  case attrLookup (Set.singleton a) (tableNonRef r) of
+    Just rv ->
+      match eq (Right rv)
     Nothing -> False
-    Just rv ->
-      match eq (Right rv)
-    Just rv ->
-      match eq (Right rv)
   where
     eq = getOp key  eqs
 indexPred i v= error (show (i,v))

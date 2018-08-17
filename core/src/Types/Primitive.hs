@@ -110,7 +110,7 @@ instance (Binary k) => Binary (Union k)
 instance (NFData k) => NFData (Union k)
 data Access a
   = IProd (Maybe UnaryOperator) a
-  | Nested (NonEmpty a) (Union (Access a))
+  | Nested (NonEmpty (Rel a)) (Union (Access a))
   | Rec Int  (Union (Access a))
   | Point Int
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
@@ -845,7 +845,7 @@ renderUnary i = error (show i)
 accesRelGen' :: Rel k -> Access k
 accesRelGen' (Inline i) = IProd Nothing i
 accesRelGen' (RelAccess l m) =
-  Nested (_relOrigin <$> Non.fromList l) (Many [(accesRelGen' m)])
+  Nested (Non.fromList l) (Many [(accesRelGen' m)])
 
 newKey table name ty =
   let un = maximum (keyPosition <$> rawAttrs table) + 1
@@ -856,4 +856,4 @@ lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l
 relAccesGen (Nested l (Many [m])) =
-  RelAccess ((\(i) -> Inline i) <$> F.toList l) (relAccesGen m)
+  RelAccess (F.toList l) (relAccesGen m)
