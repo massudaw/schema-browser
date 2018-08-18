@@ -106,7 +106,7 @@ mergeDBRefT  (ref1,j ,i) (ref2,m ,l) = (ref1 <> ref2 ,liftA2 (\(IndexMetadata a)
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
-  ref <-lookDBVar inf mmap (tableMeta table)
+  ref <- liftIO $ lookDBVar inf mmap (tableMeta table)
   (idxTds,dbTds ) <- convertChan inf table mempty ref
   return (DBVar2 ref idxTds  dbTds )
 
@@ -156,7 +156,7 @@ modifyTable t ix p = do
     Just (ref,po,ixp) -> return $ M.insert t (ref,p ++ po,ix ++ ixp ) m
     Nothing -> do
       mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
-      ref <- lift $ lookDBVar inf mmap t
+      ref <- liftIO $ lookDBVar inf mmap t
       return $ M.singleton t (ref,p,ix)
   put o
 
@@ -300,7 +300,7 @@ tableLoader  table page fixed tbf = do
   inf <- askInf
   vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
   idxTds <- lift $ convertChanStepper0 inf table nidx fixedChan
-  dbvar <- lift $ prerefTable inf table
+  dbvar <- liftIO $ prerefTable inf table
   return (DBVar2 dbvar idxTds vpt)
 
 tableLoader'
@@ -334,7 +334,7 @@ createTable fixed m = do
   let mvar = mvarMap inf
   mmap <- liftIO . atomically $ readTVar mvar
   map <-get
-  predbvar <- lift (lookDBVar inf mmap m)
+  predbvar <- liftIO (lookDBVar inf mmap m)
   ((fixedmap,table),dbvar)
       <- liftIO . atomically $
         cloneDBVar  (fixed ,_kvpk m) predbvar

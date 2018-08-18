@@ -1,4 +1,5 @@
-:set  -fwarn-unused-imports
+:set -fwarn-unused-imports
 :set -isrc
+:set -fobject-code
 :set args localhost 5439 incendio postgres queijo incendio 
-:set -j8
+:set -j2

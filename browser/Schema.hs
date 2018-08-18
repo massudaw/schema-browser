@@ -280,7 +280,7 @@ logTableModification inf (TableModification Nothing ts u table ip) = do
 
   [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
-  (dbref ,_) <-R.runDynamic $ prerefTable (meta inf) modt
+  dbref  <- prerefTable (meta inf) modt
 
   putPatch (patchVar dbref) [FetchData modt $ createRow' (tableMeta table) $ liftTable' (meta inf)  (modificationEnv env)   $ encodeT (TableModification (Just id) ts u (schemaName inf,tableName table ) (firstPatchRow keyValue ip ) )]
   return (TableModification (Just id) ts u table ip )

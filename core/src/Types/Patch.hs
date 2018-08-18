@@ -169,7 +169,7 @@ instance Patch b => Patch (Maybe b) where
   applyUndo i = recoverEditChange i
 
 -- Investigate adding a new field for target Edit
-data PTBRef k s = PTBRef { sourcePRef :: TBIdx k s , targetPRef :: TBIdx k s {-, targetPRefEdit :: TBIdx k s-} }  deriving(Show,Eq,Ord,Functor,Generic)
+data PTBRef k s = PTBRef { sourcePRef :: TBIdx k s , targetPRef :: TBIdx k s , targetPRefEdit :: TBIdx k s }  deriving(Show,Eq,Ord,Functor,Generic)
 
 nonRefPatch (PFK rel i j) = i
 nonRefPatch i = [i]
@@ -553,27 +553,33 @@ instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
 
 
 instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
-  compact i = zipWith PTBRef f s -- t
+  compact i = zipWith3 PTBRef f s  t
     where
       f = compact (sourcePRef <$> i)
       s = compact (targetPRef <$> i)
-      -- t = compact (targetPRefEdit <$> i)
+      t = compact (targetPRefEdit <$> i)
 
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = PTBRef Key Showable
   diff (TBRef (i, j)) (TBRef (k, l) )=
-    (PTBRef <$> dref <*> dtb) <|> (PTBRef <$> dref <*> pure []) <|>
-    (PTBRef <$> pure [] <*> dtb)
+    (PTBRef <$> dref <*> dtb <*> pure []) <|> (PTBRef <$> dref <*> pure [] <*> pure []) <|>
+    (PTBRef <$> pure [] <*> pure [] <*> dtb )
     where
       dref = diff i k
       dtb = diff j l
-  patch (TBRef (i, j)) = PTBRef (patch i) (patch j)
-  applyUndo (TBRef (i, j)) (PTBRef k l) =
-    (\(a, b) (i, j) -> (TBRef (a, i), PTBRef b j)) <$> applyUndo i k <*> applyUndo j l
-  createIfChange (PTBRef i j) = fmap TBRef $
-    ((,) <$> createIfChange i <*> createIfChange j) <|>
-    ((kvlist [], ) <$> createIfChange j) <|>
-    ((, kvlist []) <$> createIfChange i)
+  patch (TBRef (i, j)) = PTBRef (patch i) (patch j) []
+  applyUndo (TBRef (i, j)) (PTBRef k l e) = do
+    (s,su) <- applyUndo i k
+    (t,tu) <- applyUndo j l
+    (t',tu') <- applyUndo t e
+    return (TBRef (s,t'),PTBRef su tu tu')
+  createIfChange (PTBRef i j k ) = do
+    (s,t) <-
+      ((,) <$> createIfChange i <*> createIfChange j) <|>
+      ((kvlist [], ) <$> createIfChange j) <|>
+      ((, kvlist []) <$> createIfChange i)
+    t' <- applyIfChange t k
+    return $ TBRef (s,t')
 
 type PatchConstr k a
    = ( Show (Index a)
@@ -1049,7 +1055,7 @@ liftPRel ::
   -> [Rel k]
   -> PathFTB (TBIdx k b)
   -> PathFTB (PTBRef k b)
-liftPRel l rel f = liftA2 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f
+liftPRel l rel f = liftA3 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f (pure  [])
   where
     rels = catMaybes $ findPRel l <$> rel
 
@@ -1081,8 +1087,7 @@ recoverPFK ::
   -> PathFTB (PTBRef Key Showable)
   -> PathAttr Key Showable
 recoverPFK ori rel i =
-  PFK
-    rel
+  PFK rel
     (catMaybes $
      (\k ->
         PAttr k <$>
@@ -1090,6 +1095,5 @@ recoverPFK ori rel i =
          traverse
            (fmap patchvalue .
             L.find ((== Set.singleton (Inline k)) . index) . sourcePRef) $
-         i)) <$>
-     ori)
-    (fmap targetPRef i)
+              i)) <$> ori)
+    ((\v -> targetPRef  v <> targetPRefEdit v) <$> i)

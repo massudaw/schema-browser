@@ -57,7 +57,6 @@ patchFrom m  r   = do
   asyncPatches m (pure l)
   return l
 
-
 fullInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
 fullInsert k1 v1 = createRow' k1 <$> recInsert k1 v1
 
@@ -239,5 +238,3 @@ asyncPatches m i =
 tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
 tellPatches m i =
   modifyTable m [] =<< mapM (wrapModification m ) i
-
-

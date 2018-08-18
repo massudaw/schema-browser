@@ -5,6 +5,7 @@ import Types
 import Types.Index as G
 import Data.Ord
 import Data.Time
+import Control.Concurrent (ThreadId)
 import Types.Patch
 import Text
 import qualified Data.Functor.Contravariant as C
@@ -176,6 +177,7 @@ data DBRef k v =
          , idxVar :: TVar (IndexMetadata k v)
          , idxChan :: TChan (IndexMetadataPatch k v)
          , collectionState  :: TVar (TableRep k v)
+         , threadIds :: [ThreadId]
          }
 
 meta inf = fromMaybe inf (metaschema inf)

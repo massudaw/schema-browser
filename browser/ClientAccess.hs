@@ -34,7 +34,7 @@ addSchemaIO
      -> Dynamic ()
 addSchemaIO clientId minf inf six = do
   let cli = lookTable minf "clients"
-  dbmeta  <- prerefTable minf cli
+  dbmeta  <- liftIO $ prerefTable minf cli
   now <- liftIO getCurrentTime
   let new = addSchema clientId  now inf six
       mkPatch = PatchRow . liftPatch minf "clients"
@@ -56,7 +56,7 @@ addClientLogin inf =  transactionNoLog inf $ do
       row = ClientState Nothing (startTime now) []
       obj = liftTable' inf "clients" (encodeT row)
       m = lookMeta inf  "clients"
-    lift $ prerefTable inf (lookTable inf "clients")
+    liftIO $ prerefTable inf (lookTable inf "clients")
     liftIO $ print obj
     i <-  fullInsert m obj
     liftIO $ print "inserted"
@@ -83,7 +83,7 @@ trackTable minf cid table six ix = do
       mkPatch i =  PatchRow . liftPatch minf "clients" <$> i
       cli  = lookTable minf "clients"
       mcli = tableMeta cli
-  ref <- prerefTable minf cli
+  ref <- liftIO$ prerefTable minf cli
   transactionNoLog minf $
     patchFrom mcli (mkPatch cpatch)
   registerDynamic (void $ do

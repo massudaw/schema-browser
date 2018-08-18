@@ -424,8 +424,8 @@ indexPredIx (n@(RelAccess [Inline key] nt ) ,eq) r
     recPred i = error (show ("IndexPredIx",i))
 indexPredIx (n@(RelAccess nk nt ) ,eq) r
   = case  relLookup (Set.fromList nk) r of
-    Nothing -> Nothing
     Just i ->  PathForeign nk  <$> recPred i
+    Nothing -> Nothing
   where
     allRefs (TBRef (i,v))= Many . pure <$> (indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v)
     recPred (TB1 i ) = TipPath <$> allRefs i
