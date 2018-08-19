@@ -2,7 +2,10 @@
 module Utils where
 
 import Data.Aeson
+import Data.Unique
+import Data.Time
 import qualified Data.HashMap.Strict as HM
+import Control.Monad.IO.Class
 import Data.Interval as Interval
 import qualified Data.List as L
 import Data.Maybe
@@ -15,6 +18,17 @@ import GHC.Exts
 
 import qualified Data.Foldable as F
 import qualified Data.Map as M
+
+debugTime t f = do
+  un <- liftIO $ newUnique
+  t0 <- liftIO $ getCurrentTime
+  liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un)
+  v <- f
+  tf <- liftIO $ getCurrentTime
+  liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un) <> " - " <> show (diffUTCTime tf t0)
+  return v
+
+
 
 
 spanList :: ([a] -> Bool) -> [a] -> ([a], [a])

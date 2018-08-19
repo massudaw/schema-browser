@@ -16,6 +16,7 @@ module TP.QueryWidgets (
 import Data.Tuple
 import Debug.Trace
 import Safe
+import Data.Unique
 import qualified Data.Functor.Contravariant as C
 import Serializer
 import qualified Data.Aeson as A
@@ -656,7 +657,7 @@ crudUITable
 crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <-  ui $ loadItems inf table ftb =<< calmDiff preoldItems2
+  preoldItems <-  ui $ loadItems inf table ftb =<< calmT preoldItems2
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
@@ -685,11 +686,10 @@ dynCrudUITable
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 dynCrudUITable inf nav refs pmods table preoldItems = do
-  switchUILayout delta UI.div nav
+  switchUILayout (pure Keep) UI.div nav
       (do
         reftb@(_,gist,_) <- ui $ refTables inf   table
         crudUITable inf table reftb refs pmods (allFields inf table) preoldItems)
-    where delta = compactPlugins preoldItems pmods
 
 mergePatches i j = join $ (liftA2 applyIfChange i j)<|> (createIfChange <$> j) <|> Just i
 
@@ -1186,9 +1186,10 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
-        where
-          prim (Attr k v) = buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
-          buildPrim o rel = PrimColl (keyRef (_relTarget rel),[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
+    where
+      prim (Attr k v) =  buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
+      buildPrim o rel = PrimColl (keyRef (_relTarget rel),[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
+
 
 fkUITablePrim ::
   InformationSchema
@@ -1222,9 +1223,10 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         nonEmptyTBRef v@(TBRef n) = if  snd n  == mempty then Nothing else Just v
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
-      inipl <- mapM (ui . currentValue . facts) (snd <$>  plmods)
+
       let
-        inip = maybe Keep (Diff .head) $ nonEmpty $ catMaybes inipl
+        inipl = compactPlugins oldItems plmods
+      inip <- currentValue (facts inipl)
 
       (elsel, helsel) <- ui newEvent
       (elselTarget, helselTarget) <- ui newEvent
@@ -1232,9 +1234,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
 
 
       let
-        evsel = unionWith const elsel  (const Keep <$> rumors oldItems)
-        evseltarget = unionWith const elselTarget (const Keep <$> evsel)
-        evtarget = unionWith const eleditu (const Keep <$> evseltarget)
+        evsel = unionWith const elsel  (unionWith const (fmap sourcePRef <$> rumors inipl) (const Keep <$> rumors oldItems))
+        evseltarget = unionWith const elselTarget (fmap targetPRef <$> rumors inipl)
+        evtarget = unionWith const eleditu (fmap targetPRefEdit <$> rumors inipl)
 
       tsource <- ui $ stepperT (sourcePRef <$> inip) evsel
       tseltarget <- ui $ stepperT (targetPRef <$> inip) evseltarget
@@ -1246,6 +1248,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       nav <- openClose dblClickT
       let
         merge :: Editor (TBIdx CoreKey Showable ) -> Editor (TBIdx CoreKey Showable) -> Editor (TBIdx CoreKey Showable) -> Editor (PTBRef CoreKey Showable)
+        -- merge i j k | traceShow (i,j,k) False = undefined -- if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
         merge (Diff i) (Diff j) (Diff k) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
         merge (Diff i) (Diff j) Keep = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j [])
         merge Keep (Diff i) Keep = Diff $ PTBRef [] i []
@@ -1264,21 +1267,26 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         selector False = do
           ui $ onEventDyn
             ((,,) <$> facts tsource <*> facts oldItems <@> rumors (fmap sourcePRef <$> sel))
-            (\(oldsel,initial,newdiff) -> do
+            (\(oldsel,initial,newdiff) ->
               -- if newdiff is different than old diff update
-              when (oldsel /= newdiff) $ do
+              when (oldsel /= newdiff) $ debugTime "selector False" $ do
                 let newsel = (join $ applyIfChange (fst .unTBRef <$> initial) newdiff)
                 -- Just fetch if the arguments for all relations are present
                 out <- if (maybe False ((L.length rel ==) .kvSize) newsel )
                   then do
-                    pred <- currentValue (facts predicate)
+
+                    let
+                      pred = (buildPredicate rel . unkvlist) <$> newsel
                     reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
                     TableRep (_,s,g) <- currentValue (facts gist)
                     return $ searchGist rel targetTable  g s =<< newsel
                   else do
                     return Nothing
-                liftIO $ void $ traverse helselTarget (diff (snd .unTBRef<$> initial) out)
+                -- liftIO $ print ("SourceE",tableName targetTable,oldsel,newdiff,(fst .unTBRef <$> initial),out)
                 liftIO $ helsel newdiff
+                liftIO $ void $ traverse (\i -> do
+                  -- print ("TargetE",tableName targetTable,i)
+                  helselTarget i ) (diff (snd .unTBRef<$> initial) out)
                 return ())
           pan <- UI.div
             # set UI.class_ "col-xs-11 fixed-label"
@@ -1348,20 +1356,20 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
             output = diff' <$> oldItems <*> fksel
           ui $ onEventIO (rumors output)
-            (\i -> do
+            (\i -> debugTime "selector True" $ do
               when (not (L.null reflectRels)) $ do
                 helsel (filterReflect.sourcePRef <$> i)
               helselTarget $ fmap targetPRef i)
           return [getElement itemList]
 
         edit =  do
-          tdi <- ui $  calmDiff $ fmap join $ applyIfChange <$> (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
+          tdi <- ui $  calmT $ fmap join $ applyIfChange <$> (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
           let
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
+            swapKey k = maybe k _relTarget (L.find ((==k)._relOrigin) rel)
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
             replaceKeyP = firstPatchAttr swapKey
-            swapKey k = maybe k _relTarget (L.find ((==k)._relOrigin) rel)
 
             staticold :: ColumnTidings
             staticold = fmap (\(i,j) -> (patch <$>  liftA2 apply  (projectValue j) (projectEdit i),pure Nothing)) . M.mapKeys (S.map (fmap swapKey)) $ M.filterWithKey (\k _ -> all (\i ->  not (isInlineRel i ) &&  (_relOperator i == Equals)) k) nonInjRefs
@@ -1382,7 +1390,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             when (isNothing selt && fmap filterReflect old /= fmap filterReflect s && not (L.null reflectRels)) $ do
               -- liftIO $ print ("SourceE",tableName targetTable,fmap filterReflect old ,fmap filterReflect (fmap sourcePRef i) )
               helsel $ fmap (filterReflect) s
-            when (olde /= i) $ do
+            when (olde /= i) $ debugTime ("edit"  <> show (G.getIndex (tableMeta targetTable ) <$> (join (applyIfChange selt i))))$ do
               -- liftIO $ print ("TargetE",tableName targetTable,olde,fmap targetPRef i)
               heleditu  i)
           return (getElement nav,[celem],max (6,1) <$> layout)
@@ -1414,15 +1422,18 @@ fkUITableGen ::
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
-  = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target) constr nonInjRefs) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj) ) (fmap liftFK <$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
+  = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj) ) (fmap liftFK<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
+    liftRelation (Rel k (AnyOp i) t) = Rel k i t
+    liftRelation o = o
     replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ onDiff  ( fmap (\m -> PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v) ) . S.map _relOrigin . index) .  nonRefPatch) (const Nothing)<$> fst j )<$> F.toList i ) <$> M.toList nonInjRefs
       where patchChange (PAttr i k ) = fmap (const []) k
+            -- mergeOrCreate i j | traceShow ("mergeOrCreate",i,"=============",j) False = undefined
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
     emptyFKT = FKT  (kvlist []) rel (const (kvlist []) <$> fkref)
     mergeRef (FKT r rel v) i = FKT (foldl' addAttrO r (nonRefTB i)) rel v
-    addAttrO  i v = if isNothing (unSOptional (_tbattr v)) then i else addAttr v i
+    addAttrO  i v = if isNothing (unSOptional (_tbattr v)) then i else  (addAttr v i)
     (targetSchema,target) = findRefTableKey table rel
     inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
     setattr = keyAttr <$> unkvlist ifk

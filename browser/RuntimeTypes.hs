@@ -345,7 +345,7 @@ typecheck f a = case f a of
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k]) -> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK  $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
-        searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g) <$> mergeSIdxs
+        searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g)  <$> mergeSIdxs
         notPK = WherePredicate <$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
         mergeSIdxs = L.foldl1' S.intersection <$> nonEmpty (catMaybes $ fmap (S.unions . fmap (M.keysSet.leafValue)). searchPK b <$> (M.toList s))

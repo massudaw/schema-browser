@@ -347,7 +347,7 @@ createTable fixed m = do
 
 -- TODO: Could we derive completeness information from bounds
 -- or have some negative information about explored empty bounds
-pageTable method table page fixed tbf = do
+pageTable method table page fixed tbf = debugTime "pageTable" $ do
     inf <- askInf
     let
       m = tableMeta table
@@ -360,7 +360,7 @@ pageTable method table page fixed tbf = do
       fixedChan = idxChan dbvar
       pageidx =  (fromMaybe 0 page +1) * pagesize
       hasIndex = M.lookup fixed fixedmap
-      readNew sq l = do
+      readNew sq l =  do
          let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
              (_,mp) = fromMaybe (maxBound,M.empty ) hasIndex
          (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf
@@ -399,7 +399,7 @@ pageTable method table page fixed tbf = do
           when (sq < G.size reso) $ do
             modifyTable (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
             liftIO $print (tableName table,fixed,G.keys reso)
-          liftIO $ putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
+          liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
           return ((max (G.size reso) sq,idx), reso)
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)

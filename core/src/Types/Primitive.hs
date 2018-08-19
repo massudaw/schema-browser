@@ -731,8 +731,54 @@ inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
 attrT :: (a, FTB b) -> TB a b
 attrT (i, j) = Attr i j
 
+-- relLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (FTB (TBRef k a))
+relLookup rel i = liftFK <$> kvLookup rel i
+
+--liftFK :: Ord k => Column k b -> FTB (TBRef k b)
+liftFK (FKT l rel i) = TBRef <$> liftRelFK (unkvlist l) rel i
+
+merge :: (a -> b -> c) -> (b -> c) -> (a -> c) -> FTB a -> FTB b -> FTB c
+merge f g h (LeftTB1 i) (LeftTB1 j) =
+  LeftTB1 $ (merge f g h <$> i <*> j) <|> (fmap h <$> i) <|> (fmap g <$> j)
+merge f g h (ArrayTB1 i) (ArrayTB1 j) =
+  ArrayTB1 $
+  Non.fromList $
+  F.toList ziped  <>
+  (fmap g <$> (Non.drop (Non.length ziped) j)) <>
+  (fmap h <$> (Non.drop (Non.length ziped) i))
+  where
+    ziped = Non.zipWith (merge f g h) i j
+merge f g h (TB1 i) (TB1 j) = TB1 $ f i j
+merge f g h (LeftTB1 i) j = LeftTB1 $ ((\i -> merge f g h i j) <$> i) <|> (Just (g <$> j))
+merge f g h i (LeftTB1 j) = LeftTB1 $ ((\j -> merge f g h i j) <$> j) <|> (Just (h <$> i))
+merge f g h (ArrayTB1 i) j = ArrayTB1 $ (\i -> merge f g h i j) <$> i
+merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
+
+
+liftRelFK l rel f =
+  merge
+    (,)
+    (kvlist [], )
+    (, kvlist [])
+    (kvlist <$> F.foldl' (flip (merge (:) id pure)) (defaultTy ty) rels)
+    f
+  where
+    defaultTy :: [KTypePrim] -> FTB [w]
+    defaultTy l  = foldl (flip (.)) TB1 (match  <$> l) $ []
+    match KArray  = ArrayTB1 . Non.fromList . L.replicate 50
+    match KOptional = LeftTB1 . Just
+    ty  = foldl1 mergeOpt (inferTy <$> rel)
+    rels = catMaybes $ findRel l <$> rel
+findRel l (Rel k op j) = do
+  Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) l
+  return $ fmap (Attr k . TB1) v
+
+
+inferTy (Rel i (AnyOp v) k ) = KArray : inferTy (Rel i v k)
+inferTy _  = []
+
 -- mergeFKRef  $ keyType . _relOrigin <$>rel
-mergeFKRel :: [Rel CoreKey] -> KType [(Rel CoreKey, KType CorePrim)]
+mergeFKRel :: [Rel CoreKey ] -> KType [(Rel CoreKey , KType CorePrim)]
 mergeFKRel ls =
   Primitive
     (F.foldr mergeRel [] ((\i -> _keyFunc $ keyType (_relOrigin i)) <$> ls))
@@ -747,20 +793,21 @@ mergeFKRel ls =
     mergeRel o (KArray:kl) = KArray : mergeRel o kl
     mergeRel i j = error ("mergeOpt" <> show (i, j))
 
+
 mergeFKRef :: [KType a] -> KType [a]
 mergeFKRef ls = Primitive (foldl1 mergeOpt (_keyFunc <$> ls)) (_keyAtom <$> ls)
-  where
-    mergeOpt (KOptional:i) (KOptional:j) = KOptional : (mergeOpt i j)
-    mergeOpt (KOptional:i) j = KOptional : mergeOpt i j
-    mergeOpt i (KOptional:j) = KOptional : mergeOpt i j
-    mergeOpt (KArray:i) (KArray:j) = KArray : mergeOpt i j
-    mergeOpt (KArray:i) j = KArray : mergeOpt i j
-    mergeOpt i (KArray:j) = KArray : mergeOpt i j
-    mergeOpt (KInterval:i) (KInterval:j) = KInterval : mergeOpt i j
-    mergeOpt (KInterval:i) j = KInterval : mergeOpt i j
-    mergeOpt i (KInterval:j) = KInterval : mergeOpt i j
-    mergeOpt [] [] = []
-    mergeOpt i j = error ("mergeOpt" <> show (i, j))
+
+mergeOpt (KOptional:i) (KOptional:j) = KOptional : (mergeOpt i j)
+mergeOpt (KOptional:i) j = KOptional : mergeOpt i j
+mergeOpt i (KOptional:j) = KOptional : mergeOpt i j
+mergeOpt (KArray:i) (KArray:j) = KArray : mergeOpt i j
+mergeOpt (KArray:i) j = KArray : mergeOpt i j
+mergeOpt i (KArray:j) = KArray : mergeOpt i j
+mergeOpt (KInterval:i) (KInterval:j) = KInterval : mergeOpt i j
+mergeOpt (KInterval:i) j = KInterval : mergeOpt i j
+mergeOpt i (KInterval:j) = KInterval : mergeOpt i j
+mergeOpt [] [] = []
+mergeOpt i j = error ("mergeOpt" <> show (i, j))
 
 relType :: Show a => Rel (FKey (KType a)) -> KType a
 relType (Inline k) = keyType k

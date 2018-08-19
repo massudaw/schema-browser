@@ -482,7 +482,7 @@ queryCheck (WherePredicate b ,pk)
    isPK = fmap WherePredicate $ splitIndexPK b pk
 
 projectIndex :: (Show k,Ord k) => [k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
-projectIndex pk l = G.queryL (mapPredicate (justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk) l)
+projectIndex pk l = G.queryL ( mapPredicate (justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk) l)
 
 filterIndex l =  L.filter (flip checkPred l . leafValue)
 filterRows l =  L.filter (flip checkPred l )

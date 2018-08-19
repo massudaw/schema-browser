@@ -39,7 +39,6 @@ module Types.Common
   , trazipWithKV
   , traTable
   , keyattr
-  , liftFK
   , recoverFK
   , kvFind
   , kvFilter
@@ -72,7 +71,6 @@ module Types.Common
   , kvLookup
   , refLookup
   , recLookup
-  , relLookup
   , attrLookup
   , unkvlist
   , sortedFields
@@ -584,21 +582,6 @@ alterFTB f (ArrayTB1 i) = ArrayTB1 <$> traverse (alterFTB f) i
 alterFTB f (LeftTB1 i) = LeftTB1 <$> traverse (alterFTB f) i
 alterFTB f (IntervalTB1 i) = IntervalTB1 <$> traverse (alterFTB f) i
 
-liftFK :: Ord k => Column k b -> FTB (TBRef k b)
-liftFK (FKT l rel i) = TBRef <$> liftRel (unkvlist l) rel i
-
-liftRel ::
-     (Ord k) => [Column k b] -> [Rel k] -> FTB (KV k b) -> FTB (KV k b, KV k b)
-liftRel l rel f =
-  merge
-    (,)
-    (kvlist [], )
-    (, kvlist [])
-    (kvlist <$> F.foldl' (flip (merge (:) id pure)) (TB1 []) rels)
-    f
-  where
-    rels = catMaybes $ findRel l <$> rel
-
 addDefault :: Ord d => TB d a -> TB d b
 addDefault = def
   where
@@ -625,27 +608,8 @@ recoverFK ori rel i
     rel
     (fmap (snd .unTBRef ) i)
 
-merge :: (a -> b -> c) -> (b -> c) -> (a -> c) -> FTB a -> FTB b -> FTB c
-merge f g h (LeftTB1 i) (LeftTB1 j) =
-  LeftTB1 $ (merge f g h <$> i <*> j) <|> (fmap h <$> i) <|> (fmap g <$> j)
-merge f g h (ArrayTB1 i) (ArrayTB1 j) =
-  ArrayTB1 $
-  Non.fromList $
-  F.toList (Non.zipWith (merge f g h) i j) <>
-  (fmap g <$> (Non.drop (Non.length i) j)) <>
-  (fmap h <$> (Non.drop (Non.length j) i))
-merge f g h (TB1 i) (TB1 j) = TB1 $ f i j
-merge f g h (LeftTB1 i) j = LeftTB1 $ (\i -> merge f g h i j) <$> i
-merge f g h i (LeftTB1 j) = LeftTB1 $ (\j -> merge f g h i j) <$> j
-merge f g h (ArrayTB1 i) j = ArrayTB1 $ (\i -> merge f g h i j) <$> i
-merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
-
 instance IsString i => IsString (Rel i ) where
   fromString i = Inline (fromString i)
-
-findRel l (Rel k op j) = do
-  Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) l
-  return $ fmap (Attr k . TB1) v
 
 
 restrictTable :: Ord k => (TB k a  -> [TB k a]) -> KV k a -> KV k a
@@ -768,8 +732,6 @@ kvLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (TB k a)
 -- kvLookup rel  (KV i) = Map.lookup rel i
 kvLookup rel (KV i) = recoverAttr' <$> PM.lookup (relSort rel) i
 
-relLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (FTB (TBRef k a))
-relLookup rel i = liftFK <$> kvLookup rel i
 
 refLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (FTB (KV k a))
 -- refLookup rel (KV i) = _aref <$> Map.lookup rel i
@@ -792,6 +754,8 @@ unAttr (Attr _ i) = i
 unAttr (Fun _ _ i) = i
 unAttr i = error $ "cant find attr" <> (show i)
 
+-- TODO: Remove special case for atoms
+unArray i@(TB1 _) = Non.fromList $ replicate 10 i
 unArray (ArrayTB1 s) = s
 unArray o = error $ "unArray no pattern " <> show o
 
