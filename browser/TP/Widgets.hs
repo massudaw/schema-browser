@@ -685,7 +685,8 @@ switchManyUI  bool map = do
       case M.lookup x map of
         Just i -> do
           el <- i
-          onChanges (facts (triding el)) (liftIO . h)
+          liftIO . h =<< currentValue (facts (triding el))
+          ui $ onEventIO (rumors (triding el)) h
           return el
         Nothing -> error ("no ix " ++ (show x))
 
@@ -710,8 +711,10 @@ switchManyLayout  bool map = do
       case M.lookup x map of
         Just i -> do
           el <- i
-          onChanges (facts (triding el )) (liftIO . h)
-          onChanges (facts (getLayout el)) (liftIO . hl)
+          liftIO . h =<< currentValue (facts (triding el))
+          ui $ onEventIO (rumors (triding el)) h
+          liftIO . hl =<< currentValue (facts (getLayout el))
+          ui $ onEventIO (rumors (getLayout el)) hl
           return el
         Nothing -> error ("no ix " ++ (show x))
 
@@ -720,8 +723,7 @@ switchManyLayout  bool map = do
   currentLayout <- currentValue (facts $ getLayout currentEl)
   currentResult <- currentValue (facts $ triding currentEl)
   out <- UI.div # sink root (getElement <$> facts els)
-  let ev = evp
-  t <- ui $ stepperT currentResult ev
+  t <- ui $ stepperT currentResult evp
   l <- ui $ stepperT currentLayout levp
   return (LayoutWidget t out l)
 

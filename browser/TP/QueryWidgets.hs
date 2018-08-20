@@ -15,6 +15,7 @@ module TP.QueryWidgets (
 
 import Data.Tuple
 import Debug.Trace
+import Control.Concurrent
 import Safe
 import Data.Unique
 import qualified Data.Functor.Contravariant as C
@@ -279,12 +280,12 @@ labelCaseDiff inf a o wid = do
       ltype <- UI.div
         # set text (show $ keyType . _relOrigin <$> keyattr  a)
       ldelta <- UI.div
-        # sinkDiff text  (show <$> wid)
+        # sink text  (show <$> facts wid)
       UI.div # set children [lref,ltype,ldelta]
   hl <- detailsLabel (set UI.text (attributeLabel a) . (>>= paintEditDiff o wid)) dynShow
   return $ TrivialWidget wid hl
 
-paintEditDiff o i e = element e # sinkDiff UI.style ( st <$> (cond <$> o <*> i ))
+paintEditDiff o i e = element e # sink UI.style ( facts $ st <$> (cond <$> o <*> i ))
   where cond _ Delete = ("red","white")
         cond Nothing Keep = ("purple","white")
         cond (Just i)  Keep = ("black","white")
@@ -664,8 +665,8 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   errors <- printErrors e
-  debug <- debugConsole   preoldItems tablebdiff
-  out <- UI.div # set children [listBody,panelItems,errors,debug]
+  --debug <- debugConsole   preoldItems tablebdiff
+  out <- UI.div # set children [listBody,panelItems,errors]-- ,debug]
   return $ LayoutWidget tablebdiff out layout
 
 openClose open = do
@@ -713,7 +714,7 @@ insertCommand lbox inf table inscrudp inscrud  authorize gist = do
     insertB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
         # set children [insertI]
-        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
+        # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
     cliIns <- UI.click insertB
     let  crudIns j  =  transaction inf (fullInsert m j)
     diffIns <- ui $ mapEventDyn catchEd $ fmap crudIns <$> facts inscrud <@ unionWith const cliIns (filterKey  (facts insertEnabled) altI )
@@ -724,12 +725,14 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
     let
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
-      crudEdi i j =  transaction inf $ fullEdit m i j
+      crudEdi i j =  do
+        liftIO $print (diff i j)
+        transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
         # set children [editI]
-        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> editEnabled)
+        # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> editEnabled)
     -- Edit when any persistent field has changed
     cliEdit <- UI.click editB
     diffEdi <- ui $ mapEventDyn catchEd $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
@@ -745,7 +748,7 @@ deleteCommand lbox inf table oldItemsi authorize gist = do
     deleteB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
         # set children [deleteI]
-        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "DELETE" `elem`) i && j)) <$>authorize <*> deleteEnabled)
+        # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "DELETE" `elem`) i && j)) <$>authorize <*> deleteEnabled)
 
     altD <- onAltO lbox
     cliDel <- UI.click deleteB
@@ -765,7 +768,7 @@ mergeCommand lbox inf table inscrudp inscrud  authorize gist = do
     mergeB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
         # set UI.children [mergeI]
-        # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> mergeEnabled)
+        # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> mergeEnabled)
     cliMerge <- UI.click mergeB
     diffMerge <- ui $ mapEventDyn catchEd $ liftA2 crudMerge <$> facts inscrud <*> fmap Just (facts gist) <@ cliMerge
     return (diffMerge,mergeB)
@@ -835,6 +838,7 @@ printErrors diffEvs = do
   return errors
 
 compactPlugins  valix plix= fromMaybe Keep .safeHead . compact <$> (F.foldl' (liftA2 (flip (:)))  (pure .const Keep <$> valix)  (fmap (maybe Keep Diff) .snd<$> plix))
+compactPlugins'  plix= fromMaybe Keep .safeHead . compact <$> (F.foldl' (liftA2 (flip (:)))  (pure [] )  (fmap (maybe Keep Diff) .snd<$> plix))
 
 dynHandlerPatch
   :: (Compact (Index a1),Patch a1,Eq (Index a1),Show (Index a1),Show a1,Eq a1)
@@ -927,13 +931,14 @@ buildUIDiff f (Primitive l prim) = go l
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
             widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
             let
-              widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets) )
+              widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets))
               -- [Note] Array diff must be applied in the right order
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
-              bres = reduceDiffList  arraySize <$> offsetT <*>  widgets2 <*> foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)
+              bres = (\i k j-> reduceDiffList  arraySize  i j k) <$> offsetT <*>   (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <*> widgets2
+              -- bres2 = (\i j k -> reduceDiffList  arraySize  k i j )<$>  facts widgets2 <*> facts (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <@> rumors offsetT
             pini <- currentValue (facts bres)
-            bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres))
+            bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres)) -- (unionWith (.) (const <$> rumors bres) (const <$> bres2)))
             element offsetDiv # set children (fmap getElement widgets)
             size <- ui $ calmT (maybe 0 ((+ negate 1).Non.length .unArray)  . join <$> (applyIfChange <$> ctdi' <*> bres))
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
@@ -974,7 +979,7 @@ buildUIDiff f (Primitive l prim) = go l
               replaceL   i h =  fmap (PInter True  . (,h). Interval.Finite) i
               replaceU  Delete   h = Diff $ PInter False (Interval.PosInf,h)
               replaceU  i  h =  fmap (PInter False . (,h).Interval.Finite) i
-              output = (\i j -> reduceDiff [i,j])<$> (replaceL <$>  triding inf <*> triding lbd ) <*> (replaceU <$> triding sup <*> triding ubd)
+            output <-  ui $ calmT $ (\i j -> reduceDiff [i,j])<$> (replaceL <$>  triding inf <*> triding lbd ) <*> (replaceU <$> triding sup <*> triding ubd)
             return $ LayoutWidget output  subcomposed  (horizontalL  <$> getLayout inf <*> getLayout sup)
 
 horizontalL (i,j) (a,b) =  (i + a ,max j b)
@@ -1054,7 +1059,7 @@ buildPrim fm tdi i
        tdi2 <- ui $ stepperT vi tdie
        let fty = ("iframe",UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("max-height","300px")])
 
-       f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
+       f <- pdfFrame fty (facts tdi2) # sink UI.style (noneShow . isJust <$> facts tdi2)
        fd <- UI.div # set UI.style [("display","inline-flex")] # set children [i]
        res <- UI.div # set children [fd,f]
        return (TrivialWidget tdi2 res)
@@ -1120,7 +1125,7 @@ buildPrim fm tdi i
                "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("max-height","300px")])
-           f <- fty (facts tdi2 ) # sinkDiff UI.style (noneShow. isJust <$> tdi2)
+           f <- fty (facts tdi2 ) # sink UI.style (noneShow. isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
            valChange <- UI.valueChange f
@@ -1129,7 +1134,7 @@ buildPrim fm tdi i
      PColor -> do
         let f = facts tdi
         v <- currentValue f
-        inputUI <- UI.input # set UI.class_ "jscolor" # sink0 UI.value (maybe "FFFFFF" renderPrim <$> f)# set UI.style [("width","100%")]
+        inputUI <- UI.input # set UI.class_ "jscolor" # sink UI.value (maybe "FFFFFF" renderPrim <$> f)# set UI.style [("width","100%")]
         onCE <- UI.onChangeE inputUI
         let pke = unionWith const (readPrim i <$> onCE) (rumors tdi)
         pkt <- ui $ stepperT v  pke
@@ -1225,17 +1230,16 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
 
 
       let
-        inipl = compactPlugins oldItems plmods
+        inipl = diff' <$>  oldItems <*> ftdi -- fmap traceShowId <$> compactPlugins' plmods
       inip <- currentValue (facts inipl)
 
       (elsel, helsel) <- ui newEvent
       (elselTarget, helselTarget) <- ui newEvent
       (eleditu, heleditu) <- ui newEvent
 
-
       let
-        evsel = unionWith const elsel  (unionWith const (fmap sourcePRef <$> rumors inipl) (const Keep <$> rumors oldItems))
-        evseltarget = unionWith const elselTarget (fmap targetPRef <$> rumors inipl)
+        evsel = unionWith const elsel (fmap sourcePRef <$> rumors inipl) -- (unionWith const (fmap sourcePRef <$> rumors inipl) (const Keep <$> rumors oldItems))
+        evseltarget = unionWith const elselTarget (fmap targetPRef <$> rumors inipl) -- (unionWith const (fmap targetPRef <$> rumors inipl)(const Keep <$> rumors oldItems))
         evtarget = unionWith const eleditu (fmap targetPRefEdit <$> rumors inipl)
 
       tsource <- ui $ stepperT (sourcePRef <$> inip) evsel
@@ -1263,35 +1267,37 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         refs :: Tidings (Maybe [TB Key Showable])
         refs =  fmap (unkvlist . filterNotReflect . fst . unTBRef) <$> ftdi
         predicate = fmap (buildPredicate rel) <$> refs
-        sel = liftA2 diff' oldItems ftdi
+        matches  rel tb = case tb of
+           Just (TBRef (s,t)) ->  kvSize s == L.length rel && kvSize t > 0
+           Nothing -> False
         selector False = do
           ui $ onEventDyn
-            ((,,) <$> facts tsource <*> facts oldItems <@> rumors (fmap sourcePRef <$> sel))
-            (\(oldsel,initial,newdiff) ->
+            ((,,) <$> facts tsource <*> facts oldItems <@> rumors inipl)
+            (\(oldsel,initial,tbdiff) -> do
+              let newdiff = fmap sourcePRef tbdiff
+                  newtbsel = join $ applyIfChange initial tbdiff
+                  newsel = fst .unTBRef <$> newtbsel
+              -- liftIO $ print (oldsel /= newdiff , not (matches rel newtbsel))
               -- if newdiff is different than old diff update
-              when (oldsel /= newdiff) $ debugTime "selector False" $ do
-                let newsel = (join $ applyIfChange (fst .unTBRef <$> initial) newdiff)
+              when (oldsel /= newdiff  ) $ debugTime ("selector False: " <> show (oldsel /= newdiff , not (matches rel newtbsel))) $ do
                 -- Just fetch if the arguments for all relations are present
-                out <- if (maybe False ((L.length rel ==) .kvSize) newsel )
-                  then do
-
-                    let
-                      pred = (buildPredicate rel . unkvlist) <$> newsel
-                    reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-                    TableRep (_,s,g) <- currentValue (facts gist)
-                    return $ searchGist rel targetTable  g s =<< newsel
-                  else do
-                    return Nothing
-                -- liftIO $ print ("SourceE",tableName targetTable,oldsel,newdiff,(fst .unTBRef <$> initial),out)
                 liftIO $ helsel newdiff
-                liftIO $ void $ traverse (\i -> do
-                  -- print ("TargetE",tableName targetTable,i)
-                  helselTarget i ) (diff (snd .unTBRef<$> initial) out)
+                when (maybe False ((L.length rel ==) .kvSize) newsel ) .void$
+                  do
+                    let
+                      pred = buildPredicate rel . unkvlist <$> newsel
+                    reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
+                    flip mapTidingsDyn gist $ \(TableRep (_,s,g)) -> do
+                      let out = searchGist rel targetTable  g s =<< newsel
+                      liftIO $ void $ traverse (\i -> do
+                        -- print ("TargetE",tableName targetTable,i)
+                        helselTarget i ) (diff (snd .unTBRef<$> initial) out)
+                -- liftIO $ print ("SourceE",tableName targetTable,oldsel,newdiff,(fst .unTBRef <$> initial),out)
                 return ())
           pan <- UI.div
             # set UI.class_ "col-xs-11 fixed-label"
             # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","26px")]
-            # sinkDiff  text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
+            # sink text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (facts $ fmap join $ applyIfChange <$>  oldItems <*>  tdfk))
           panClick <- UI.click pan
           ui $ onEventIO panClick (\ _ -> hSelector True)
           (nav,celem,layout) <- edit
@@ -1305,7 +1311,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         selector True = do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-          let newSel = fmap (justError "fail apply") $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*>(fmap sourcePRef <$> sel)
+          let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*> (fmap sourcePRef <$> inipl)
           tdi <- ui $ calmT ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<< v) <$> gist  <*> newSel)
           metaMap <- mapWidgetMeta inf
           cliZone <- jsTimeZone
@@ -1387,7 +1393,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             -- 3. new diff is different than current
             let new = (reflectFK reflectRels =<< join (applyIfChange selt i)) <|> serialRef
                 s = diff' (fst . unTBRef<$> init) new
-            when (isNothing selt && fmap filterReflect old /= fmap filterReflect s && not (L.null reflectRels)) $ do
+            when (isNothing selt && fmap filterReflect old /= fmap filterReflect s && not (L.null reflectRels)) $ debugTime "reflectSel" $ do
               -- liftIO $ print ("SourceE",tableName targetTable,fmap filterReflect old ,fmap filterReflect (fmap sourcePRef i) )
               helsel $ fmap (filterReflect) s
             when (olde /= i) $ debugTime ("edit"  <> show (G.getIndex (tableMeta targetTable ) <$> (join (applyIfChange selt i))))$ do
@@ -1444,7 +1450,7 @@ reduceTable l
   | L.any isDelete l = Delete
   | otherwise  = (\i -> if L.null i then Keep else Diff i) . filterDiff $ l
 
-pdfFrame (elem,sr , call,st) pdf = mkElement elem UI.# sink0 sr (call <$> pdf)  UI.# UI.set style st
+pdfFrame (elem,sr , call,st) pdf = mkElement elem UI.# sink sr (call <$> pdf)  UI.# UI.set style st
 
 metaTable
   :: InformationSchemaKV Key Showable

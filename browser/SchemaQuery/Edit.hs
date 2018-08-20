@@ -23,6 +23,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Time
 import qualified NonEmpty as Non
+import Debug.Trace
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -195,7 +196,7 @@ tbEditRef fun@(funi,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse (fmap funo 
     interp (TBNoop l) = return l
     interp (TBInsert l) = insert m2  l
     interp (TBUpdate ol l) = edit m2  ol l
-    comparison ol l =  if G.getIndex m2 inol  == G.getIndex m2 inl then TBUpdate ol l else TBInsert l
+    comparison ol l = if G.getIndex m2 inol  == G.getIndex m2 inl then TBUpdate ol l else TBInsert l
       where
         inol = funi ol
         inl = funi l

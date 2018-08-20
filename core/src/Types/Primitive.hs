@@ -754,9 +754,12 @@ merge f g h i (LeftTB1 j) = LeftTB1 $ ((\j -> merge f g h i j) <$> j) <|> (Just 
 merge f g h (ArrayTB1 i) j = ArrayTB1 $ (\i -> merge f g h i j) <$> i
 merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
 
+filterTB1 (ArrayTB1 l )  = ArrayTB1 . Non.fromList <$> nonEmpty (Non.filter (\(TB1 i ) -> not $ kvNull (fst i) &&  kvNull (snd i)) l)
+filterTB1 (LeftTB1 l) = Just . LeftTB1 . join $ filterTB1 <$> l
+filterTB1 i = Just i
 
 liftRelFK l rel f =
-  merge
+  justError "liftRelFK" $ filterTB1 $ merge
     (,)
     (kvlist [], )
     (, kvlist [])
