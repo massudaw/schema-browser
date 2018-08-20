@@ -217,10 +217,10 @@ foldCompact f (x:xs) =
 instance (Compact i) => Compact (Editor i) where
   compact l = [F.foldl' pred Keep l]
     where
-      pred i Keep = i
-      pred i Delete = Keep
       pred (Diff i) (Diff j) = maybe Keep Diff $ safeHead $ compact [i, j]
-      pred _ (Diff i) = (maybe Keep Diff $ safeHead $compact [i])
+      pred _ (Diff i) = (maybe Keep Diff $ safeHead $ compact [i])
+      pred _ Delete = Delete
+      pred i Keep = i
 
 firstPatchRow ::
      (Ord a, Ord k, Ord (Index a), Ord j)
@@ -553,7 +553,7 @@ instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
 
 
 instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
-  compact i = zipWith3 PTBRef f s  t
+  compact i =  zipWith3 PTBRef f s  (maybe (pure []) id $ nonEmpty t)
     where
       f = compact (sourcePRef <$> i)
       s = compact (targetPRef <$> i)
@@ -572,14 +572,13 @@ instance Patch (TBRef Key Showable) where
     (s,su) <- applyUndo i k
     (t,tu) <- applyUndo j l
     (t',tu') <- applyUndo t e
-    return (TBRef (s,t'),PTBRef su tu tu')
+    if kvNull s  || kvNull t' then (Left "unconstrained" ) else Right (TBRef (s,t'),PTBRef su tu tu')
   createIfChange (PTBRef i j k ) = do
     (s,t) <-
       ((,) <$> createIfChange i <*> createIfChange j) <|>
-      ((kvlist [], ) <$> createIfChange j) <|>
       ((, kvlist []) <$> createIfChange i)
     t' <- applyIfChange t k
-    return $ TBRef (s,t')
+    if kvNull s  || kvNull t then Nothing else Just (TBRef (s,t'))
 
 type PatchConstr k a
    = ( Show (Index a)
@@ -1058,6 +1057,12 @@ liftPRel ::
 liftPRel l rel f = liftA3 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f (pure  [])
   where
     rels = catMaybes $ findPRel l <$> rel
+
+filterPFK (PatchSet l )  = PatchSet . Non.fromList <$> nonEmpty (Non.filter (isJust . filterPFK) l)
+filterPFK (POpt l) = Just . POpt. join $ filterPFK <$> l
+filterPFK (PIdx ix l) = fmap (PIdx  ix) . sequenceA $ filterPFK <$> l
+filterPFK (PAtom p@(PTBRef i j k) )= if not $ L.null i &&  L.null j && L.null k then Just (PAtom p) else Nothing
+
 
 recoverRel ::
      Eq k => PathFTB ([b], TBIdx k b) -> ([PathFTB b], PathFTB (TBIdx k b))

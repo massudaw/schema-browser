@@ -177,7 +177,7 @@ pluginUI inf oldItems pl@(idp,FPlugins n t p) =
       cliHeader <- UI.click headerP
       let ecv = const <$> facts tdInput <@ cliHeader
       ini <- currentValue (facts tdInput)
-      let ecv1 = unionWith const (const (const Nothing) <$> rumors tdInput ) ecv
+      let ecv1 = unionWith const (const (const Nothing) <$> rumors tdInput) ecv
       bcv <- ui $ accumT ini ecv1
       pgOut  <- ui $mapTEventDyn (liftIO . execute inf t pl)  bcv
       return (headerP, (out,  pgOut ))
@@ -321,7 +321,7 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
   let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic v)) Just ) preoldItems  ) ( keyStatic i)
       tdiv = fmap _tbattr <$> oldItems
       insertT = fmap (PAttr i)
-  fmap insertT <$> buildUIDiff (buildPrimitive (keyModifier i)) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
+  fmap insertT <$> buildUIDiff (buildPrimitive (keyModifier i)) (const True) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search (Inline t) = fmap (fmap _tbattr) . recoverValue . snd $ justError ("cant find: " <> show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
@@ -332,7 +332,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
     liftKey = fmap (liftType (_keyFunc $ keyType i).join)
 
   funinp <-  liftKey <$> traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
-  ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
+  ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) [] funinp
   return $ LayoutWidget (diff' <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev) (getLayout ev)
 
 
@@ -485,7 +485,7 @@ batchUITable inf table reftb@(_, gist ,tref) refs pmods ftb  preoldItems2 = do
       unIndexEl ix =  index ix <$> preoldItems
       dyn = dynHandlerPatch  (\ix valix plix ->do
         (listBody,tablebdiff) <- rowTableDiff inf table constraints refs pmods ftb ix valix
-        return $ LayoutWidget tablebdiff listBody (pure (12,0))) unIndexEl (\ix -> [])
+        return $ LayoutWidget tablebdiff listBody (pure (12,0))) unIndexEl (\ix -> []) (const True)
 
   widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
 
@@ -845,16 +845,17 @@ dynHandlerPatch
   => (Int -> Tidings (Maybe a1) -> PluginRef a1 -> UI (LayoutWidget (Editor (Index a1))))
   -> (Int -> Tidings (Maybe a1))
   -> (Int -> PluginRef a1)
+  -> (a1 -> Bool)
   -> Int
   -> ([LayoutWidget (Editor (Index a1))], Tidings Bool)
   -> UI ([LayoutWidget (Editor (Index a1))], Tidings Bool)
-dynHandlerPatch hand val valp ix (l,old)= do
+dynHandlerPatch hand val valp check ix (l,old)= do
     valix <- ui $ calmT (val ix)
     plix <- ui $ traverse (traverse calmT) (valp ix)
     oldC <- ui (calmT old)
     let next = hand ix valix plix
     el <- switchUILayout (compactPlugins valix plix) UI.div oldC next
-    return (l <> [el], (\i j ->  isJust i && j ) <$> ((\ i j -> join $ applyIfChange i j <|> createIfChange j <|> Just i )<$> valix <*> triding el) <*> oldC )
+    return (l <> [el], (\i j ->  maybe False check i && j ) <$> ((\ i j -> join $ applyIfChange i j <|> createIfChange j  <|> Just i) <$> valix <*> triding el) <*> oldC )
 
 
 reduceDiffList
@@ -900,8 +901,8 @@ unPOpt i = error (show i)
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (LayoutWidget (Editor (Index b)))
 
-buildUIDiff:: (Compact (Index b),Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (LayoutWidget (Editor (PathFTB (Index b) )))
-buildUIDiff f (Primitive l prim) = go l
+buildUIDiff:: (Compact (Index b),Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> (b -> Bool) -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (LayoutWidget (Editor (PathFTB (Index b) )))
+buildUIDiff f check (Primitive l prim) = go l
   where
     go [] plug tdi = fmap (fmap PAtom) <$> f (fmap (fmap (fmap unAtom)) <$>plug) (fmap unTB1 <$> tdi) prim
     go (i:ti) plug tdi = case i of
@@ -920,27 +921,27 @@ buildUIDiff f (Primitive l prim) = go l
                 index o ix v = flip Non.atMay (o + ix) <$> v
                 unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
                 unplugix ix = fmap ((\o -> ((indexPatchSet (o + ix) )=<<)) <$> offsetT <*>) <$> cplug
+                first = (\ i j o ->  if o > 0 then  maybe False (isJust  . filterTB1 check) $ (join $ applyIfChange i j <|> createIfChange j  <|> Just i) else True) <$> unIndexEl (-1) <*> compactPlugins' (unplugix (-1)) <*> offsetT
                 dyn = dynHandlerPatch  (\ix valix plix ->do
                   wid <- go ti  plix valix
                   lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
                   paintEditDiff valix (triding wid) lb
                   element wid # set UI.class_ "col-xs-12"
                   row <- UI.div # set children [lb,getElement wid]
-                  return $ LayoutWidget (triding wid) row (getLayout wid) ) unIndexEl unplugix
+                  return $ LayoutWidget (triding wid) row (getLayout wid) ) unIndexEl unplugix (isJust  . filterTB1 check )
 
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
-            widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+            widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],first)) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets))
               -- [Note] Array diff must be applied in the right order
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
               bres = (\i k j-> reduceDiffList  arraySize  i j k) <$> offsetT <*>   (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <*> widgets2
-              -- bres2 = (\i j k -> reduceDiffList  arraySize  k i j )<$>  facts widgets2 <*> facts (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <@> rumors offsetT
             pini <- currentValue (facts bres)
-            bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres)) -- (unionWith (.) (const <$> rumors bres) (const <$> bres2)))
+            bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres))
             element offsetDiv # set children (fmap getElement widgets)
-            size <- ui $ calmT (maybe 0 ((+ negate 1).Non.length .unArray)  . join <$> (applyIfChange <$> ctdi' <*> bres))
+            size <- ui $ calmT (maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> ( applyIfChange <$> ctdi' <*> bres))
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ LayoutWidget bres' composed (F.foldl1 verticalL  <$> (sequenceA $ getLayout <$> widgets))
          KOptional -> do
@@ -1188,7 +1189,7 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (const True) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
     where
@@ -1229,8 +1230,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$> plmods)
 
 
-      let
-        inipl = diff' <$>  oldItems <*> ftdi -- fmap traceShowId <$> compactPlugins' plmods
+      inipl <-  ui . calmT $ {-diff' <$>  oldItems <*> ftdi  --} compactPlugins' plmods
       inip <- currentValue (facts inipl)
 
       (elsel, helsel) <- ui newEvent
@@ -1428,7 +1428,7 @@ fkUITableGen ::
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
-  = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj) ) (fmap liftFK<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
+  = fmap (fmap (recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) ((\((TBRef (i,j))) ->  not $ kvNull j)) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap (liftPFK))) <$> (plmods <> concat replaceNonInj) ) (join .fmap liftFKM<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
     liftRelation o = o

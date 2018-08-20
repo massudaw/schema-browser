@@ -299,7 +299,7 @@ recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (T
 -}
 recAttr un f@(FKT l rel k) = first (PathForeign rel) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> unkvlist i
-  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
+   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> (liftFK f))
 
 recPred
   :: (t -> [(PathIndex PathTID b, d)])

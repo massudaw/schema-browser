@@ -735,7 +735,9 @@ attrT (i, j) = Attr i j
 relLookup rel i = liftFK <$> kvLookup rel i
 
 --liftFK :: Ord k => Column k b -> FTB (TBRef k b)
-liftFK (FKT l rel i) = TBRef <$> liftRelFK (unkvlist l) rel i
+liftFK (FKT l rel i) = justError "partial lift" $  liftRelFK (unkvlist l) rel i
+
+liftFKM (FKT l rel i) = liftRelFK (unkvlist l) rel i
 
 merge :: (a -> b -> c) -> (b -> c) -> (a -> c) -> FTB a -> FTB b -> FTB c
 merge f g h (LeftTB1 i) (LeftTB1 j) =
@@ -754,12 +756,19 @@ merge f g h i (LeftTB1 j) = LeftTB1 $ ((\j -> merge f g h i j) <$> j) <|> (Just 
 merge f g h (ArrayTB1 i) j = ArrayTB1 $ (\i -> merge f g h i j) <$> i
 merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
 
-filterTB1 (ArrayTB1 l )  = ArrayTB1 . Non.fromList <$> nonEmpty (Non.filter (\(TB1 i ) -> not $ kvNull (fst i) &&  kvNull (snd i)) l)
-filterTB1 (LeftTB1 l) = Just . LeftTB1 . join $ filterTB1 <$> l
-filterTB1 i = Just i
+-- TODO : How do we enforce constraints to prune invalid fields  from liftFK
+
+filterTBRef :: (Ord k ) => FTB (TBRef k a) -> Maybe (FTB (TBRef k a))
+filterTBRef  = filterTB1 (\(TBRef i) -> not $ kvNull (fst i) &&  kvNull (snd i))
+
+filterTB1 f (ArrayTB1 l ) = ArrayTB1 . Non.fromList <$> nonEmpty (Non.filter (isJust . filterTB1 f ) l)
+filterTB1 f (LeftTB1 l) = Just . LeftTB1 . join $ filterTB1 f <$> l
+filterTB1 f (TB1 i) = if f i  then Just (TB1 i) else Nothing
+
+
 
 liftRelFK l rel f =
-  justError "liftRelFK" $ filterTB1 $ merge
+  filterTBRef $ TBRef <$> merge
     (,)
     (kvlist [], )
     (, kvlist [])
@@ -772,6 +781,7 @@ liftRelFK l rel f =
     match KOptional = LeftTB1 . Just
     ty  = foldl1 mergeOpt (inferTy <$> rel)
     rels = catMaybes $ findRel l <$> rel
+
 findRel l (Rel k op j) = do
   Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) l
   return $ fmap (Attr k . TB1) v
@@ -862,7 +872,7 @@ atTBValue l f g h v = alterKV (relSort $ Set.fromList l) (traverse modify) v
         IT l j -> IT l <$> g j
         t@(FKT l i j) ->
           recoverFK (concat $ fmap _relOrigin . keyattr <$> (unkvlist l)) i <$>
-          h (liftFK t)
+            h ( liftFK t)
 
 {-
           APrim j -> APrim <$> f j
