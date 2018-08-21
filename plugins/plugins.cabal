@@ -22,6 +22,7 @@ executable schema-browser
 
   ghc-options: -O   -threaded -rtsopts
 
+  hs-source-dirs: src
   other-modules:
     CnpjReceita
     Crea
