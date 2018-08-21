@@ -432,7 +432,7 @@ tableCheck
      KVMetadata (FKey (KType t))
      -> KV (FKey (KType t)) a
      -> Either [Char] (KV (FKey (KType t)) a)
-tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
+tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,_kvname m,t))
   where
     checkAllFilled =  need `S.isSubsetOf`  available
     available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t

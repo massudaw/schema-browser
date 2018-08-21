@@ -553,8 +553,9 @@ instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
 
 
 instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
-  compact i =  zipWith3 PTBRef f s  (maybe (pure []) id $ nonEmpty t)
+  compact i =  zipWith3 PTBRef f (defEmpty s)  (defEmpty t)
     where
+      defEmpty = maybe (pure []) id . nonEmpty
       f = compact (sourcePRef <$> i)
       s = compact (targetPRef <$> i)
       t = compact (targetPRefEdit <$> i)
@@ -569,16 +570,19 @@ instance Patch (TBRef Key Showable) where
       dtb = diff j l
   patch (TBRef (i, j)) = PTBRef (patch i) (patch j) []
   applyUndo (TBRef (i, j)) (PTBRef k l e) = do
-    (s,su) <- applyUndo i k
-    (t,tu) <- applyUndo j l
-    (t',tu') <- applyUndo t e
-    if kvNull s  || kvNull t' then (Left "unconstrained" ) else Right (TBRef (s,t'),PTBRef su tu tu')
+    (s,su) <- applyUndo i k <|> Right (i,[])
+    (t,tu) <- applyUndo j l <|> Right (j,[])
+    (t',tu') <- applyUndo t e <|> Right (t,tu)
+    return (TBRef (s,t'),PTBRef su tu tu')
   createIfChange (PTBRef i j k ) = do
     (s,t) <-
       ((,) <$> createIfChange i <*> createIfChange j) <|>
+      -- create non reflective
+      (( kvlist [],) <$> createIfChange j) <|>
+      -- TODO: check if we need to create no ref ptbref
       ((, kvlist []) <$> createIfChange i)
     t' <- applyIfChange t k
-    if kvNull s  || kvNull t then Nothing else Just (TBRef (s,t'))
+    return (TBRef (s,t'))
 
 type PatchConstr k a
    = ( Show (Index a)
@@ -1058,10 +1062,10 @@ liftPRel l rel f = liftA3 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f (p
   where
     rels = catMaybes $ findPRel l <$> rel
 
-filterPFK (PatchSet l )  = PatchSet . Non.fromList <$> nonEmpty (Non.filter (isJust . filterPFK) l)
-filterPFK (POpt l) = Just . POpt. join $ filterPFK <$> l
-filterPFK (PIdx ix l) = fmap (PIdx  ix) . sequenceA $ filterPFK <$> l
-filterPFK (PAtom p@(PTBRef i j k) )= if not $ L.null i &&  L.null j && L.null k then Just (PAtom p) else Nothing
+filterPFK f (PatchSet l )  = PatchSet . Non.fromList <$> nonEmpty (Non.filter (isJust . filterPFK f) l)
+filterPFK f (POpt l) = Just . POpt. join $ filterPFK f <$> l
+filterPFK f (PIdx ix l) = fmap (PIdx  ix) . sequenceA $ filterPFK f <$> l
+filterPFK f (PAtom p )= if f p then Just (PAtom p) else Nothing
 
 
 recoverRel ::
@@ -1090,7 +1094,7 @@ recoverPFK ::
      [Key]
   -> [Rel Key]
   -> PathFTB (PTBRef Key Showable)
-  -> PathAttr Key Showable
+  -> Maybe (PathAttr Key Showable)
 recoverPFK ori rel i =
   PFK rel
     (catMaybes $
@@ -1100,5 +1104,5 @@ recoverPFK ori rel i =
          traverse
            (fmap patchvalue .
             L.find ((== Set.singleton (Inline k)) . index) . sourcePRef) $
-              i)) <$> ori)
-    ((\v -> targetPRef  v <> targetPRefEdit v) <$> i)
+              i)) <$> ori) <$>
+      (fmap (\v -> targetPRef  v <> targetPRefEdit v) <$>  (filterPFK  ( \i -> not $ L.null $ targetPRef i <> targetPRefEdit i  ) i))

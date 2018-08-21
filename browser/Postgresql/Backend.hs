@@ -223,7 +223,7 @@ insertPatch  inf conn i  t = either error (\i ->  liftIO $ if not $ L.null seria
         executeLogged  conn (fromString  iquery ) directAttr
         return []) checkAllFilled
     where
-      checkAllFilled = tableCheck  (tableMeta t) i
+      checkAllFilled = tableCheck  (tableMeta t) (traceShowId i)
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
       attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV i)
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)

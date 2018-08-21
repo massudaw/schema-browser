@@ -213,7 +213,7 @@ type SelPKConstraint = [([Set (Rel Key)],R.Tidings PKConstraint)]
 
 type SelTBConstraint = [([Set (Rel Key)],R.Tidings TBConstraint)]
 
-type PluginRef a = [(Union (Access Key), R.Tidings (Maybe (Index a)))]
+type PluginRef a = [(Union (Access Key), R.Tidings (Editor (Index a)))]
 
 currentState db = R.currentValue (R.facts $ collectionTid db)
 currentIndex db = R.currentValue (R.facts $ idxTid db)

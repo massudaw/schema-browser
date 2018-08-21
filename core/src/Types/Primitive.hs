@@ -776,10 +776,12 @@ liftRelFK l rel f =
     f
   where
     defaultTy :: [KTypePrim] -> FTB [w]
-    defaultTy l  = foldl (flip (.)) TB1 (match  <$> l) $ []
+    defaultTy l  = foldr (\i j ->   i . j ) TB1 (match  <$> l) $ []
     match KArray  = ArrayTB1 . Non.fromList . L.replicate 50
     match KOptional = LeftTB1 . Just
-    ty  = foldl1 mergeOpt (inferTy <$> rel)
+    isOptional (LeftTB1 i) = True
+    isOptional _ = False
+    ty  = (if isOptional f then (KOptional:) else id) $ foldl1 mergeOpt (inferTy <$> rel)
     rels = catMaybes $ findRel l <$> rel
 
 findRel l (Rel k op j) = do
