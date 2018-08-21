@@ -17,6 +17,7 @@ cabal-version:       >=1.10
 
 library 
   ghc-options: -O
+  hs-source-dirs: src
   exposed-modules:
 
     Postgresql.Backend

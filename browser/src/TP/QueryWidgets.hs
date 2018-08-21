@@ -718,7 +718,7 @@ insertCommand lbox inf table inscrudp inscrud  authorize gist = do
         # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
     cliIns <- UI.click insertB
     let  crudIns j  =  do
-            liftIO $ print j
+        -- liftIO $ print j
             transaction inf (fullInsert m j)
     diffIns <- ui $ mapEventDyn catchEd $ fmap crudIns <$> facts inscrud <@ unionWith const cliIns (filterKey  (facts insertEnabled) altI )
     return $ (diffIns ,insertB)
@@ -729,7 +729,7 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
       crudEdi i j =  do
-        liftIO $print (diff i j)
+        -- liftIO $print (diff i j)
         transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -1278,7 +1278,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               let newdiff = fmap sourcePRef tbdiff
                   newtbsel = join $ applyIfChange initial tbdiff
                   newsel = join $ applyIfChange (fst .unTBRef <$> initial) (sourcePRef <$> tbdiff)
-              liftIO $ print ("selector False",oldsel , newdiff , not (matches rel newtbsel), newsel ,L.length rel)
+              -- liftIO $ print ("selector False",oldsel , newdiff , not (matches rel newtbsel), newsel ,L.length rel)
               -- if newdiff is different than old diff update
               when (oldsel /= newdiff  ) $ debugTime ("selector False: " <> show (oldsel /= newdiff , not (matches rel newtbsel))) $ do
                 -- Just fetch if the arguments for all relations are present
@@ -1290,7 +1290,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     flip mapTidingsDyn gist $ \(TableRep (_,s,g)) -> do
                       let out = searchGist rel targetTable  g s =<< newsel
                       liftIO $ void $ traverse (\i -> do
-                        print ("TargetE",tableName targetTable,i)
+                        -- print ("TargetE",tableName targetTable,i)
                         helselTarget i ) (diff (snd .unTBRef<$> initial) out)
                 -- liftIO $ print ("SourceE",tableName targetTable,oldsel,newdiff,(fst .unTBRef <$> initial),out)
                 return ())
