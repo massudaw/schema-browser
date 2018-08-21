@@ -377,17 +377,17 @@ withTable s m w =
     now <- liftIO getCurrentTime
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         table = lookTable inf m
-    liftIO $ print  table
     lift $ mapM print (rawFKS table)
-    db <- transactionNoLog  inf $ selectFrom m Nothing pred
-    i2 <- currentValue (facts $ collectionTid db)
-    addClientLogin inf
+    -- # db <- transactionNoLog  inf $ selectFrom m Nothing pred
+    -- i2 <- currentValue (facts $ collectionTid db)
+    -- addClientLogin inf
     let
       debug i = show <$> G.toList (primary i)
       -- debug2 i = show <$> G.projectIndex w i
-    liftIO $ putStrLn (unlines $ debug i2)
+    -- liftIO $ putStrLn (unlines $ debug i2)
     -- liftIO $ putStrLn (unlines $ debug2 i2)
     --
+    return ()
                )
 
 

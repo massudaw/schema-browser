@@ -218,7 +218,7 @@ indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
     match i f = False
     thisPlugs = filter (hasProd (`match` head (prodRef . _relOrigin <$> keyattr a)) . fst)  plugItens
     evs  = fmap (fmap (join . fmap (maybe Keep  Diff . F.find ((== index a)  . index )  ))) <$>  thisPlugs
-indexPluginAttrDiff  i  plugItens = pfks
+indexPluginAttrDiff i plugItens = pfks
   where
     thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (keyattr i) )) .  fst) plugItens
     pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  index i)  . index ) ))) <$>  thisPlugs
@@ -308,7 +308,7 @@ tbCaseDiff
 tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
   let
     nonInj = S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
-    nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin $ k) wl
+    nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.fromList . concat .catMaybes . fmap _relOutputs $ F.toList k) wl
     restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
     reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
       where frel = filter (\i -> isJust $ kvLookup (S.singleton (Inline (_relOrigin i))) ifk) rel
@@ -375,9 +375,10 @@ anyColumns
    -> [(Set (Rel Key),TB Key ())]
    ->  UI (LayoutWidget  (Editor (TBIdx CoreKey Showable)))
 anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
+
+      initialAttr <- ui . calmT  $ ((\j -> L.find (isJust .  unLeftItens) $ unkvlist  j) =<<) <$>oldItems
       let
         fks2 = M.fromList $ run <$> cols
-        initialAttr = ((\j -> safeHead $ catMaybes $ unLeftItens <$> unkvlist  j) =<<) <$>oldItems
         sumButtom itb =  do
           el <- UI.div
           element =<< labelCaseDiff inf (justError "no sum column" $ M.lookup itb (unKV k)) (join . fmap (M.lookup itb . unKV) <$> oldItems) ((\i j -> if i == itb then j else Keep) <$> triding chk <*> triding fks)
@@ -392,7 +393,7 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
           where
             defaultInitial ini new
               = case ini of
-                 Nothing -> [new]
+                 Nothing -> compact $ (patch <$> (addDefault .snd<$> cols:: [TB Key Showable])) ++ [new]
                  Just ini -> if index ini == index new
                       then [new]
                       else new : [patch (addDefault ini :: TB Key Showable)]
@@ -948,7 +949,7 @@ buildUIDiff f check (Primitive l prim) = go l
             return  $ LayoutWidget bres' composed (F.foldl1 verticalL  <$> (sequenceA $ getLayout <$> widgets))
          KOptional -> do
            let pretdi = join . fmap unSOptional <$> tdi
-               plugtdi = fmap (fmap (join . fmap (traceShowId . maybe Delete Diff .unPOpt) ))<$> plug
+               plugtdi = fmap (fmap (join . fmap (maybe Delete Diff .unPOpt) ))<$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
            return  (reduceOptional <$> tdnew)
