@@ -328,7 +328,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
 
   funinp <-  liftKey <$> traverseUI (traverse (liftIO . evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) [] funinp
-  return $ LayoutWidget ((\i j -> traceShow (i,j) $ diff' i j )<$> facts preoldItems <#> (fmap (Fun i rel) <$>  funinp)) (getElement ev) (getLayout ev)
+  return $ LayoutWidget ( diff'<$> facts preoldItems <#> (fmap (Fun i rel) <$>  funinp)) (getElement ev) (getLayout ev)
 
 
 
@@ -776,7 +776,7 @@ mergeCommand lbox inf table inscrudp inscrud  authorize gist = do
 
 debugConsole oldItemsi inscrudp = do
     let
-      inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
+      inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
     debugBox <- checkedWidget (onDiff (const True) (const False )<$> inscrudp)
     debugT <- traverseUI (\i ->
             if i
@@ -813,7 +813,7 @@ processPanelTable
    -> UI (Element,Event [String])
 processPanelTable lbox inf reftb@(res,trep,_) inscrudp table oldItemsi = do
   let
-    inscrud = fmap join $ applyIfChange <$> oldItemsi <*> inscrudp
+    inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
     m = tableMeta table
     authPred =  [(keyRef "grantee",Left ( int $ usernameId inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing authPred)
@@ -1294,7 +1294,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           pan <- UI.div
             # set UI.class_ "col-xs-11 fixed-label"
             # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","26px")]
-            # sink text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  (facts $ (\i j ->  join $ applyIfChange i j)<$>  oldItems <*>  tdfk))
+            # sink text ((\i  -> maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd .unTBRef)  i) <$>  ((\i j ->  join $ applyIfChange i j)<$>  facts oldItems <*>  facts tdfk))
           panClick <- UI.click pan
           ui $ onEventIO panClick (\ _ -> hSelector True)
           (nav,celem,layout) <- edit
@@ -1308,7 +1308,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         selector True = do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
-          let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> oldItems) <*> (fmap sourcePRef <$> inipl)
+          let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> facts oldItems) <#> (fmap sourcePRef <$> inipl)
           tdi <- ui $ calmT ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<< v) <$> gist  <*> newSel)
           metaMap <- mapWidgetMeta inf
           cliZone <- jsTimeZone
