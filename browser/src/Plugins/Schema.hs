@@ -133,7 +133,7 @@ addPlugins iniPlugList smvar = do
       mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()
-  watch <- liftIO$ addWatch inotify  [CloseWrite] "./plugins/Plugins.hs" modifyed
+  watch <- liftIO$ addWatch inotify  [CloseWrite] "./plugins/src/Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
   liftIO $ mapM (traverse (handle . createRow' (lookMeta metaschema "plugin_code").liftTable' metaschema "plugin_code") . row)  iniPlugList
   return  iniPlugList

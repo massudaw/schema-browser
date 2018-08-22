@@ -75,8 +75,6 @@ instance (Ring s ,Arrow m)  => Arrow (Parser m s) where
   arr f = P one (arr f )
   first (P s d )  = P s (first d)
 
-instance (Ring s ,ArrowChoice m)  => ArrowChoice (Parser m s) where
-  (|||) (P si d ) (P ki  j ) = P (si `add` ki ) (d ||| j)
 
 instance (Ring s,Arrow m) => Category (Parser m s) where
   id = P one id
@@ -97,7 +95,6 @@ class Ring a where
   one :: a
   mult :: a -> a -> a
   add :: a -> a -> a
-  star :: a -> a
 
 
 instance (Ring a , Ring b) => Ring (a,b) where

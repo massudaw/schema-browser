@@ -112,7 +112,6 @@ accountDef inf
 accountWidget (incrementT,resolutionT) sel inf = do
     let
       calendarSelT = liftA2 (,) incrementT resolutionT
-
     dashes <- accountWidgetMeta inf
     let allTags =  dashes
     itemListEl2 <- mapM (\i ->
@@ -159,8 +158,6 @@ accountWidget (incrementT,resolutionT) sel inf = do
                 ) $ (,) <$> sel <*> calendarSelT
 
          pure <$> UI.div # sink children (facts  els)
-
-
     return (legendStyle,dashes,calFun )
 
 

@@ -17,6 +17,7 @@ module SchemaQuery.Store
   ) where
 
 import Control.Concurrent
+import Debug.Trace
 import Control.Concurrent.STM
 import Control.DeepSeq
 import Control.Monad.Catch

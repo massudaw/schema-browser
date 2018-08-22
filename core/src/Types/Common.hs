@@ -337,6 +337,7 @@ _relTarget (Rel _ _ i) = i
 _relTarget (RelAccess _ i) = _relTarget i
 _relTarget i = error (show i)
 
+
 _relOrigin (Rel i _ _) = _relOrigin i
 _relOrigin (Inline i) = i
 _relOrigin (RelAccess _ i) = _relOrigin i

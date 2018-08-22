@@ -1,203 +1,42 @@
 {-# LANGUAGE Arrows,GADTs,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module Postgresql.Backend (connRoot,postgresOps) where
 
-import Types
-import Step.Client
-import Debug.Trace
 import Control.Exception
-import Data.Time
-import qualified Types.Index as G
-import Control.Arrow hiding(first)
-import SchemaQuery
-import GHC.Int
-import Control.Monad.RWS hiding(pass)
-import Environment
-import Postgresql.Types
-import Default
-import Postgresql.Printer
-import Data.Interval (Extended(..),upperBound)
-import Data.Either
-import Data.Functor.Apply
-import Postgresql.Parser
-import Utils
-import Text
-import Control.Lens as Le
-import Schema
-import RuntimeTypes
-import Data.Bifunctor
-import Query
+import Control.Monad.RWS hiding (pass)
 import Control.Monad.Writer hiding (pass)
-import Types.Patch
-import Data.Ord
-import qualified  Data.Map as M
-
-import Data.Tuple
-import Data.String
-
-import Control.Applicative
-import Data.Maybe
-import qualified Data.List as L
-
-import Prelude hiding (takeWhile,head)
-
+import Data.Bifunctor
+import Data.Either
 import qualified Data.Foldable as F
+import Data.Functor.Apply
+import Data.Interval (Extended(..), upperBound)
+import qualified Data.List as L
+import qualified Data.Map as M
+import Data.Maybe
+import Data.String
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Set as S
+import Data.Time
+import Data.Tuple
 import Database.PostgreSQL.Simple
+import Debug.Trace
+import Default
+import GHC.Int
+import Postgresql.Extensions
+import Postgresql.Parser
+import Postgresql.Printer
+import Postgresql.Types
+import Prelude hiding (head, takeWhile)
+import RuntimeTypes
+import Schema
+import SchemaQuery
+import Types
+import qualified Types.Index as G
+import Types.Patch
+import Utils
 
 filterFun  = M.filter (\ v-> not $ isFun v )
   where isFun (Fun _ _ _ ) = True
         isFun i = False
-
-overloadedRules = M.fromListWith (++) (translate <$> postgresqlRules)
-postgresqlRules  = [dropSchema,createSchema,alterSchema,createTableCatalog, dropTableCatalog,createColumnCatalog,dropColumnCatalog]
-
-schema_name
-  :: Monad m => Text -> PluginM (G.AttributePath Text  MutationTy) (Atom (TBData Text Showable))   m i (Showable)
-schema_name  s
-  = iforeign [(Rel (Inline s) Equals "name")] (ivalue . irecord $ ifield "name" (ivalue (readV PText)))
-
-column_type
-  :: (Monad m ) =>
-    PluginM (G.PathIndex PathTID (Union (G.AttributePath Text  MutationTy))) (Atom (FTB (TBData Text Showable)))   m i (Showable,Showable)
-column_type
-  = ivalue $ isum [iinline "primitive" . iopt . ivalue . irecord $
-             iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
-               (ivalue $ irecord ((,) <$> ifield "nspname" (ivalue (readV PText)) <*> ifield "typname" (ivalue (readV PText))))
-         ,iinline "composite" . iopt . ivalue . irecord $
-             iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
-               (ivalue $ irecord ((,) <$> ifield "schema_name" (ivalue (readV PText)) <*> ifield "table_name" (ivalue (readV PText))))]
-
-createColumnCatalog
-  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
-createColumnCatalog  =
-  aschema "metadata" $
-    atable "catalog_columns" $
-      arow RowCreate  $
-        proc _ -> do
-          c <- ifield "column_name" (ivalue (readV PText)) -< ()
-          (s,t) <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
-                      (ivalue $ irecord ((,) <$> schema_name "schema_name"  <*>  ifield "table_name" (ivalue (readV PText)))) -< ()
-          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt $ column_type -< ()
-          act (\(s,t,c,sty,ty) -> do
-            inf <- lift askInf
-            let sqr = "ALTER TABLE ?.? ADD COLUMN ? ?.? "
-                args = (DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty )
-            executeLogged (rootconn inf)  sqr args
-            return ()) -< (s,t,c,sty,ty)
-
-dropColumnCatalog
-  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
-dropColumnCatalog  = do
-  aschema "metadata" $
-    atable "catalog_columns" $
-      arow RowDrop $
-        proc _ -> do
-          c <- ifield "column_name"
-              (ivalue (readV PText)) -< ()
-          s <- iforeign [(Rel "table_schema" Equals "name")]
-              (ivalue $ irecord (ifield "name" (ivalue (readV PText) ))) -< ()
-          t <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
-              (ivalue $ irecord (ifield "table_name" (ivalue (readV PText)))) -< ()
-          act (\(t,s,c) -> do
-            inf <- lift askInf
-            executeLogged (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
-          returnA -< ()
-
-
-createTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBData  Text Showable)) TransactionM  i ()
-createTableCatalog = do
-  aschema "metadata" $
-    atable "catalog_tables" $
-      arow RowCreate $
-        proc _ -> do
-          t <- ifield "table_name"
-             (ivalue (readV PText)) -< ()
-          s <- schema_name "schema_name"  -< ()
-          oid <- act (\(sc ,n) -> do
-              inf <- lift askInf
-              liftIO $ executeLogged (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted sc ,DoubleQuoted  n)
-              [Only i] <- liftIO $ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
-              return i) -< (TB1 s,TB1 t)
-          ifield "oid" (iftb PIdOpt (ivalue (writeV (PInt 8)))) -< SNumeric oid
-          returnA -< ()
-
-dropTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBData  Text Showable)) TransactionM  i ()
-dropTableCatalog = do
-  aschema "metadata" $
-    atable "catalog_tables" $
-      arow RowDrop $
-        proc _ -> do
-          t <- ifield "table_name"
-              (ivalue (readV PText)) -< ()
-          (SText ty) <- ifield "table_type"
-              (ivalue (readV  PText))-< ()
-          s <- schema_name "schema_name"  -< ()
-          act (\(ty,sc ,n) ->  do
-              inf <- lift askInf
-              let tys = case ty of
-                    "BASE TABLE" -> "TABLE"
-                    "VIEW" -> "VIEW"
-              liftIO$ executeLogged (rootconn inf) ("DROP " <> tys <> " ?.?") (DoubleQuoted sc ,DoubleQuoted n)
-              ) -< (ty,TB1 s,TB1 t)
-          returnA -< ()
-
-
-createSchema
-  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
-createSchema  = do
-  aschema "metadata" $
-    atable "catalog_schema" $
-      arow RowCreate $
-        proc _ -> do
-          s <- ifield "name"
-              (ivalue (readV  PText))-< ()
-          o <- fmap join $ iforeign [(Rel "owner" Equals "oid")]
-              (iopt $ ivalue $ irecord (ifield "usename" (iopt $ ivalue (readV PText)) )) -< ()
-          oid <- act (\(n,onewm) ->  do
-            inf <- lift askInf
-            maybe
-              (executeLogged (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted n))
-              (\o -> executeLogged (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted n, DoubleQuoted o)) onewm
-            liftIO $ print =<< formatQuery  (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
-            [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
-            return i) -< (TB1 s,fmap TB1 o)
-          ifield "oid" (ivalue (writeV (PInt 8))) -< SNumeric oid
-          returnA -< ()
-
-alterSchema
-  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
-alterSchema = do
-  aschema "metadata" $
-    atable "catalog_schema" $
-      arow RowUpdate $
-        proc _ -> do
-          (n,nnewm) <- ifield "name"
-              (ivalue (changeV PText)) -< ()
-          Just (o,onewm) <- fmap join $ iforeign [(Rel "owner" Equals "oid")]
-              (iopt $ ivalue $ irecord (ifield "usename" (iopt (ivalue (changeV PText))) )) -< ()
-          act (\(n,o,onewm,nnewm) -> do
-            inf <- lift askInf
-            when (onewm /= o) . void $
-              executeLogged (rootconn inf) "ALTER SCHEMA ? OWNER TO ?" (DoubleQuoted n, DoubleQuoted onewm)
-            when (nnewm /= n) . void $
-              executeLogged (rootconn inf) "ALTER SCHEMA ? RENAME TO ?" (DoubleQuoted n, DoubleQuoted nnewm) ) -< (n,o,onewm,nnewm)
-          returnA -< ()
-
-dropSchema
-  :: PluginM  (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM i ()
-dropSchema = do
-  aschema "metadata" $
-    atable "catalog_schema" $
-      arow RowDrop $
-        proc _ -> do
-          s <- ifield "name" (ivalue (readV  PText))-< ()
-          act (\n->  do
-            inf <- lift askInf
-            liftIO$ executeLogged (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted n)
-            return ()) -< TB1 s
-          returnA -< ()
 
 insertPatch
   :: (MonadIO m ,Functor m )
@@ -303,36 +142,41 @@ type SetterGen c = (Text
                 -> PathFTB c
                 -> UpdateOperations)
 
+escapeInline str = case T.splitOn "."  str of
+           [] -> ""
+           [i] -> i
+           x:xs ->  "(" <> x <> ")." <> T.intercalate "." xs
+
 sqlPatchFTB :: Show c => SetterGen c ->SetterGen c
 sqlPatchFTB f k call (Primitive l c ) s = go k call l s
   where
-    go  k call (KSerial:xs)  (POpt o) = do
+    go  prefix call (KSerial:xs)  (POpt o) = do
       case o of
-        Just j ->go  k call xs  j
+        Just j ->go  prefix call xs  j
         Nothing -> inpStatic $  (k <> "=" <>   "null" )
-    go  k call (KOptional:xs)  (POpt o) = do
+    go  prefix call (KOptional:xs)  (POpt o) = do
       case o of
-        Just j ->go  k call xs  j
+        Just j ->go  prefix call xs  j
         Nothing -> inpStatic $  (k <> "=" <>   "null" )
-    go  k ca (KArray:xs)  (PIdx ix o) = do
+    go  prefix ca (KArray:xs)  (PIdx ix o) = do
       case o of
         Just j -> go  (k <> six ix ) ca xs  j
-        Nothing -> inpStatic $ (k <> " = " <>  k <> sixDown (ix -1) <> " || " <> k <> sixUp (ix + 1)  )
+        Nothing -> inpStatic $ (k <> " = " <>  escapeInline prefix <> sixDown (ix -1) <> " || " <> escapeInline prefix <> sixUp (ix + 1)  )
       where
         six ix = "[" <> T.pack (show ix) <> "]"
         sixUp ix = "[" <> T.pack (show ix) <> ":]"
         sixDown ix = "[:" <> T.pack (show ix) <> "]"
-    go  k ca (KInterval:xs) b@(PatchSet _ ) =
-      f k ca (Primitive (KInterval:xs) c ) b
-    go  k ca (KInterval:xs)  (PInter s (v,j)) =
+    go  prefix ca (KInterval:xs) b@(PatchSet _ ) =
+      f prefix ca (Primitive (KInterval:xs) c ) b
+    go  prefix ca (KInterval:xs)  (PInter s (v,j)) =
       case (s,v) of
-        (True,NegInf) ->   inpStatic (k <> " = " <> "lowerI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
-        (True,Finite b) -> go  k ((\i ->"lowerI(" <> k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca) xs  b
-        (False,PosInf) -> inpStatic (k <> " = " <> "upperI(" <>  k <> ",null," <> (T.pack (show j )) <> ")")
-        (False ,Finite b) -> go  k ((\i -> "upperI(" <>  k <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca ) xs  b
-    go  k c ty (PatchSet b) = mapM_ (go  k c ty) b
-    go  k ca ty i@(PAtom _) = f k ca (Primitive ty c) i
-    go  k  _ ty i = error $ show (k,ty,i)
+        (True,NegInf) ->   inpStatic (k <> " = " <> "lowerI(" <> escapeInline prefix <> ",null," <> (T.pack (show j )) <> ")")
+        (True,Finite b) -> go  prefix ((\i ->"lowerI(" <> escapeInline prefix <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca) xs  b
+        (False,PosInf) -> inpStatic (k <> " = " <> "upperI(" <>  escapeInline prefix <> ",null," <> (T.pack (show j )) <> ")")
+        (False ,Finite b) -> go  prefix ((\i -> "upperI(" <>  escapeInline prefix <> "," <> i <> "," <> (T.pack (show j )) <> ")") . ca ) xs  b
+    go  prefix c ty (PatchSet b) = mapM_ (go  prefix c ty) b
+    go  prefix ca ty i@(PAtom _) = f prefix ca (Primitive ty c) i
+    go  prefix  _ ty i = error $ show (k,ty,i)
 
 
 paginate

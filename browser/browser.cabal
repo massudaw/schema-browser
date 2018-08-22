@@ -21,6 +21,7 @@ library
   exposed-modules:
 
     Postgresql.Backend
+    Postgresql.Extensions
     Postgresql.Function
     Postgresql.Parser
     Postgresql.Printer

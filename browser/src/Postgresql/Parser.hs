@@ -279,10 +279,11 @@ parsePrimJSON i  v =
       i -> error ("not defined " <> show i)
   ) v
 
-executeLogged :: (ToRow q ,MonadIO m) => Connection -> Query -> q -> m Int
+executeLogged :: (ToRow q ,MonadIO m) => Connection -> Query -> q -> m ()
 executeLogged conn sqr args = liftIO $ do
   putStrLn . BS.unpack =<< formatQuery conn sqr args
   fromIntegral <$> execute conn sqr args
+  return ()
 
 queryLogged :: (FromRow o ,ToRow q ,MonadIO m) => Connection -> Query -> q -> m [o]
 queryLogged conn sqr args = liftIO $ do

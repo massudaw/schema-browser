@@ -401,7 +401,7 @@ recoverEditChange (Just i) (Diff j) = bimap Just Diff <$> applyUndo i j
 recoverEditChange Nothing (Diff j) =
   (, Delete) . Just <$> maybe (Left $ "cant create: Nothing, Diff") Right (createIfChange j)
 recoverEditChange Nothing Keep = Right (Nothing, Keep)
-recoverEditChange Nothing Delete = Left "cant delete"
+recoverEditChange Nothing Delete = Right (Nothing,Keep)
 recoverEditChange _ _ = error "no edit"
 
 -- editor  i j | traceShow (i,j) False = undefined
@@ -536,11 +536,19 @@ instance Patch () where
   createIfChange  = Just
   applyUndo _ _ = Left "no difference"
 
+diffPrim (SDouble i ) (SDouble j)
+  | abs(i - j) < 1e-9 = Nothing
+diffPrim i j
+  | i == j = Nothing
+  | otherwise = Just j
+
 
 instance Patch Showable where
   type Index Showable = Showable
   diff = diffPrim
+
   applyUndo (SNumeric s) (SDelta (DSInt i))  = Right (SNumeric (s + i),SDelta (DSInt $ negate i))
+  applyUndo (SDouble s) (SDelta (DSDouble i))  = Right (SDouble (s + i),SDelta (DSDouble $ negate i))
   applyUndo j i = Right (i, j)
   createIfChange = Just
   patch = id
@@ -833,11 +841,6 @@ applyShowable = apply
 
 createShowable :: (Show a, Ord a, Patch a) => PathFTB (Index a) -> FTB a
 createShowable = create
-
-diffPrim :: (Eq a, a ~ Index a) => a -> a -> Maybe (Index a)
-diffPrim i j
-  | i == j = Nothing
-  | otherwise = Just j
 
 -- FTB
 patchFTB :: Show a => (a -> Index a) -> FTB a -> PathFTB (Index a)
