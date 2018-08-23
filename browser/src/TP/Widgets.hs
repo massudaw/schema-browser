@@ -685,7 +685,7 @@ switchManyUI  bool map = do
       case M.lookup x map of
         Just i -> do
           el <- i
-          liftIO . h =<< currentValue (facts (triding el))
+          liftIOLater $ do liftIO . h =<< currentValue (facts (triding el))
           ui $ onEventIO (rumors (triding el)) h
           return el
         Nothing -> error ("no ix " ++ (show x))

@@ -318,16 +318,25 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
   fmap insertT <$> buildUIDiff (buildPrimitive (keyModifier i)) (const True) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItens) tdiv
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    search f (Inline t) = fmap (fmap _tbattr) . f . snd $ justError ("cant find: " <> show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
-    search f (RelAccess t m) =  fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable)) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList t)  wl)
-    recoverValue (edit,old) = (\i j -> join $ (applyIfChange i j) <|> (createIfChange j) ) <$> facts old <#> edit
-    refs = sequenceA $ search recoverValue <$> snd rel
+    search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
+    search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList t)  wl)
+    recoverValue (edit,old) = (\i j -> (isKeep j,join $ (applyIfChange i j) <|> (createIfChange j) <|> Just i ) ) <$> old <*> edit
+    prerefs = sequenceA $ search recoverValue <$> snd rel
     liftType (KOptional :xs) i = Just $ LeftTB1 (join $ liftType xs . Just <$> i)
     liftType [] i = i
     liftKey = fmap (liftType (_keyFunc $ keyType i).join)
-  funinp <-  liftKey <$> traverseUI (liftIO . traverse ( evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes) refs
-  ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) [] funinp
-  let out = (\i j -> diff'  i j )<$> facts preoldItems <#> (fmap (Fun i rel) <$> funinp)
+  refs <- ui $ calmT prerefs
+  funinp <-  ui $ liftKey <$> mapEventDyn (liftIO . traverse ( evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes . fmap snd ) (filterE (not . all fst) $ rumors refs)
+  ini <- ui $ currentValue (facts preoldItems)
+
+  -- FIXME : Function evaluation is producing Delete when using offset.
+  -- FIXME : Behaviour is holding across transitions
+  let pout = (\i j ->  ignoreDelete $ diff'  i j )<$> facts preoldItems <@> (fmap (Fun i rel) <$> funinp)
+      ignoreDelete Delete  = Keep
+      ignoreDelete i = i
+
+  out <- ui $ stepperT  Keep pout
+  ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) ((fmap (fmap (fmap (\(PFun _ _ v) -> v)))<$>plugItens) <> [(Many [],((fmap (\(PFun _ _ v) -> v)))<$> out)]) (fmap _tbattr <$> preoldItems )
   return $ LayoutWidget  out (getElement ev) (getLayout ev)
 
 
@@ -338,8 +347,8 @@ select table  = do
 
 loadPlugins :: InformationSchema -> Dynamic [Plugins]
 loadPlugins inf =  do
-  code <- liftIO$ indexSchema  (rootRef inf) "code"
-  F.toList <$> transactionNoLog  code (select "plugin_code")
+  --code <- liftIO$ indexSchema  (rootRef inf) "code"
+  return [] --F.toList <$> transactionNoLog  code (select "plugin_code")
 
 
 traRepl :: Ord k => Union (Access k) -> Union (Access k)
@@ -528,7 +537,7 @@ validateRow inf table fks =
       reduceTable <$> Tra.sequenceA (triding . fst . snd <$> fks)
     isValid fks = sequenceA <$> sequenceA (uncurry (checkDefaults inf table) <$> fks)
 
-checkDefaults inf table k  (r, i) =   liftA2 (applyDefaults inf table k ) i (triding r)
+checkDefaults inf table k  (r, i) =   applyDefaults inf table k  <$> facts i <#> (triding r)
 
 
 applyDefaults inf table k i j = -- traceShowIdPrefix (show k) $
@@ -850,8 +859,8 @@ dynHandlerPatch hand val valp check ix (l,old)= do
     plix <- ui $ traverse (traverse calmT) (valp ix)
     oldC <- ui (calmT old)
     let next = hand ix valix plix
-    el <- switchUILayout (fmap traceShowId $ compactPlugins valix plix) UI.div ((\i -> traceShow (ix,i) i ) <$> oldC) (fmap traceShowId <$>next)
-    return (l <> [el], flip (\i j ->  traceShow (ix, maybe False check i , j) $ maybe False check i && j ) <$> facts oldC <#> ((\ i j -> join $ applyIfChange i j <|> createIfChange j) <$> valix <*> triding el))
+    el <- switchUILayout (compactPlugins valix plix) UI.div oldC next
+    return (l <> [el], flip (\i j ->   maybe False check i && j ) <$> facts oldC <#> ((\ i j -> join $ applyIfChange i j <|> createIfChange j) <$> valix <*> triding el))
 
 
 reduceDiffList
@@ -935,7 +944,7 @@ buildUIDiff f check (Primitive l prim) = go l
               bres = (\i k j-> reduceDiffList  arraySize  i j k) <$>facts offsetT <#>   (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <*> widgets2
             pini <- currentValue (facts bres)
             element offsetDiv # set children (fmap getElement widgets)
-            let size = traceShowId . maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> ( applyIfChange <$> ctdi' <*> bres)
+            let size = maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> ( applyIfChange <$> ctdi' <*> bres)
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ LayoutWidget bres composed (F.foldl1 verticalL  <$> (sequenceA $ getLayout <$> widgets))
          KOptional -> do
@@ -1154,7 +1163,8 @@ oneInput fm i tdi = do
           decode v = maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
       pkt <- ui $ stepperT (Right v) pke
       element inputUI # sink UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> facts pkt)
-      return $ TrivialWidget (either (const Nothing) id <$> pkt) inputUI
+      cpkt <- ui $ calmDiff (either (const Nothing) id <$> pkt)
+      return $ TrivialWidget  cpkt inputUI
 
 
 inlineTableUI
@@ -1301,7 +1311,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             # set children celem
             # set UI.class_ "col-xs-12"
           return [nav,pan,hidden]
-        selector True = do
+        selector True = debugTime "selector True" $  do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> facts oldItems) <#> (fmap sourcePRef <$> inipl)
@@ -1398,6 +1408,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       element top
         # sink children (facts selEls)
       let lintReflect = (>>= (\(TBRef (i,j)) -> nonEmptyTBRef $ TBRef (filterReflectKV i,j )))
+          -- checkOutput i  j | traceShow ("checkOutput",i,j) False = undefined
           checkOutput old tdfk =
             let oldn =  lintReflect old
             in diff' oldn (lintReflect (join $ applyIfChange  oldn  tdfk))

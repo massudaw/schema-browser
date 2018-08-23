@@ -347,7 +347,7 @@ createTable fixed m = do
 
 -- TODO: Could we derive completeness information from bounds
 -- or have some negative information about explored empty bounds
-pageTable method table page fixed tbf = debugTime "pageTable" $ do
+pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (tableName table)) $ do
     inf <- askInf
     let
       m = tableMeta table
