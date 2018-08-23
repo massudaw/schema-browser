@@ -196,7 +196,7 @@ paginateList inf table itemListEl predicate (vpt,gist,_) constr proj tdi =  do
           applyConstr m l =  filter (F.foldl' (\l (C.Predicate c) ->  liftA2 (&&) l (not <$> c) ) (pure True)  l) m
         res3 <- ui$ cacheTidings (filtering  <$> triding filterInp <*> aconstr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
-        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i) <$>  facts res3 <#> tdi) wheel  (flip lengthPage <$> facts predicate <#> vpt)
+        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i) <$>  facts res3 <#> tdi) wheel  (flip lengthPage <$> facts predicate <*> facts vpt)
         return (offset, res3)
 
       -- Load offseted items
@@ -286,12 +286,12 @@ offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
   offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
 
-  lengs  <- mapM (\max -> UI.span # sinkDiff text (("/" ++) .show  <$> max )) maxes
+  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> max )) maxes
   offparen <- UI.div # set children (offset : lengs) # set UI.style [("text-align","center")]
 
   enter  <- UI.onChangeE offset
   whe <- UI.mousewheel offparen
-  let max  = facts $ foldr1 (liftA2 min) maxes
+  let max  = foldr1 (liftA2 min) (maxes)
   let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMay <$> enter)
       ev = unionWith const (negate <$> whe ) eve
       saturate m i j
@@ -299,13 +299,12 @@ offsetFieldFiltered  initT eve maxes = do
           | i + j < 0  = 0
           | i + j > m  = m
           | otherwise = i + j
-      diff o m inc
-        | saturate m inc o /= o = Just (saturate m inc )
-        | otherwise = Nothing
+      diff  m inc
+        = (saturate m inc )
 
   (offsetB ,ev2) <- mdo
     let
-      filt =  filterJust $ diff <$> offsetB <*> max <@> ev
+      filt =  diff <$> max <@> ev
       ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
     offsetB <- ui $ accumB 0 ev2
     return (offsetB,ev2)

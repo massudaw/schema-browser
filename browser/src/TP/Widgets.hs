@@ -748,6 +748,14 @@ switchUI
      -> UI (TrivialWidget a1)
 switchUI  t def bool next  = switchManyUI  bool (M.fromList [(True,next),(False , TrivialWidget t <$> def )])
 
+traverseUIInt
+  :: (a -> UI b)
+     -> Tidings a
+     -> UI (Tidings b)
+traverseUIInt m inp = do
+  w <- askWindow
+  ui $ mapTidingsDynInterrupt (runUI w . m) inp
+
 
 
 traverseUI
@@ -756,7 +764,7 @@ traverseUI
      -> UI (Tidings b)
 traverseUI m inp = do
   w <- askWindow
-  ui $ mapTidingsDynInterrupt (runUI w . m ) inp
+  ui $ mapTidingsDyn (runUI w . m) inp
 
 line n =   set  text n
 

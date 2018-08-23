@@ -54,6 +54,7 @@ updateFrom m a pk b = do
   return v
 
 patchFrom m  r   = do
+  liftIO $ print r
   let l = RowPatch r
   asyncPatches m (pure l)
   return l

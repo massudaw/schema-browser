@@ -536,8 +536,6 @@ instance Patch () where
   createIfChange  = Just
   applyUndo _ _ = Left "no difference"
 
-diffPrim (SDouble i ) (SDouble j)
-  | abs(i - j) < 1e-9 = Nothing
 diffPrim i j
   | i == j = Nothing
   | otherwise = Just j
