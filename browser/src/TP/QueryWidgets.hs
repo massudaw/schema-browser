@@ -335,7 +335,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
       ignoreDelete Delete  = Keep
       ignoreDelete i = i
 
-  out <- ui $ stepperT  Keep pout
+  out <- ui $ stepperT  Keep (unionWith const (const Keep <$> rumors preoldItems ) pout)
   ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) ((fmap (fmap (fmap (\(PFun _ _ v) -> v)))<$>plugItens) <> [(Many [],((fmap (\(PFun _ _ v) -> v)))<$> out)]) (fmap _tbattr <$> preoldItems )
   return $ LayoutWidget  out (getElement ev) (getLayout ev)
 
