@@ -83,7 +83,7 @@ defaultTableData
 defaultTableData inf table v =
   let
     nonFKAttrs = nonFKS table
- in catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (M.lookup (pathRelRel ix) (unKV v))) (rawFKS table)
+ in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (M.lookup (pathRelRel ix) (unKV v))) (rawFKS table)
 
 defaultTableType
   :: InformationSchemaKV Key Showable
@@ -92,7 +92,7 @@ defaultTableType
 defaultTableType inf table =
   let
     nonFKAttrs = nonFKS table
-  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList nonFKAttrs) (defaultFKS inf)  (rawFKS table)
+  in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList nonFKAttrs) (defaultFKS inf)  (rawFKS table)
 
 nonFKS :: Table -> [Key]
 nonFKS table =  nonFKAttrs
