@@ -285,8 +285,7 @@ offsetField  initT eve  max = offsetFieldFiltered initT eve [max]
 offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
   offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
-
-  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> max )) maxes
+  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) . show <$> max )) maxes
   offparen <- UI.div # set children (offset : lengs) # set UI.style [("text-align","center")]
 
   enter  <- UI.onChangeE offset

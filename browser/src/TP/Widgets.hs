@@ -646,6 +646,8 @@ isNew (New x) = Just x
 isNew _ = Nothing
 
 -- | Returns a new 'Event' that skips consecutive triggers with the same value.
+
+
 calmE :: Eq a => Memory a  -> Event a -> Dynamic (Event a)
 calmE ini e =
   filterJust . fmap isNew <$> accumE ini (updateMemory <$> e)

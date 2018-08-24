@@ -320,22 +320,25 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show t) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
     search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList t)  wl)
+    -- Add information if the patch is Keep
     recoverValue (edit,old) = (\i j -> (isKeep j,join $ (applyIfChange i j) <|> (createIfChange j) <|> Just i ) ) <$> old <*> edit
-    prerefs = sequenceA $ search recoverValue <$> snd rel
+    refs = sequenceA $ search recoverValue <$> snd rel
     liftType (KOptional :xs) i = Just $ LeftTB1 (join $ liftType xs . Just <$> i)
     liftType [] i = i
     liftKey = fmap (liftType (_keyFunc $ keyType i).join)
-  refs <- ui $ calmT prerefs
+  -- Only executes if not all patches are Keep and all values are Just
   funinp <-  ui $ liftKey <$> mapEventDyn (liftIO . traverse ( evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes . fmap snd ) (filterE (not . all fst) $ rumors refs)
   ini <- ui $ currentValue (facts preoldItems)
 
   -- FIXME : Function evaluation is producing Delete when using offset.
-  -- FIXME : Behaviour is holding across transitions
   let pout = (\i j ->  ignoreDelete $ diff'  i j )<$> facts preoldItems <@> (fmap (Fun i rel) <$> funinp)
       ignoreDelete Delete  = Keep
       ignoreDelete i = i
 
-  out <- ui $ stepperT  Keep (unionWith const (const Keep <$> rumors preoldItems ) pout)
+  -- The new functions is
+  -- t == 0 = initial value
+  -- t  > 0 = latest (input event , function evaluated)
+  out <- ui $ stepperT  Keep (unionWith const (const Keep <$> rumors preoldItems) pout)
   ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) ((fmap (fmap (fmap (\(PFun _ _ v) -> v)))<$>plugItens) <> [(Many [],((fmap (\(PFun _ _ v) -> v)))<$> out)]) (fmap _tbattr <$> preoldItems )
   return $ LayoutWidget  out (getElement ev) (getLayout ev)
 
@@ -347,8 +350,8 @@ select table  = do
 
 loadPlugins :: InformationSchema -> Dynamic [Plugins]
 loadPlugins inf =  do
-  --code <- liftIO$ indexSchema  (rootRef inf) "code"
-  return [] --F.toList <$> transactionNoLog  code (select "plugin_code")
+  code <- liftIO$ indexSchema  (rootRef inf) "code"
+  F.toList <$> transactionNoLog  code (select "plugin_code")
 
 
 traRepl :: Ord k => Union (Access k) -> Union (Access k)
@@ -390,17 +393,25 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
-        resei = (\j i -> defaultInitial j <$> i) <$>  facts initialAttr <#> triding fks
+        resei = (\j i -> join $ joinEmpty . defaultInitial j <$> i) <$>  facts initialAttr <#> triding fks
           where
+            joinEmpty [] = Keep
+            joinEmpty  i = Diff i
+            defaultInitial ini new | traceShow (ini,new) False = undefined
             defaultInitial ini new
               = case {-traceShow (index <$> ini,index new,new)-} ini of
-                 Nothing -> compact $ (patch <$> (addDefault .snd<$> cols:: [TB Key Showable])) ++ [new]
-                 Just ini -> if index ini == index new
+                  Nothing -> case unLeftItens (create new  :: TB Key Showable) of
+                              Just _ -> compact $ (patch <$> (addDefault .snd<$> cols:: [TB Key Showable])) ++ [new]
+                              Nothing -> []
+                  Just ini -> if index ini == index new
                       then [new]
                       else  compact $ [patch (addDefault ini :: TB Key Showable)] ++ [new]
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
-      return (LayoutWidget ((\i j -> if  isNothing (projectAttr (apply i j)) && isJust (projectAttr i) then Delete else j) <$> facts oldItems <#> resei) listBody (getLayout fks))
+      let computeResult i j = case  traceShow (i,j) (isJust (projectAttr (apply i j)) ,isJust (projectAttr i)) of
+            (False,True) -> Delete
+            (_,_) -> j
+      return (LayoutWidget (computeResult <$> facts oldItems <#> resei) listBody (getLayout fks))
   where
     meta = tableMeta table
     run (l,m) = (l,do
@@ -935,16 +946,16 @@ buildUIDiff f check (Primitive l prim) = go l
                   return $ LayoutWidget (triding wid) row (getLayout wid) ) unIndexEl unplugix (isJust  . filterTB1 check )
 
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
-            widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+            widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],first)) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets))
               -- [Note] Array diff must be applied in the right order
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
-              bres = (\i k j-> reduceDiffList  arraySize  i j k) <$>facts offsetT <#>   (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <*> widgets2
+            bres <- ui . calmT $ (\i k j-> reduceDiffList  arraySize  i j k) <$>facts offsetT <#>   (foldr (liftA2 (:)) (pure [])  ( snd <$>cplug)) <*> widgets2
             pini <- currentValue (facts bres)
             element offsetDiv # set children (fmap getElement widgets)
-            let size = maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> ( applyIfChange <$> ctdi' <*> bres)
+            size <- ui .calmT $  maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> ( applyIfChange <$> ctdi' <*> bres)
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ LayoutWidget bres composed (F.foldl1 verticalL  <$> (sequenceA $ getLayout <$> widgets))
          KOptional -> do
