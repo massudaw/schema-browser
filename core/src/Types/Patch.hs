@@ -1042,7 +1042,7 @@ instance Monad Editor where
   return = pure
   Diff i >>= j = j i
   Keep >>= j = Keep
-  Delete >>= j = Keep
+  Delete >>= j = Delete
 
 instance Monad PathFTB where
   PAtom i >>= j = j i

@@ -205,7 +205,7 @@ getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
       rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
       table = lookTable rinf $ snd j
       nextRef :: [FTB (TBData Key Showable)]
-      nextRef = fmap (\i -> _fkttable $ justError "no it" $ kvLookup (S.singleton $ Inline r) i ) set
+      nextRef = catMaybes $ fmap (\i -> _fkttable  <$> kvLookup (S.singleton $ Inline r) i ) set
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
         joinFK <- getFKS rinf predtop table  refs tbf
@@ -230,9 +230,9 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
         table = lookTable rinf $ snd j
         genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
         primPredicate o k  = do
-          i <- unSOptional (_tbattr (lkAttr k o))
+          i <- unSOptional ._tbattr  =<< lkAttr k o
           return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-        lkAttr k v = justError ("no attr " <> show k) $ kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
+        lkAttr k v =  kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
         refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
         predm = refs <> predicate i predtop
     tb2 <-  case predm of

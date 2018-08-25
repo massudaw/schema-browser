@@ -338,7 +338,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   -- The new functions is
   -- t == 0 = initial value
   -- t  > 0 = latest (input event , function evaluated)
-  out <- ui $ stepperT  Keep (unionWith const (const Keep <$> rumors preoldItems) pout)
+  out <- ui $ calmT =<< stepperT  Keep (unionWith const (const Keep <$> rumors preoldItems) pout)
   ev <- buildUIDiff (buildPrimitive [FRead]) (const True) (keyType i) ((fmap (fmap (fmap (\(PFun _ _ v) -> v)))<$>plugItens) <> [(Many [],((fmap (\(PFun _ _ v) -> v)))<$> out)]) (fmap _tbattr <$> preoldItems )
   return $ LayoutWidget  out (getElement ev) (getLayout ev)
 
@@ -389,7 +389,7 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
         sumButtom itb =  do
           el <- UI.div
           let prev = (join . fmap unLeftItens . join . fmap (M.lookup itb . unKV) <$> oldItems)
-              edit = (\j -> ( (maybe Delete Diff. unLeftItensP <=< maybe Keep Diff . L.find (\a -> index a == itb)) =<< j )) <$> resei
+              edit = ((maybe Delete Diff. unLeftItensP <=< maybe Keep Diff . L.find (\a -> index a == itb)) =<< ) <$> resei
           element =<< labelCaseDiff inf (justError "no sum column" $ M.lookup itb (unKV k)) prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j))<$> prev <*> edit)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
@@ -398,26 +398,24 @@ anyColumns inf hasLabel el constr table refs plugmods  k oldItems cols =  mdo
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
-        resei = (\j i -> join $ joinEmpty . defaultInitial j <$> i) <$>  facts initialAttr <#> triding fks
+        resei = (\j i -> {-traceShow ("resei",i,j) $-} join $ defaultInitial j <$> i) <$>  facts initialAttr <#> triding fks
           where
-            joinEmpty [] = Keep
-            joinEmpty  i = Diff i
-            defaultInitial ini new | traceShow ("defaultIni",ini,new) False = undefined
+            -- defaultInitial ini new | traceShow ("defaultIni",ini,new,fmap index ini == Just (index new)) False = undefined
             defaultInitial ini new
               = case {-traceShow (index <$> ini,index new,new)-} ini of
                   Nothing -> case unLeftItens (create new  :: TB Key Showable) of
-                              Just _ -> compact $ (patch <$> (addDefault .snd<$> cols:: [TB Key Showable])) ++ [new]
-                              Nothing -> []
+                               Just _ -> Diff $ compact $ (patch <$> (addDefault .snd<$> cols:: [TB Key Showable])) ++ [new]
+                               Nothing -> Keep
                   Just ini -> if index ini == index new
-                      then [new]
-                      else  compact $ [patch (addDefault ini :: TB Key Showable)] ++ [new]
+                                  then maybe Delete (const (Diff [new])) (unLeftItensP new)
+                                  else  Diff $ compact $ [patch (addDefault ini :: TB Key Showable)] ++ [new]
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
-      let computeResult i j = case  traceShow ("result",projectAttr i ,projectAttr (apply i j)) (isJust (projectAttr (apply i j)) ,isJust (projectAttr i)) of
+      let computeResult i j = case  {-traceShow ("result",j,projectAttr i ,projectAttr (apply i j)) -}(isJust (projectAttr (apply i j)) ,isJust (projectAttr i)) of
             (False,True) -> Delete
             (False,False)-> Keep
             (_,_) -> j
-      return (LayoutWidget (computeResult <$> oldItems <*> resei) listBody (getLayout fks))
+      return (LayoutWidget ( computeResult <$> facts oldItems <#> resei) listBody (getLayout fks))
   where
     meta = tableMeta table
     run (l,m) = (l,do
@@ -457,7 +455,7 @@ buildFKS inf hasLabel el constr table refs plugmods   oldItems =  F.foldl'  run 
           then do
             (\i -> LayoutWidget (triding wn) i (getLayout wn)) <$> el # set children [getElement wn]
           else do
-            v <- labelCaseDiff inf m oldref (fmap traceShowId $ diff' <$> facts oldref <#> checkDefaults inf table  (index m) (wn,oldref))
+            v <- labelCaseDiff inf m oldref (diff' <$> facts oldref <#> checkDefaults inf table  (index m) (wn,oldref))
             out <- el # set children [getElement v,getElement  wn]
             return $ LayoutWidget (triding wn) out (getLayout wn)
         return (w <> [( index m,(lab,oldref))] )
@@ -549,7 +547,7 @@ validateRow inf table fks =
     ifValid i j =
       if isJust j
         then i
-        else  Keep
+        else (if isDiff i then Keep else i)
     sequenceTable fks =
       reduceTable <$> Tra.sequenceA (triding . fst . snd <$> fks)
     isValid fks = sequenceA <$> sequenceA (uncurry (checkDefaults inf table) <$> fks)
@@ -557,15 +555,16 @@ validateRow inf table fks =
 checkDefaults inf table k  (r, i) =  applyDefaults inf table k  <$> facts i <#> (triding r)
 
 
-applyDefaults inf table k i j = -- traceShowIdPrefix (show k) $
-  join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
+applyDefaults inf table k i j = {-traceShow ("apply",j,i,join (applyIfChange i j) <|> join (createIfChange (def j))) $ -- traceShowIdPrefix (show k)  -}
+  join (applyIfChange i j) <|> join (createIfChange (def j))
   where
     defTable = defaultTableType inf table
+    defField = L.find (\a -> index a == k) defTable
     def (Diff i) =
       Diff . maybe i (\a -> head $ compact [a, i]) $
       L.find (\a -> index a == k) defTable
-    def Keep = maybe Keep Diff $ L.find (\a -> index a == k) defTable
-    def i = Keep -- error ("Invalid pattern: " ++ show (k,i))
+    def Keep = maybe Keep Diff defField
+    def Delete = maybe Delete (const Keep) defField
 
 
 rowTableDiff
@@ -616,7 +615,8 @@ eiTableDiff
   -> TBData CoreKey ()
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
-eiTableDiff inf table constr refs plmods ftb@k oldItems = do
+eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
+  oldItems <- ui $ calmT preoldItems
   plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
@@ -646,7 +646,8 @@ eiTableDiff inf table constr refs plmods ftb@k oldItems = do
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
-  return $ LayoutWidget output body layout
+  out <- ui $ calmT output
+  return $ LayoutWidget out body layout
 
 
 loadItems
@@ -877,7 +878,7 @@ dynHandlerPatch hand val valp check ix (l,old)= do
     oldC <- ui (calmT old)
     let next = hand ix valix plix
     el <- switchUILayout (compactPlugins valix plix) UI.div oldC next
-    return (l <> [el], flip (\i j ->   maybe False check i && j ) <$> facts oldC <#> ((\ i j -> join $ applyIfChange i j <|> createIfChange j) <$> valix <*> triding el))
+    return (l <> [el], flip (\i j -> maybe False check i && j ) <$> facts old <#> ((\ i j -> join $ applyIfChange i j <|> createIfChange j <|> Just i) <$> valix <*> triding el))
 
 
 reduceDiffList
@@ -907,7 +908,8 @@ reduceDiffList arraySize o i plugM
          unDiff o i = Nothing
 
 
-reduceOptional :: Editor (PathFTB a) -> Editor (PathFTB a)
+reduceOptional :: Show a => Editor (PathFTB a) -> Editor (PathFTB a)
+-- reduceOptional i  | traceShow ("reduceOptional",i) False = undefined
 reduceOptional Delete   = Diff $ POpt Nothing
 reduceOptional Keep  = Keep
 reduceOptional (Diff i )  = Diff (POpt (Just  i))
@@ -1429,9 +1431,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           checkOutput old tdfk =
             let oldn =  lintReflect old
             in diff' oldn (lintReflect (join $ applyIfChange  oldn  tdfk))
-
-      o <- ui $ calmT (checkOutput <$> facts oldItems <#> tdfk )
-      return $ LayoutWidget o top layoutT
+      out <- ui $ calmT ( checkOutput <$> facts oldItems <#> tdfk )
+      return $ LayoutWidget  out top layoutT
 
 traceShowIdPrefix s i = traceShow (s,show i) i
 
@@ -1449,7 +1450,7 @@ fkUITableGen ::
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
-  = fmap (join. fmap (maybe Keep Diff. recoverPFK setattr rel)) <$> buildUIDiff (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) ((\((TBRef (i,j))) ->  not $ kvNull j)) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj)) (join .fmap liftFKM<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
+  = fmap (join. fmap (maybe Keep Diff. recoverPFK setattr rel) ) <$> buildUIDiff (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) ((\((TBRef (i,j))) ->  not $ kvNull j)) (mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj)) (join .fmap liftFKM<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
     liftRelation o = o
