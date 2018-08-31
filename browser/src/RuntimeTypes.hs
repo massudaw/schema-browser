@@ -265,18 +265,17 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
   first (m,) <$>case flip G.lookup l =<< (G.notOptionalM i)  of
     Just v -> do
       (el ,u) <- applyUndo v patom
-      let pkel = G.getIndex m el
-          notEmpty (G.Idex  []) = False
-          notEmpty _ = True
       return $
-        ((if (pkel == i) || maybe False notEmpty (G.notOptionalM pkel)
-          then G.update (G.notOptional i) (flip apply patom)
-          else G.insert (el, G.tbpred m el) G.indexParam .
-            G.delete (G.notOptional i) G.indexParam) l, RowPatch (ipa,PatchRow u))
+        (case G.notOptionalM (G.getIndex m el) of
+          Just pk ->  (if i == pk
+            then G.update (G.notOptional i) (flip apply patom)
+            else G.insert (el, G.tbpred m el) G.indexParam .
+                 G.delete (G.notOptional i) G.indexParam) l
+          Nothing -> G.update (G.notOptional i) (flip apply patom) l, RowPatch (ipa,PatchRow u))
 
     Nothing -> do
       el <-maybe (Left $ "cant create row" ++ show patom) Right $ createIfChange patom
-      return $ (G.insert (el, G.tbpred m el) G.indexParam l,RowPatch (ipa,DropRow ))
+      return $ (G.insert (el, i ) G.indexParam l,RowPatch (ipa,DropRow ))
   where
     i = fmap create ipa
 applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow (elp))) =

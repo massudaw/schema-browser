@@ -608,7 +608,6 @@ plugKeyToRel inf table ftb (i,o) = traceShow (inp,out) S.fromList ( inp  <>  out
         genRel (Nested i j) = concat $ fmap (RelAccess (F.toList i)). relAccesGen' <$> F.toList j
         genRel (IProd _ i) = [RelAccess [Inline i] (Inline i) ]
         out = concat . fmap (fmap Output .relAccesGen') . filter (isJust. filterEmpty) . F.toList $ liftAccessU inf tname  o
-
         filterEmpty (Nested _ (Many [])) = Nothing
         filterEmpty (Nested _ (ISum [])) = Nothing
         filterEmpty i = Just i

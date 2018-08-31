@@ -410,7 +410,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 match (OrColl l) =  sum $ match <$> l
                 match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
             complements = catMaybes $ (\i -> recComplement inf (tableMeta table) i tbf) <$> G.toList reso
-        if fixed /= mempty && isComplete fixed == G.size reso
+            size = G.size reso
+        if fixed /= mempty && isComplete fixed == size && size /= 0
            then
             case L.null complements of
               True -> do
@@ -515,7 +516,7 @@ convertChanTidings0
 convertChanTidings0 inf table fixed ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
-    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j (traceShow i i) )) <$> evdiff)
+    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
     return  (snd <$> t)
 
 tryTakeMany :: TChan a -> STM [a]
