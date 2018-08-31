@@ -180,9 +180,11 @@ ifield ::
        (Monad m ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID p)  (Atom (FTB Showable )) m i a
        -> PluginM (AttributePath k p)  (Atom (TBData k Showable ))  m i a
-ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT4 (\ v -> [PAttr s <$> v]) (concat . fmap (catMaybes .fmap pvalue) ) (fmap (_tbattr .justError ("no field " ++ show s ).indexField (IProd Nothing s))) . op ))
+ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT4 (\ v -> [PAttr s <$> v]) (concat . fmap (catMaybes .fmap pvalue) ) (fmap (value .justError ("no field " ++ show s ).indexField (IProd Nothing s))) . op ))
   where pvalue (PAttr k v) | k == s = Just v
         pvalue i = Nothing
+        value (Attr k v) = v
+        value i = error (show (s,i))
 
 iinlineR ::
        (Monad m ,Patch s ,Show s ,Show k ,Ord k) => k
@@ -200,10 +202,11 @@ iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInli
 
 
 iforeign ::
-       (Monad m ,Patch s ,Show s ,Show (Index s) ,Show k ,Ord k) => [Rel k]
-       -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
-       -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue ))(fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(Non.fromList s) (Many []))   ) ). op ))
+   (Monad m ,Patch s ,Show s ,Show (Index s) ,Show k ,Ord k)
+  => [Rel k]
+  -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
+  -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested(Non.fromList s) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 

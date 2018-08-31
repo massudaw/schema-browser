@@ -14,10 +14,12 @@ module Types.Common
   ( TB(..)
   , TBRef(..)
   , _fkttable
+  , _tbattr
   , ifkttable
   , mapFValue
   , mapFAttr
   , replaceRecRel
+  , testPM
   , traFAttr
   , traFValue
   , relSort
@@ -74,6 +76,7 @@ module Types.Common
   , attrLookup
   , unkvlist
   , sortedFields
+  , sortRels
   , sortValues
   , kvmap
   , kattr
@@ -124,6 +127,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Set as S
 import qualified Data.Text as T
+import Data.Graph
 import Data.Text (Text)
 import Data.Traversable (Traversable, traverse)
 import Debug.Trace
@@ -166,6 +170,12 @@ newtype MutRec a = MutRec
   { unMutRec :: [a]
   } deriving (Eq, Ord, Show, Functor, Foldable, Generic, Binary, NFData)
 
+sortRels
+  :: (P.Poset k ,Show k,Ord k) =>
+  [Set (Rel k)]  -> [Set (Rel k)]
+sortRels = fst .topSortRels -- fmap (originalRel) .P.sortBy (P.comparing id) . fmap relSort
+
+
 
 sortedFields
   :: (P.Poset k ,Show a,Show k,Ord k)
@@ -173,7 +183,6 @@ sortedFields
   -> [(Set (Rel k) , TB k a)]
 sortedFields = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO . _kvvalues
 
-testPM = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO $ PM.fromList [(relSortL [Inline 1],1),(relSortL [Inline 2],1),(relSortL [Rel (RelAccess [Inline (3 :: Int)] (Inline 3)) (Flip Contains) 4],3 ::Int), (relSortL [Inline 4],1),(relSortL [Inline 3],1)]
 
 isInline (Inline i ) = True
 isInline _ = False
@@ -192,7 +201,7 @@ instance  Ord k => PartialOrd (RelSort k) where
 instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
   compare (RelSort inpi outi i ) (RelSort inpj outj j) =
     case (  inline i j
-        , comp outi inpj
+         , comp outi inpj
          , comp outj inpi
          , P.compare inpi inpj
          , P.compare outi outj)
@@ -217,6 +226,31 @@ instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
         | S.empty == j = P.EQ
       comp i j = P.compare i j
 
+testPM =  originalRel <$> [(relSortL [Inline 3]),(relSortL [Inline 1]),(relSortL [Inline 2]),(relSortL [Output (Inline 4),Rel (RelAccess [Inline (3 :: Int)] (Inline 3)) (Flip Contains) 4]), (relSortL [Inline 4]),relSortL [Rel (Inline 3) Contains 5]]
+
+
+topSortRels :: (Show k,Ord k) => [Set (Rel k)] ->  ([Set (Rel k)],[Int])
+topSortRels l = ((l!!) <$> traceShowId sorted,sorted)
+  where
+    edgeList = traceShowId $ concat $ concat $ deps
+    sorted = topSort (buildG (0,L.length l - 1 ) edgeList)
+    edges = zip  l [0..]
+    outputMap = traceShowId $ Map.fromListWith (<>) $ fmap pure . first outputs <$> edges
+    deps = findDeps <$> edges
+    outputs i = S.fromList $ concat $ catMaybes $ _relOutputs <$> S.toList i
+    findDeps (l,ix) = findDep ix <$> S.toList l
+    findDep ix (RelAccess l _)
+      = maybe [] (fmap (,ix) )$ Map.lookup (outputs $ S.fromList l) outputMap
+    findDep ix rel@(Rel r _ _)
+      | not (isRelAccess r) && isNothing (_relOutputs rel) = maybe [] (fmap (,ix)) $ Map.lookup (outputs (S.singleton r)) outputMap
+    findDep ix (Rel r _ _) = findDep ix r
+    findDep ix (RelFun _ _ l) = concat $ findDep ix . fix <$> l
+      where fix (Inline i) =  (RelAccess [Inline i] (Inline i))
+            fix i = i
+    findDep ix (Inline i) = [(ix,ix)]
+    findDep ix (Output (RelAccess i _ ) ) = maybe [] (fmap (ix,)) $ Map.lookup (outputs $ S.fromList i) outputMap
+    findDep ix (Output i) = maybe [] (fmap (ix,)) $ Map.lookup (outputs $ S.singleton i) outputMap
+    findDep ix c = []
 
 
 kvlist :: Ord k => [TB k a] -> KV k a
@@ -321,6 +355,7 @@ instance NFData BinaryOperator
 
 data Rel k
   = Inline { _relOri :: k }
+  | Output { _relAccess :: Rel k }
   | Rel { _relAccess :: Rel k
         , _relOperator :: BinaryOperator
         , _relTip :: k }
@@ -340,13 +375,15 @@ _relTarget i = error (show i)
 
 _relOrigin (Rel i _ _) = _relOrigin i
 _relOrigin (Inline i) = i
+_relOrigin (Output i) = _relOrigin i
 _relOrigin (RelAccess _ i) = _relOrigin i
 _relOrigin (RelFun i _ _) = i
 _relOrigin (RelAlias i _) = i
 
 -- TODO Fix Rel to store proper relaaccess
 _relInputs (Rel i _ _) = _relInputs i
-_relInputs (Inline i) = Nothing
+_relInputs (Inline i) = Just [i]
+_relInputs (Output i) = Nothing
 _relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relOutputs <$> i)
 _relInputs (RelFun _ _ l) = nonEmpty $ concat $ catMaybes $ fmap _relOutputs l
 _relInputs (RelAlias i l) = Just $ fmap _relOrigin l
@@ -361,6 +398,7 @@ _relOutputs (Rel i Equals _) =  _relOutputs i
 _relOutputs (Rel i (Flip Equals) _) = _relOutputs i
 _relOutputs (Rel _ _ _) = Nothing
 _relOutputs (Inline i) = Just [i]
+_relOutputs (Output i) = _relOutputs i
 _relOutputs (RelAccess i _) = Nothing -- Just [i]
 _relOutputs (RelFun i _ _) = Just [i]
 _relOutputs (RelAlias i _) = Nothing
@@ -458,14 +496,18 @@ firstATB f (ARef i) = ARef (mapKey f i)
 firstATB f (ARel m  i) = ARel (mapKey' f m)  (mapKey f i)
 
 -}
+_tbattr (Attr _ v ) = v
+_tbattr (Fun _ _ v) = v
+_tbattr i = error "not a attr"
+
 data TB k a
   = Attr -- Primitive Value
      { _tbattrkey :: k
-     , _tbattr :: FTB a }
+     , _tbattrvalue :: FTB a }
   | Fun -- Function Call
      { _tbattrkey :: k
      , _fundata :: (Expr, [Rel k])
-     , _tbattr :: FTB a }
+     , _tbattrvalue :: FTB a }
   | IT -- Inline Table
      { _tbattrkey :: k
      , _ifkttable :: FTB (KV k a) }
@@ -544,6 +586,10 @@ instance Applicative FTB where
 instance Enum a => Enum (FTB a) where
   toEnum = TB1 . toEnum
   fromEnum (TB1 i) = fromEnum i
+
+instance Floating a => Floating (FTB a) where
+  (TB1 i) ** TB1 j  = TB1 (i ** j)
+
 
 instance Real a => Real (FTB a) where
   toRational (TB1 i) = toRational i
@@ -782,6 +828,7 @@ indexerRel field =
 
 renderRel :: Show k => Rel k -> String
 renderRel (Inline k) = show k
+renderRel (Output k) = renderRel k ++ "="
 renderRel (RelFun k expr rel) = show k ++ " = " ++ renderFun expr rel
   where
     renderFun :: Show k => Expr -> [Rel k] -> String

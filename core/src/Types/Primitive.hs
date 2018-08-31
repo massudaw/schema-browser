@@ -915,6 +915,11 @@ newKey table name ty =
 
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
+relAccesGen' :: Access k -> [Rel k]
+relAccesGen' (IProd i l) = [Inline l]
+relAccesGen' (Nested l (Many m)) =
+  RelAccess (F.toList l)  <$> (concat  $ relAccesGen' <$> F.toList m)
+
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l
 relAccesGen (Nested l (Many [m])) =

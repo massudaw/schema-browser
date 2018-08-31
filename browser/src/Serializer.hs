@@ -151,7 +151,7 @@ class IsoProfunctor f => IsoDivisible f where
 
 instance (Monoid j ,Monoid i) => IsoDivisible  (SIso i j) where
   itotal = isoMap (IsoArrow (justError "partial output") Just )
-  isplit (IsoArrow aenc adec) fa fb =  SIso (stoken fa  `mappend` stoken fb) (void . traverse (either (encodeIso'  fa.Just ) (encodeIso' fb . Just) ). fmap adec) (\i -> fmap aenc $ (Left <$> (decodeIso fa $ i)) <|> (Right <$> (decodeIso fb $ i)) )
+  isplit (IsoArrow aenc adec) fa fb =  SIso (stoken fa  `mappend` stoken fb) (void . traverse (either (encodeIso'  fa.Just ) (encodeIso' fb . Just) ). fmap adec) (\i -> fmap aenc $ (Left <$> (decodeIso fa  i)) <|> (Right <$> (decodeIso fb i)) )
     where
           pR (Right i) = Just i
           pR i = Nothing
@@ -257,8 +257,6 @@ nest :: (Functor f, DecodeTable a, DecodeTB1 f) =>
 nest ix = nestWith ix isoTable
 
 traverseIso  (SIso g k l) (SIso f i j)=  SIso (f,g) (tell . (execWriter . i) . fmap (execWriter . k)) (fmap l . j)
-
-
 
 instance Category IsoArrow where
   id = IsoArrow id id

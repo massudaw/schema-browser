@@ -120,9 +120,7 @@ viewerMode six inf table tix cli cliTid = do
 
   nav  <- buttonDivSet  ["Edit","Table"] (pure Nothing)
       (\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-sm btn-default pull-right" )
-
   v <- ui $ currentValue (facts tdi)
-
   cru <- switchManyUI (triding nav) $
     M.fromList [
     ("Edit",do

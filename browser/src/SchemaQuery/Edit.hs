@@ -222,7 +222,7 @@ tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
 tbRefFun rel2 = (snd.unTBRef,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,recInsert)
 
 tbInsertRef ::Show b => RelOperations b -> KVMetadata Key ->  FTB b -> TransactionM (FTB b)
-tbInsertRef (funi,funo,edit,insert) m2 = mapInf m2 . traverse  (fmap funo . insert m2 .funi)
+tbInsertRef (funi,funo,edit,insert) m2 = mapInf m2 . traverse (fmap funo . insert m2 .funi)
 
 mapInf m2 = localInf (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf)))
 

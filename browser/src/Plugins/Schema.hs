@@ -119,8 +119,8 @@ addPlugins iniPlugList smvar = do
         let (inp,out) = pluginStatic dyn
         return $ kvlist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                      , Attr "table" (txt (_bounds dyn) )
-                     , IT "input" (array (TB1 .encodeT ) (list inp))
-                     , IT "output" (array (TB1 .encodeT) (list out))
+                     , IT "input" (opt (array (TB1 .encodeT )) (list' inp))
+                     , IT "output" (opt (array (TB1 .encodeT)) (list' out))
                      , Attr "plugin" (TB1 $ SDynamic (HDynamic (toDyn dyn ))) ]
           where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (fetchData  (iniRef  dbstats). pure )

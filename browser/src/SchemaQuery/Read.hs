@@ -515,7 +515,7 @@ convertChanTidings0
 convertChanTidings0 inf table fixed ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
-    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
+    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j (traceShow i i) )) <$> evdiff)
     return  (snd <$> t)
 
 tryTakeMany :: TChan a -> STM [a]

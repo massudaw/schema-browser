@@ -596,6 +596,31 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
       returnA -< tbst
 
 
+delayedDate = FPlugins "Juros Atraso" "transactions" (DiffPurePlugin url)
+  where
+    url = proc t -> do
+      TB1 (STime (SDate s)) <- atAny "purchase_type"
+          [atR "recurring" (atR "recurring_date,expense_name" (idxM "scheduled_date"))
+          ,atR "scheduled" (idxM "scheduled_date")] -< t
+      TB1 (STime (STimestamp e)) <- atR "statement,account" (idxK "dtposted") -< t
+      let delta = diffDays (utctDay e) s
+      a <- idxK "amount"  -< t
+      m <- idxK "multa"  -< t
+      j <- idxK "juros"  -< t
+      odxR "multa_real" -< ()
+      returnA -< Just $ [PAttr "multa_real" (POpt . Just . patch $ a*(1 + m)*(1 + j)^(fromIntegral delta) -a )]
+
+
+
+jurosMulta = FPlugins "Valor Real" "transactions" $ DiffPurePlugin url
+  where
+    url = proc t -> do
+      fn <- idxK "amount" -< t
+      d <- idxM "desconto" -< t
+      m <- idxM "multa_real" -< t
+      odxR "valor_real" -< ()
+      returnA -< Just $ [PAttr "valor_real" (POpt . Just $ patch $ fn - fromMaybe 0 d + fromMaybe 0 m)]
+
 importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
   where
     tname = "account_file"
@@ -604,6 +629,9 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
       fn <- idxK "file_name" -< t
       i <- idxK "import_file" -< t
       row <- act (const ask )-< ()
+      atR "account" (
+        idxK "id_account"
+                    ) -< ()
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
@@ -760,4 +788,4 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       returnA -< artInp v
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [ subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , {-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [ delayedDate,jurosMulta,subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,{-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]

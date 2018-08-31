@@ -266,9 +266,11 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
     Just v -> do
       (el ,u) <- applyUndo v patom
       let pkel = G.getIndex m el
+          notEmpty (G.Idex  []) = False
+          notEmpty _ = True
       return $
-        ((if pkel == i
-          then G.update (G.notOptional i) (const el)
+        ((if (pkel == i) || maybe False notEmpty (G.notOptionalM pkel)
+          then G.update (G.notOptional i) (flip apply patom)
           else G.insert (el, G.tbpred m el) G.indexParam .
             G.delete (G.notOptional i) G.indexParam) l, RowPatch (ipa,PatchRow u))
 
