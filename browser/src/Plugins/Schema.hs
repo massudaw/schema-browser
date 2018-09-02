@@ -111,18 +111,18 @@ addPlugins iniPlugList smvar = do
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
         name <- nameM
         return $ kvlist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
-                     ,Attr "table" (txt (_bounds dyn) )
+                     ,Attr "table" (txt (_pluginTable dyn) )
                      ,Attr "plugin" (TB1 $ SDynamic (HDynamic (toDyn dyn ))) ]
-          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel(keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
+          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel(keyRef "name",Left (txt (_pluginName dyn ),Equals))]))) (mapKey' keyValue <$> plug)
     row dyn = do
         name <- nameM
         let (inp,out) = pluginStatic dyn
         return $ kvlist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
-                     , Attr "table" (txt (_bounds dyn) )
+                     , Attr "table" (txt (_pluginTable dyn) )
                      , IT "input" (opt (array (TB1 .encodeT )) (list' inp))
                      , IT "output" (opt (array (TB1 .encodeT)) (list' out))
                      , Attr "plugin" (TB1 $ SDynamic (HDynamic (toDyn dyn ))) ]
-          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
+          where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl $ fixrel (keyRef "name",Left (txt (_pluginName dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (fetchData  (iniRef  dbstats). pure )
   inotify <- liftIO initINotify
   let

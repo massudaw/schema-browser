@@ -41,6 +41,7 @@ executable schema-browser
   build-depends:
      core
    , browser
+   , master-plan
    , exceptions
    , base == 4.10.*
    , postgresql-simple >=0.4 && <0.6

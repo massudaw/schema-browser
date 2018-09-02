@@ -435,6 +435,7 @@ data FieldModifier
   = FRead
   | FWrite
   | FPatch
+  | FTemp
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData FieldModifier
@@ -909,9 +910,12 @@ accesRelGen' (Inline i) = IProd Nothing i
 accesRelGen' (RelAccess l m) =
   Nested (Non.fromList l) (Many [(accesRelGen' m)])
 
+newKey' mode tun max name ty =
+  let un = max + 1
+  in  Key name Nothing mode un Nothing tun ty
+
 newKey table name ty =
-  let un = maximum (keyPosition <$> rawAttrs table) + 1
-  in  Key name Nothing [FRead,FWrite] un Nothing (tableUnique table) ty
+  newKey' [FRead,FWrite] (tableUnique table)  (maximum (keyPosition <$> rawAttrs table)) name ty
 
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
@@ -919,6 +923,8 @@ relAccesGen' :: Access k -> [Rel k]
 relAccesGen' (IProd i l) = [Inline l]
 relAccesGen' (Nested l (Many m)) =
   RelAccess (F.toList l)  <$> (concat  $ relAccesGen' <$> F.toList m)
+relAccesGen' (Rec ix v ) = concat $ relAccesGen' <$> F.toList v
+relAccesGen' (Point ix ) = [] -- error "Point not implemented"
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l

@@ -6,6 +6,7 @@ module SchemaQuery.Read
   -- Create fresh variables
    createFresh
   -- Database Read Only Operations
+  , select
   , selectFrom
   , selectFromProj
   , getFrom
@@ -33,6 +34,7 @@ module SchemaQuery.Read
 import Control.Arrow
 import Control.Concurrent
 import SchemaQuery.Store
+import Serializer
 import Text
 import Control.Concurrent.STM
 import Control.Exception (throw)
@@ -622,6 +624,11 @@ fromTable origin whr = do
   inf <- askInf
   (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing (tablePredicate inf origin whr) Nothing
   return (origin,inf,primary rep)
+
+select table  = do
+  inf <-askInf
+  (_,(_,TableRep (_,_,evMap ))) <- tableLoaderAll (lookTable inf table) Nothing mempty Nothing
+  return (decodeT . mapKey' keyValue <$> evMap)
 
 
 --- Plugins Interface Methods

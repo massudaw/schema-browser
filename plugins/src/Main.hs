@@ -27,19 +27,18 @@ import qualified Data.Text as T
 
 main :: IO ()
 main = do
+  print "Start Server"
   db <- argsToState <$> getArgs
   smvar <- createVar
   let
       amap = authMap
-  print "Dyn Load Plugins"
   print "Load Metadata"
   (metas, lm) <-
-    runDynamic $keyTablesInit smvar ("metadata", postgresUser ) amap []
-  print "Start Server"
+    runDynamic $keyTablesInit smvar ("metadata", postgresUser ) amap
   print "Load Plugins"
   (plugListLoad, pfin) <-
     runDynamic $ do
-      keyTablesInit smvar ("code", postgresUser) amap []
+      keyTablesInit smvar ("code", postgresUser) amap
       addPlugins plugList smvar
   print "Register Plugins"
   regplugs <- plugs smvar amap db plugListLoad
@@ -87,13 +86,13 @@ withSelector s m  = do
     amap = authMap
 
   (metas, lm) <-
-    runDynamic $ keyTablesInit smvar ("metadata", postgresUser) amap []
+    runDynamic $ keyTablesInit smvar ("metadata", postgresUser) amap
   (plugListLoad, pfin) <-
     runDynamic $ do
-      keyTablesInit smvar ("code", postgresUser) amap []
+      keyTablesInit smvar ("code", postgresUser) amap
       addPlugins plugList smvar
   regplugs <- plugs smvar amap db plugListLoad
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap regplugs
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap
   startGUI defaultConfig {jsStatic = Just "static", jsCustomHTML = Just "index.html"} (\w -> do
     let
       table = lookTable inf m

@@ -14,6 +14,7 @@ module Step.Client
   , nameI
   , callI
   , atAny
+  , atAnyM
   , idxA
   , atMA
   , callO
@@ -54,6 +55,7 @@ act :: (Monoid s, Monad m) => (a -> m b) -> Parser (Kleisli m) s a b
 act a = P mempty (Kleisli a)
 
 atAny k = atP k . anyP
+atAnyM k = atMR k . anyP
 
 allP = id
 
@@ -71,9 +73,25 @@ anyP ps =
     fsum = fmap (\(P s _) -> fst s) ps
     ssum = fmap (\(P s _) -> snd s) ps
 
+atMR k (P (fsum, ssum) (Kleisli a)) =
+  P (nest fsum, nest ssum) (Kleisli ((\v -> do
+      i <- ask
+      let o = unSOptional . indexTB1 ind $ i
+      traverse (\i -> local (unTB1 . fromJust .unSOptional . indexTB1 ind) (a v)) o)))
+  where
+    unTB1 (TB1 i) = i
+    unTB1 j = error (show j)
+    nest (Many []) = Many []
+    nest (ISum []) = Many []
+    nest ls = Many [Nested (Non.fromList (Inline .iprodRef <$> ind)) ls]
+    ind = splitIndex (Just $ Not IsNull) k
+
+
 atP k (P (fsum, ssum) (Kleisli a)) =
   P (nest fsum, nest ssum) (Kleisli (fmap (local (unTB1 . indexTB1 ind)) a))
   where
+    unTB1 (TB1 i) = i
+    unTB1 j = error (show j)
     nest (Many []) = Many []
     nest (ISum []) = Many []
     nest ls = Many [Nested (Non.fromList (Inline .iprodRef <$> ind)) ls]
@@ -145,25 +163,15 @@ maybeLocal g f = do
   maybe (return Nothing) (\i -> local (const i) g) (g v)
 
 atR ::
-     (Ord k, KeyString k, MonadReader (TBData k Showable) m)
+     (Show k,Ord k, KeyString k, MonadReader (TBData k Showable) m)
   => String
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) a b
   -> Parser (Kleisli m) (Union (Access Text), Union (Access Text)) a b
 atR k = atP k
 
-atK = at Nothing
 
-atMR = at notNull
-  where
-    at b i (P s (Kleisli j)) =
-      P
-        (BF.second (nest (Inline . iprodRef <$> ind Nothing)) .
-          BF.first (nest (Inline . iprodRef <$> ind b)) $
-         s)
-        (Kleisli
-           (\i -> maybeLocal (fmap unTB1 . unLeftTB1 . (indexTB1 (ind b))) (j i)))
-      where
-        ind b = splitIndex b i
+
+atK = at Nothing
 
 nameI i (P (l, v) d) = P (Many [Rec i l], v) d
 

@@ -257,7 +257,7 @@ patchMod m pk patch = do
 getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
 getRow table  delayed (G.Idex idx) = do
   inf <- askInf
-  liftIO $ check inf delayed
+  liftIO $ check inf (filterReadable delayed)
   where
     m = tableMeta table
     check inf delayed = do
@@ -271,6 +271,9 @@ getRow table  delayed (G.Idex idx) = do
            [i] ->return $ patch i
            [] -> error "empty query"
            _ -> error "multiple result query"
+
+filterReadable = kvFilter (\k -> attr k)
+  where attr = F.all (\k -> L.elem FRead (keyModifier (_relOrigin k)))
 
 selectAll
   ::
@@ -287,7 +290,7 @@ selectAll meta m offset i  j k st = do
   let
       unIndex (Idex i) = i
       unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
-  (l,i) <- liftIO$ paginate inf meta m k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
+  (l,i) <- liftIO$ paginate inf meta (filterReadable m) k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
   return (i,(TableRef $ G.getBounds meta i) ,l)
 
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )

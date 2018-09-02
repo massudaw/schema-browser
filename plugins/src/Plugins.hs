@@ -13,6 +13,7 @@ import System.Process
 import Data.Time
 import Data.Semigroup
 import Control.Monad.Catch
+import MasterPlan.Data
 import Location
 import Step.Host (findFK)
 import Data.Interval(Extended(..),upperBound)
@@ -751,6 +752,36 @@ queryArtCrea = FPlugins "Documento Final Art Crea" tname $ IOPlugin url
       let ao =  Just $ kvlist [attrT ("art",    LeftTB1 $ fmap (LeftTB1 . Just . TB1 ) b)]
       returnA -< ao
 
+costPlugins  = FPlugins pname tname $ StatefullPlugin
+ [(([],[("cost",atPrim PDouble),("trust",atPrim PDouble),("duration",atPrim PDouble),("progress",atPrim PDouble)]),DiffPurePlugin  url)]
+  where
+    pname = "Task Cost"
+    tname = "tasks"
+    url :: ArrowReaderDiffM Identity
+    url = proc t -> do
+      vm <- reduced -< ()
+      odxR "cost" -< ()
+      odxR "trust" -< ()
+      odxR "progress" -< ()
+      odxR "duration" -< ()
+      returnA -< (\v -> [ PAttr "cost" (PAtom . SDouble $ realToFrac (cost v))
+                     , PAttr "trust" (PAtom . SDouble $ realToFrac (trust v))
+                     , PAttr "progress" (PAtom . SDouble $ realToFrac (progress v))
+                     , PAttr "duration" (PAtom . SDouble $ realToFrac (duration v))
+                        ]) <$> vm
+    reduced = nameI 0 $  atAnyM "child" [atom,prod,seq]
+    prod =  proc t -> do
+      c <- catMaybes <$>  atMA "product" (callI 0 reduced) -< ()
+      returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
+    seq = proc t -> do
+      c <- catMaybes <$> atMA "sequence"  (callI 0 reduced)-< ()
+      returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
+    atom = atMR "atomic" $ proc i ->  do
+      c <- idxK "cost" -<()
+      t <- idxK "trust" -<()
+      p <- idxK "progress" -<()
+      d <- idxK "duration" -<()
+      returnA -< Atomic undefined  (Cost . realToFrac $ c) (Trust . realToFrac $ t) (Progress . realToFrac $ p) (Duration . realToFrac $ d)
 
 queryArtBoletoCrea = FPlugins pname tname $ IOPlugin  url
   where
@@ -788,4 +819,4 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       returnA -< artInp v
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [ delayedDate,jurosMulta,subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,{-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [ costPlugins,delayedDate,jurosMulta,subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,{-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]

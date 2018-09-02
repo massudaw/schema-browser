@@ -265,8 +265,8 @@ authMap schemaN =
       "code" -> codeOps
       i -> postgresOps
 
-loadSchema smvar schemaN user auth plugList =
-  keyTables smvar (schemaN,user) auth plugList
+loadSchema smvar schemaN user auth =
+  keyTables smvar (schemaN,user) auth
 
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
@@ -321,9 +321,9 @@ databaseChooser cookies smvar metainf sargs plugList init = do
     createSchema user e@(db,(schemaN,(sid,ty))) = do
         case ty of
           "sql" -> do
-            loadSchema smvar schemaN user authMap plugList
+            loadSchema smvar schemaN user authMap
           "code" -> do
-            loadSchema smvar schemaN user authMap plugList
+            loadSchema smvar schemaN user authMap
     tryCreate = (\i -> maybe (const $ return []) (\i -> mapM (createSchema i)) i)
 
   logOutB <- UI.button # set UI.class_ "col-xs-6" # set UI.text "Log Out" # set UI.class_ "btn btn-primary"
@@ -416,7 +416,7 @@ withInf plugs s v  = do
   smvar <- createVar
   let
     amap = authMap
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap plugs
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap
   v inf
 
 
@@ -426,7 +426,7 @@ testPlugin s t p  = do
   smvar <- createVar
   let
     amap = authMap
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser ) amap []
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser ) amap
   let (i,o) = pluginStatic p
   print $ liftAccessU inf t i
   print $ liftAccessU inf t o

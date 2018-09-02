@@ -54,11 +54,8 @@ plugs schm authmap db plugs = do
         findplug p = (,p). round . unTB1 . flip index1 (liftRel inf "plugins" $ keyRef "oid") . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) (primary t))
           where
             pred :: TBPredicate Key Showable
-            pred = WherePredicate $ AndColl [PrimColl $ fixrel (liftRel inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
+            pred = WherePredicate $ AndColl [PrimColl $ fixrel (liftRel inf "plugins" $ keyRef "name" , Left (txt $ _pluginName p,Equals))]
       return regplugs
-  atomically $ do
-    schmRef <-readTVar schm
-    modifyTVar (globalRef schmRef) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
   return regplugs
 
 
@@ -95,19 +92,19 @@ poller schmRef authmap user db plugs is_test = do
         pid = index1 tb (lrel "plugin")
     enabled = G.toList (primary polling)
     poll tb  = do
-      let plug = L.find ((==pname ). _name .snd ) plugs
+      let plug = L.find ((==pname ). _pluginName .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
           indexRow polling = justError (show (tbpred tb )) $ G.lookup (tbpred tb) (primary polling)
           tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
       schm <- atomically $ readTVar schmRef
-      (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , user ) authmap plugs
+      (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , user ) authmap
       (startP,_,_,current) <- checkTime metas (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p
               elemp = pluginRun (_plugAction p)
-              pname = _name p
-              a = _bounds p
+              pname = _pluginName p
+              a = _pluginTable p
           let iter polling = do
                   (start,end,curr,current) <- liftIO$ checkTime metas polling
                   liftIO$ putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)

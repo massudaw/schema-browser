@@ -124,8 +124,6 @@ data InformationSchemaKV k v
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
   -- Backend Operations
   , schemaOps :: SchemaEditor
-  -- Schema plugins
-  , plugins :: [Plugins]
   -- Global database references
   , rootRef :: TVar DatabaseSchema
   }
@@ -366,8 +364,8 @@ type VarDef = (Text,KType CorePrim)
 
 data FPlugins k =
     FPlugins
-      { _name  :: Text
-      , _bounds :: Text
+      { _pluginName  :: Text
+      , _pluginTable :: Text
       , _plugAction :: FPlugAction k
       }
 
@@ -391,6 +389,7 @@ pluginStatic' (IOPlugin  a) = staticP a
 pluginStatic' (DiffIOPlugin a) = staticP a
 pluginStatic' (DiffPurePlugin a) = staticP a
 pluginStatic' (PurePlugin  a) = staticP a
+pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
 
 pluginRun b@(IOPlugin _) = Right (pluginAction' b)
 pluginRun b@(PurePlugin _ ) = Right (pluginAction' b)
@@ -680,10 +679,11 @@ liftAccessF lk inf tname (Nested i c) = Nested (Non.fromList r) (liftAccessF lk 
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref = fmap ((fst lk) inf tname )<$> i
     tb = lookTable inf tname
-    n = justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (F.toList (_relOrigin <$> ref))== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    n = unRecRel $ justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (F.toList (_relOrigin <$> ref))== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
     (r,l) = case n of
         FKJoinTable  r l   ->  (r,l)
         FKInlineTable  r l   ->  ([Inline r],l)
+        i -> error (show i)
 liftAccessF _ _ _  i = error (show i)
 
 liftAccess = liftAccessF lookupKeyName
@@ -693,24 +693,29 @@ liftAccessU inf t = fmap (liftAccess inf t )
 lookAccess :: InformationSchema -> Text -> (Rel Text , [(Text,AccessOp Showable )]) -> (Rel Key, [(Key,AccessOp Showable )])
 lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (lookKey inf tname) <$> l2 )
 
-genPredicateFull
-  :: Show a =>
-     t
-     -> Access a
-     -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
-genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (IProd b l) =  (\i -> PrimColl (Inline l,Right i ))  <$> b
-genPredicateFull i (Nested p l) = fmap (\(a,b) -> (RelAccess (F.toList p) a , b )) <$> genPredicateFullU i l
-genPredicateFull _ i = error (show i)
+genPredicateFull'
+  :: Show a
+  => t
+  -> Map Int (Union (Access a))
+  -> Access a
+  -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
+genPredicateFull' i s (Rec ix l) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.insert ix l s) <$> F.toList l)
+genPredicateFull' i s (Point ix) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.delete ix  s) <$> F.toList (maybe [] F.toList $ M.lookup ix s))
+genPredicateFull' i s (IProd b l) =  (\i -> PrimColl (Inline l,Right i ))  <$> b
+genPredicateFull' i s (Nested p l) = fmap (\(a,b) -> (RelAccess (F.toList p) a , b )) <$> genPredicateFullU' i s l
+genPredicateFull' _ s i = error (show i)
 
-genPredicateFullU
-  :: Show a =>
-     t
-     -> Union (Access a)
-     -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
-genPredicateFullU i (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFull i <$> l)
-genPredicateFullU i (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU t = genPredicateFullU' t M.empty
+genPredicateFull t = genPredicateFull' t M.empty
+
+genPredicateFullU'
+  :: Show a
+  => t
+  -> Map Int (Union (Access a))
+  -> Union (Access a)
+  -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
+genPredicateFullU' i s (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
+genPredicateFullU' i s (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
 
 genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
 genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
