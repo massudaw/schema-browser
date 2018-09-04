@@ -140,9 +140,10 @@ getFrom table allFields b = do
   let
     m = tableMeta table
     comp = recComplement inf m b allFields
-  join <$> traverse (\comp -> do
+  join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
+    liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ b)
     v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
-    let newRow = apply b  v
+    let newRow = apply b v
     resFKS  <- getFKS inf mempty table  [newRow] comp
     let
       result = either (const Nothing) (diff b) (resFKS newRow)
@@ -224,10 +225,10 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
 getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins _ t  c)) tbf =  do
-  liftIO $ putStrLn ("LoadPlugin" <> show (t,pluginStatic' c))
   let
-    evalPlugin (PurePlugin a) v = if isJust (traceShowId $ checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
-    evalPlugin (DiffPurePlugin a) v = if isJust (traceShowId $ checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
+    -- Only evaluate pure plugins
+    evalPlugin (PurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
+    evalPlugin (DiffPurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
     evalPlugin (StatefullPlugin j) v = F.foldl' (\i j -> evalPlugin j =<< i) (Right v) (snd <$> j)
     evalPlugin i v = Right v
   return (me >=> evalPlugin c ,old)
@@ -236,35 +237,35 @@ getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,o
 
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
-        tar = S.fromList $ fmap _relOrigin i
-        refl = S.fromList $ fmap _relOrigin $ filterReflexive i
-        rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
-        table = lookTable rinf $ snd j
-        genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
-        primPredicate o k  = do
-          i <- unSOptional ._tbattr  =<< lkAttr k o
-          return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-        lkAttr k v =  kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
-        refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
-        predm = refs <> predicate i predtop
+      tar = S.fromList $ fmap _relOrigin i
+      refl = S.fromList $ fmap _relOrigin $ filterReflexive i
+      rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
+      table = lookTable rinf $ snd j
+      genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
+      primPredicate o k  = do
+        i <- unSOptional ._tbattr  =<< lkAttr k o
+        return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
+      lkAttr k v =  kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
+      refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+      predm = refs <> predicate i predtop
     tb2 <-  case predm of
       Just pred -> do
         localInf (const rinf) $ paginateTable table pred tbf
       Nothing -> return (G.empty)
     let
-        inj = S.difference refl old
-        joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-        joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
-          where
-            replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
-            nonRef = tableNonRef m
-            atttar = getAtt tar nonRef
-            attinj = getAtt inj nonRef
-        add :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-        add r = addAttr r  . kvFilter (\k -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k)
-        joined i = do
-           fk <- joinFK i
-           return $ add fk i
+      inj = S.difference refl old
+      joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
+      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+        where
+          replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
+          nonRef = tableNonRef m
+          atttar = getAtt tar nonRef
+          attinj = getAtt inj nonRef
+      add :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
+      add r = addAttr r  . kvFilter (\k -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k)
+      joined i = do
+         fk <- joinFK i
+         return $ add fk i
     return (me >=> joined,old <> refl)
 
 mapLeft f (Left i ) = Left (f i)
@@ -434,10 +435,15 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 return ((G.size reso ,M.empty), reso)
               False -> do
                 if L.length  complements  == 1
-                   then readNew maxBound (head complements)
+                   then do
+                     liftIO $ putStrLn $ "Loading complement : " <> show (G.size reso)
+                     readNew maxBound (head complements)
                    -- TODO: Compute the max of complements for now just use all required
-                   else readNew maxBound tbf
+                   else do
+                     liftIO $ putStrLn $ "Loading Not unique complement : " <> show (G.size reso)
+                     readNew maxBound tbf
            else do
+             liftIO $ putStrLn $ "Loading empty predicate" <> show (G.size reso)
              readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
 

@@ -593,9 +593,9 @@ plugKeyToRel
   -> Set (Rel Key)
 plugKeyToRel inf table ftb (i,o) = S.fromList (inp <> out)
   where
-    inp = concat $ genRel M.empty <$> filter (isJust. filterEmpty) (F.toList (liftAccessU inf tname  i))
-    out = concat . fmap (fmap Output .relAccesGen') . filter (isJust. filterEmpty) . F.toList $ liftAccessU inf tname  o
-
+    liftAccess i = filter (isJust. filterEmpty) (F.toList (liftAccessU inf tname i))
+    inp = concat $ genRel M.empty <$>  liftAccess i
+    out = concat  $ (fmap Output .relAccesGen') <$>  liftAccess  o
     tname = tableName table
 
 rowTableDiff

@@ -621,6 +621,7 @@ kvMetaFullName m = _kvschema m <> "." <> _kvname m
 data KVMetadata k = KVMetadata
   { _kvname :: Text
   , _kvschema :: Text
+  , _kvIsSum :: Bool
   , _kvscopes :: [k]
   , _kvpk :: [k]
   , _kvdesc :: [k]
@@ -630,7 +631,7 @@ data KVMetadata k = KVMetadata
   , _kvrecrels :: [MutRec [[Rel k]]]
   } deriving (Functor, Foldable, Generic)
 
-kvempty = KVMetadata "" "" []  [] [] [] [] [] []
+kvempty = KVMetadata "" "" False []  [] [] [] [] [] []
 
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
@@ -639,6 +640,7 @@ tableMeta t =
   KVMetadata
     (rawName t)
     (rawSchema t)
+    (rawIsSum t)
     (_rawScope t)
     (rawPK t)
     (rawDescription t)
