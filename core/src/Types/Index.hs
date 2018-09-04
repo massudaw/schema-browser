@@ -16,7 +16,6 @@ module Types.Index
   , Predicate(..)
   , DiffShowable(..)
   , IndexConstr
-  , TBIndex(..)
   , toList
   , lookup
   , fromList
@@ -82,8 +81,10 @@ import qualified NonEmpty as Non
 import Prelude hiding (filter, lookup)
 import Safe
 import Debug.Trace
-import Step.Host
-import Types
+-- import Step.Host
+import Types.Common
+import Types.Primitive
+import Step.Common
 import Utils
 
 --- Row Level Predicate
@@ -205,45 +206,6 @@ instance Affine DiffString where
       diffStr [] bs = ord <$> bs
       diffStr [] [] = []
   {-# INLINE subtraction #-}
-
-splitIndexPK ::
-     Eq k
-  => BoolCollection (Rel k, [(k, AccessOp Showable)])
-  -> [k]
-  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
-splitIndexPK (OrColl l) pk =
-  if F.all (isNothing . snd) al
-    then Nothing
-    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
-  where
-    al = (\l -> (l, splitIndexPK l pk)) <$> l
-splitIndexPK (AndColl l) pk =
-  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
-splitIndexPK (PrimColl (p@(Inline i), op)) pk =
-  if elem i pk
-    then Just (PrimColl (p, op))
-    else Nothing
--- splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --error (show (l,op,pk))
-splitIndexPK i pk = Nothing -- error (show (i,pk))
-
-splitIndexPKB ::
-     Eq k
-  => BoolCollection (Rel k, [(k, AccessOp Showable)])
-  -> [k]
-  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
-splitIndexPKB (OrColl l) pk =
-  if F.all (isNothing . snd) al
-    then Nothing
-    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
-  where
-    al = (\l -> (l, splitIndexPKB l pk)) <$> l
-splitIndexPKB (AndColl l) pk =
-  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
-splitIndexPKB (PrimColl (p@(Inline i), op)) pk =
-  if not (elem i pk)
-    then Just (PrimColl (p, op))
-    else Nothing
-splitIndexPKB i pk = Just i
 
 instance Affine Position where
   type Tangent Position = DiffPosition
@@ -400,16 +362,6 @@ data AttributePath  k b
   | PathInline k (PathIndex PathTID  (Union (AttributePath k b)))
   | PathForeign [Rel k ] (PathIndex PathTID (Union (AttributePath k b)))
   deriving(Eq,Ord,Show,Functor,Generic)
-
-data PathTID
-  = PIdIdx Int
-  | PIdOpt
-  | PIdTraverse
-  | PIdInter Bool
-  | PIdAtom
-  deriving (Eq,Ord,Show,Generic)
-
-
 
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k (AccessOp a ,FTB a))
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
@@ -611,6 +563,7 @@ instance ( Range v
         where
           ma (Not i) j = not $ ma i j
           ma IsNull j = False
+          ma Exists j = True
           ma (Range b pred) j =
             match (Right pred) $
             Right $
@@ -666,6 +619,7 @@ instance ( Range v
       mar (Right i) j = ma i j
         where
           ma (Not i) j = not $ ma i j
+          ma Exists j = True
           ma IsNull (LeftTB1 j) = maybe True (ma IsNull) j
           ma IsNull j = False
           ma (Range b pred) (IntervalTB1 j) =

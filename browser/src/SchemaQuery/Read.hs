@@ -223,7 +223,17 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
       evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
+getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins _ t  c)) tbf =  do
+  liftIO $ putStrLn ("LoadPlugin" <> show (t,pluginStatic' c))
+  let
+    evalPlugin (PurePlugin a) v = if isJust (traceShowId $ checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
+    evalPlugin (DiffPurePlugin a) v = if isJust (traceShowId $ checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
+    evalPlugin (StatefullPlugin j) v = F.foldl' (\i j -> evalPlugin j =<< i) (Right v) (snd <$> j)
+    evalPlugin i v = Right v
+  return (me >=> evalPlugin c ,old)
+
 getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,old) set j tbf
+
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
         tar = S.fromList $ fmap _relOrigin i
@@ -271,9 +281,12 @@ getFKS
         (TBData Key Showable -> Either
               ([TB Key Showable],[Rel Key])
               (TBData Key Showable))
-getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (refLookup (pathRelRel f) tbf) )) (return (return ,S.empty )) sorted
+getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (pluginCheck  f tbf) )) (return (return ,S.empty )) sorted
   where
-    sorted =  sortValues pathRelRel $ rawFKS table <> functionRefs table
+    pluginCheck i@(PluginField _) tbf = Just mempty
+    pluginCheck i tbf  = refLookup (pathRelRel i) tbf
+
+    sorted =  sortValues (pathRelInputs inf (tableName table)) $ rawFKS table <> functionRefs table <> pluginFKS table
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
 

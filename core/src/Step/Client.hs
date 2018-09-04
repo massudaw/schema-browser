@@ -84,11 +84,11 @@ atMR k (P (fsum, ssum) (Kleisli a)) =
     nest (Many []) = Many []
     nest (ISum []) = Many []
     nest ls = Many [Nested (Non.fromList (Inline .iprodRef <$> ind)) ls]
-    ind = splitIndex (Just $ Not IsNull) k
+    ind = splitIndex Nothing k
 
 
 atP k (P (fsum, ssum) (Kleisli a)) =
-  P (nest fsum, nest ssum) (Kleisli (fmap (local (unTB1 . indexTB1 ind)) a))
+  P (nest fsum, nest ssum) (Kleisli (fmap (local (unTB1 . fromJust . unSOptional. indexTB1 ind)) a))
   where
     unTB1 (TB1 i) = i
     unTB1 j = error (show j)

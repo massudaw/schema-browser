@@ -190,16 +190,11 @@ checkAccessFull
      -> (f (Maybe (TBData Key Showable)),
          f (Maybe (TBData Key Showable)),
          Union (Access Key))
-checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,liftAccessU inf t out)
+checkAccessFull inf  t (inp,out) oldItems = (tdInput,tdOutput,liftAccessU inf t out)
   where
-    (inp,out) =  arrow
-    tdInput = join . fmap (checkPredFull inp) <$> oldItems
-    tdOutput = join . fmap (checkPredFull out) <$> oldItems
-    checkPredFull predi i
-      = if maybe False (G.checkPred i) pred then Just i else Nothing
-      where pred = predGen (liftAccessU inf t predi)
-    predGen inp =  WherePredicate . fmap fixrel <$> conv
-      where conv = genPredicateFullU True inp
+    tdInput = join . fmap (checkPredFull inf t inp) <$> oldItems
+    tdOutput = join . fmap (checkPredFull inf t out) <$> oldItems
+
 
 
 indexPluginAttrDiff
@@ -590,7 +585,6 @@ applyDefaults inf table k i j = {-traceShow ("apply",j,i,join (applyIfChange i j
     def Keep = maybe Keep Diff defField
     def Delete = maybe Delete (const Keep) defField
 
-
 plugKeyToRel
   :: InformationSchema
   -> Table
@@ -600,15 +594,8 @@ plugKeyToRel
 plugKeyToRel inf table ftb (i,o) = S.fromList (inp <> out)
   where
     inp = concat $ genRel M.empty <$> filter (isJust. filterEmpty) (F.toList (liftAccessU inf tname  i))
-    genRel :: Map Int (Union (Access Key)) -> Access Key -> [Rel Key]
-    genRel s (Rec ix j) = concat $ genRel (M.insert ix j s) <$> F.toList j
-    genRel s (Nested i j) = concat $ fmap (RelAccess (F.toList i)) . genRel s <$> F.toList j
-    genRel s (IProd _ i) = [RelAccess [Inline i] (Inline i) ]
-    genRel s (Point ix) = concat $ genRel (M.delete ix s) <$> maybe [] F.toList (M.lookup ix s)
     out = concat . fmap (fmap Output .relAccesGen') . filter (isJust. filterEmpty) . F.toList $ liftAccessU inf tname  o
-    filterEmpty (Nested _ (Many [])) = Nothing
-    filterEmpty (Nested _ (ISum [])) = Nothing
-    filterEmpty i = Just i
+
     tname = tableName table
 
 rowTableDiff
@@ -624,21 +611,20 @@ rowTableDiff
 rowTableDiff inf table constr refs plmods ftb@k ix oldItems= do
   ixE <- UI.div # set text (show ix) # set UI.class_ "col-xs-1"
   operation <- UI.div # set UI.class_ "col-xs-1"
-  plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
-    pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .  snd) plugins
+    pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ pluginFKS table)
 
   let
     srefs :: [Set (Rel Key)]
-    srefs =  sortRels ( M.keys pluginMap<> kvkeys ftb ) -- $ replaceRecRel ftb (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    srefs =  sortRels (M.keys pluginMap <> kvkeys ftb) -- $ replaceRecRel ftb (fmap (fmap S.fromList )  <$> _kvrecrels meta)
     plugmods = first traRepl <$> plmods
 
     isSum = rawIsSum table
   (listBody,output) <- do
       fks <- buildFKS inf True UI.div constr table refs plugmods ftb pluginMap oldItems srefs
       mapM (\(s,(i,_)) -> element (getElement  i) #  sink UI.class_ (facts $ (\i -> "col-xs-" <> show (fst   i)) <$> getLayout i)) fks
-      listBody <- UI.div # set children (ixE :operation:( getElement .fst . snd  <$> fks)) # set UI.style [("display", "flex"),("min-width","max-content")]
+      listBody <- UI.div # set children (ixE : operation : (getElement . fst . snd <$> fks)) # set UI.style [("display", "flex"),("min-width","max-content")]
       return (listBody, validateRow inf table fks)
   element listBody
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -660,10 +646,9 @@ eiTableDiff
   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
   oldItems <- ui $ calmT preoldItems
-  plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
-    pluginMap = M.fromList $ fmap (\i ->(plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table ) ._pluginTable .  snd) plugins
+    pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ _pluginRefs table)
   let
     srefs :: [Set (Rel Key)]
     srefs =  sortRels (M.keys pluginMap <> kvkeys ftb )

@@ -92,7 +92,7 @@ trackTable minf cid table six ix = do
     closeDynamic $ transactionNoLog minf $
       patchFrom mcli (mkPatch dpatch))
 
-atClient idClient =  (G.Idex [LeftTB1 . Just . num $ idClient],)
+atClient idClient =  (Idex [LeftTB1 . Just . num $ idClient],)
 atSchema  six v = PInline "selection" (POpt $ Just $ PIdx six $ Just$ PAtom v)
 atTable tix v = PInline "selection" (POpt $ Just $ PIdx tix $ Just$ PAtom v)
 atRow rix v = PInline "selection" (POpt $ Just $ PIdx rix $ Just$ PAtom v)
@@ -223,7 +223,7 @@ logRowAccess
      -> Int
      -> TBIndex Showable
      -> Dynamic ()
-logRowAccess w (six,inf) (tix,table) ix (G.Idex row) = do
+logRowAccess w (six,inf) (tix,table) ix (Idex row) = do
   let sel =  Non.fromList  (zip (rawPK table) row)
   let lift =  liftPatch minf "clients"
       cli = lookTable minf "clients"

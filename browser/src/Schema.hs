@@ -123,11 +123,11 @@ keyTablesInit schemaRef  (schema,user) authMap = do
                      max = maximum (keyPosition <$> justLook t tableKeys)
                      mapKeys (i,o) = zipWith (\un (name,ty) -> let k = newKey' [] oid un name ty  in ((t,name),k)) [max + 1 ..] (i <> o)
                  newFields _ = []
-             return plugs
-          else return []
+             return (plugs,allPlugs)
+          else return ([],[])
 
        let
-          keyMap = HM.fromList $ (fmap (typeTransform ops) <$> keyList) <> plugs
+          keyMap = HM.fromList $ (fmap (typeTransform ops) <$> keyList) <> fst plugs
           lookupKey' map t c = justError ("nokey" <> show (t,c)) $ HM.lookup (t,c) map
           lookupKey ::  Text -> Text ->  Key
           lookupKey = lookupKey' keyMap
@@ -141,7 +141,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
        descMap <- liftIO$ M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ HM.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- liftIO$ M.fromList   <$> query conn "SELECT \"table\",translation FROM metadata.table_name_translation WHERE schema = ? " (Only schemaId )
        uniqueConstrMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
-       indexMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ? " (Only schema)
+       indexMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure) <$> query conn "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ? " (Only schema)
 
        res <- liftIO$ lookupPK <$> query conn "SELECT oid,t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
 
@@ -169,7 +169,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
        let
            allKeys :: Map Text [Key]
            allKeys =  M.fromListWith mappend  $ (\((t,_),k) -> (t,pure $ lookupKey t (keyValue k))) <$> HM.toList keyMap
-           createTable (c,(un,pksl,scpv,is_sum)) = (c ,Raw un schema tableType translation is_sum c constraints indexes  scp pks desc inlineFK [] allfks attr)
+           createTable (c,(un,pksl,scpv,is_sum)) = (c ,Raw un schema tableType translation is_sum c constraints indexes  scp pks desc inlineFK [] (PluginField   <$>  filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
             where
               pks = F.toList pksl
               scp = F.toList scpv
@@ -329,7 +329,7 @@ tableOrder inf table orderMap =  maybe (int 0) _tbattr row
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (fst c) f) )) . G.lookup (idex inf (fst c) l) $ snd c
 
-idex inf t v = G.Idex $  fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
+idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
 {-
 addStats schema = do

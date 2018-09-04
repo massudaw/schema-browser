@@ -332,19 +332,19 @@ tbpredFK
   => M.Map k k
   -> [k]
   -> [k]
-  -> KV k a1 ->  Maybe (G.TBIndex a1)
+  -> KV k a1 ->  Maybe (TBIndex a1)
 tbpredFK rel un  pk2 v  = tbjust  .  Tra.traverse (Tra.traverse unSOptional) . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
         where
           flipTable = M.fromList . fmap swap .M.toList
-          tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
+          tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
 
 {-searchGist ::
   (Functor t,  Ord a1,Ord (G.Tangent a1),G.Predicates a1,Show a ,Show a1,Ord k,  Show k,
-   Foldable t, G.Predicates (FTB a1) ,G.Predicates (G.TBIndex  a1)) =>
+   Foldable t, G.Predicates (FTB a1) ,G.Predicates (TBIndex  a1)) =>
   M.Map k k
   -> KVMetadata k
-  -> G.GiST (G.TBIndex  a1) a
-  -> [([k],G.GiST (G.TBIndex  a1) (G.TBIndex a1))]
+  -> G.GiST (TBIndex  a1) a
+  -> [([k],G.GiST (TBIndex  a1) (TBIndex a1))]
   -> t (TB Identity k a1)
   -> Maybe a-}
 searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) )
@@ -358,7 +358,7 @@ searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable 
 
     lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . join . fmap safeHead . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 
-joinRel2 :: (Show k , Ord k,Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata k->  [(Rel k ,FTB a)] -> G.GiST (G.TBIndex a) (TBData k a) -> Maybe (FTB (TBData k a))
+joinRel2 :: (Show k , Ord k,Ord a ,Show a,G.Predicates (TBIndex a)) => KVMetadata k->  [(Rel k ,FTB a)] -> G.GiST (TBIndex a) (TBData k a) -> Maybe (FTB (TBData k a))
 joinRel2 tb ref table
   | L.any (isLeft.snd) ref
   = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb ) table) (Tra.traverse (traverse unSOptional) ref )
@@ -373,7 +373,7 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            idx = G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
+            idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
             tbel = G.lookup idx table
 
 

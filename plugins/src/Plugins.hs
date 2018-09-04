@@ -601,8 +601,8 @@ delayedDate = FPlugins "Juros Atraso" "transactions" (DiffPurePlugin url)
   where
     url = proc t -> do
       TB1 (STime (SDate s)) <- atAny "purchase_type"
-          [atR "recurring" (atR "recurring_date,expense_name" (idxM "scheduled_date"))
-          ,atR "scheduled" (idxM "scheduled_date")] -< t
+          [atMR "recurring" (atR "recurring_date,expense_name" (idxK "scheduled_date"))
+          ,atMR "scheduled" (idxK "scheduled_date")] -< t
       TB1 (STime (STimestamp e)) <- atR "statement,account" (idxK "dtposted") -< t
       let delta = diffDays (utctDay e) s
       a <- idxK "amount"  -< t

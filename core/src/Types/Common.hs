@@ -51,6 +51,7 @@ module Types.Common
   , getAtt
   -- ,recoverAttr', firstATB ,traFAValue,AValue(..),TBAttr
   , FTB(..)
+  , PathTID(..)
   , unTB1
   , unSOptional
   , unSSerial
@@ -566,6 +567,17 @@ data FTB a
   | ArrayTB1 !(NonEmpty (FTB a))
   | IntervalTB1 !(Interval.Interval (FTB a))
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+
+data PathTID
+  = PIdIdx Int
+  | PIdOpt
+  | PIdTraverse
+  | PIdInter Bool
+  | PIdAtom
+  deriving (Eq,Ord,Show,Generic)
+
+
 
 instance Monad FTB where
   TB1 i >>= j = j i

@@ -1,15 +1,16 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, GeneralizedNewtypeDeriving,DeriveGeneric,DeriveFunctor  ,GeneralizedNewtypeDeriving,TupleSections #-}
 module Step.Common (
-  PluginTable,Parser(..),
+  Parser(..),
   Access(..),
+  Constant(..),
   Ring(..),
-  ArrowReaderM,
-  ArrowReader,
   KeyString(..),
   BoolCollection(..),
-  WherePredicateK(..),
-  WherePredicate(..),
+  UnaryOperator(..),
   TBPredicate(..),
+  AccessOp,
+  Union(..),
+  filterEmpty,
   traPredicate,
   mapPredicate,
   static
@@ -17,7 +18,7 @@ module Step.Common (
 
 import Types.Common
 import Data.Binary
-import Types.Primitive
+import NonEmpty
 import Data.Tuple
 import Control.Monad.Reader
 import Control.Applicative
@@ -32,14 +33,47 @@ import Prelude hiding((.),id,head)
 import Data.Monoid
 
 
+data Union a
+  = Many [a]
+  | ISum [a]
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+instance (Binary k) => Binary (Union k)
+
+instance (NFData k) => NFData (Union k)
+
+data Access a
+  = IProd (Maybe UnaryOperator) a
+  | Nested (NonEmpty (Rel a)) (Union (Access a))
+  | Rec Int  (Union (Access a))
+  | Point Int
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
+
+instance (Binary k) => Binary (Access k)
+
+instance (NFData k) => NFData (Access k)
+
+
 mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (fmap f ).fmap (fmap (first f))) i)
 traPredicate f (WherePredicate i ) = WherePredicate <$> (traverse (fmap  swap . traverse ( traverse f ) . swap) i)
-type WherePredicateK k = TBPredicate k Showable
-type WherePredicate = WherePredicateK Key
+
+data BoolCollection a
+  = AndColl [BoolCollection a]
+  | OrColl [BoolCollection a]
+  | PrimColl a
+  deriving (Show, Eq, Ord, Functor, Foldable, Generic, Traversable)
+
+instance NFData a => NFData (BoolCollection a)
+
+instance Binary a => Binary (BoolCollection a)
+
+
 
 newtype TBPredicate k a
   = WherePredicate (BoolCollection (Rel k,[(k,AccessOp a )]))
   deriving (Show,Eq,Ord,Generic)
+
+type AccessOp a = Either (FTB a, BinaryOperator) UnaryOperator
 
 leftMap f (Left i) = (Left $ f i)
 leftMap f  (Right i)  = Right i
@@ -50,20 +84,14 @@ instance Functor (TBPredicate k ) where
 instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
-instance Semigroup (WherePredicateK k) where
+instance Semigroup (TBPredicate k a ) where
   (WherePredicate i) <> (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
-instance Monoid (WherePredicateK k) where
+instance Monoid (TBPredicate k a) where
   mempty = WherePredicate (AndColl [])
 
 
 data Parser m s a b = P s (m a b) deriving Functor
-
-type ArrowReader  = ArrowReaderM IO
-
-type PluginTable v = Parser (Kleisli (ReaderT ((TBData Text Showable)) Identity)) (Union (Access Text),Union (Access Text)) () v
-
-type ArrowReaderM m  = Parser (Kleisli (ReaderT ((TBData Text Showable)) m )) (Union (Access Text),Union (Access Text)) () (Maybe (TBData  Text Showable))
 
 
 deriving instance Functor m => Functor (Kleisli m i )
@@ -121,8 +149,6 @@ instance Show a => Ring (Union a) where
 class KeyString i where
   keyString :: i -> Text
 
-instance KeyString Key where
-  keyString = keyValue
 
 instance KeyString Text where
   keyString = id
@@ -157,4 +183,31 @@ instance (Semigroup s ,Monad e ) => Semigroup (Parser (Kleisli e) s a m) where
   (P i  (Kleisli l)) <> (P j (Kleisli m) ) =  P (i <> j) (Kleisli (\i -> l i >>   m i ))
 
 instance (Monoid s ,Monad e ) => Monoid (Parser (Kleisli e) s a m) where
+
+filterEmpty (Nested _ (Many [])) = Nothing
+filterEmpty (Nested _ (ISum [])) = Nothing
+filterEmpty i = Just i
+
+data UnaryOperator
+  = IsNull
+  | Not UnaryOperator
+  | Exists
+  | Range Bool UnaryOperator
+  | BinaryConstant BinaryOperator Constant
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData UnaryOperator
+
+instance Binary UnaryOperator
+
+
+data Constant
+  = CurrentTime
+  | CurrentDate
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData Constant
+
+instance Binary Constant
+
 

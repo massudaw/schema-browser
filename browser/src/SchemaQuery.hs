@@ -26,7 +26,7 @@ import Utils
 import Serializer
 import qualified Data.Text as T
 
-getRow (G.Idex ix) table =  do
+getRow (Idex ix) table =  do
   liftIO . putStrLn $ "Load complete row table : " ++ show (ix,table)
   inf <- askInf
   let pred = AndColl $ zipWith (\v i -> PrimColl (Inline i ,[(i,Left (v,Equals))])) ix (rawPK table)

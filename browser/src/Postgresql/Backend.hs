@@ -85,7 +85,7 @@ attrValueName (IT i  _) = keyValue i
 deleteIdx
   ::
      Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
-deleteIdx conn m ix@(G.Idex kold) t = do
+deleteIdx conn m ix@(Idex kold) t = do
     executeLogged conn qstr qargs
     return ()
   where
@@ -110,8 +110,8 @@ updateQuery m (pks,skv) = (qstr,qargs,Nothing)
     qstr = fromString $ T.unpack up
     qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat ( fmap koldPk pks)
     equality k = k <> "="  <> "?"
-    koldPk (G.Idex kold) = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
-    pred   (G.Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
+    koldPk (Idex kold) = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
+    pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
     paren i = "(" <> i <> ")"
@@ -255,7 +255,7 @@ patchMod m pk patch = do
     return $ rebuild  pk (PatchRow patch)
 
 getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
-getRow table  delayed (G.Idex idx) = do
+getRow table  delayed (Idex idx) = do
   inf <- askInf
   liftIO $ check inf (filterReadable delayed)
   where

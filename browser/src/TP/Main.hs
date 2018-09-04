@@ -233,7 +233,7 @@ listDBS metainf userId db = do
         unint (TB1 (SNumeric s))= s
         untxt (TB1 (SText s))= s
         untxt (LeftTB1 (Just (TB1 (SText s))))= s
-  return ((\i j u-> maybe M.empty (\u -> M.filterWithKey (\k v -> isJust $ G.lookup (G.Idex [int u,int (fst v)]) (primary j)) (schemas $primary i) ) u )  <$> collectionTid dbvar <*> collectionTid privileges <*> userId)
+  return ((\i j u-> maybe M.empty (\u -> M.filterWithKey (\k v -> isJust $ G.lookup (Idex [int u,int (fst v)]) (primary j)) (schemas $primary i) ) u )  <$> collectionTid dbvar <*> collectionTid privileges <*> userId)
 
 loginWidget userI passI =  do
     usernamel <- flabel # set UI.text "Usuário"
@@ -271,7 +271,7 @@ loadSchema smvar schemaN user auth =
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
   cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing mempty
-  let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (G.Idex [TB1 $ SNumeric ck]) (primary m)) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
+  let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (Idex [TB1 $ SNumeric ck]) (primary m)) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  loginCookie
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )

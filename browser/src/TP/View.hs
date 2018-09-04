@@ -209,8 +209,8 @@ writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
 writePK m r efield = writePK' (_kvname m)  (first keyValue <$> M.toList ( getPKM  m r))  efield
 
 
-readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
-readPK inf s = (tb, G.Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
+readPK :: InformationSchema -> T.Text -> (Table, TBIndex Showable, Key)
+readPK inf s = (tb, Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
   where
     [t,pks,f] = T.splitOn "->" s
     pk =

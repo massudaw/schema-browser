@@ -116,7 +116,7 @@ viewerMode six inf table tix cli cliTid = do
   let
     vpt = primary <$> trep
     tdip = listRows inf table <$> cliTid
-    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (G.Idex v) i)) <$> facts vpt <#> fmap activeRows tdip
+    tdi = (\i -> fromMaybe [] . traverse (\v -> G.lookup  (Idex v) i)) <$> facts vpt <#> fmap activeRows tdip
 
   nav  <- buttonDivSet  ["Edit","Table"] (pure Nothing)
       (\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-sm btn-default pull-right" )

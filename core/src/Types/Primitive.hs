@@ -15,7 +15,11 @@
 module Types.Primitive where
 
 import Control.Applicative
+import Data.Functor.Identity
+import Patch
 import Control.DeepSeq
+import Control.Monad.Reader
+import Control.Arrow (Kleisli(..))
 import qualified Control.Lens as Le
 import Data.Binary.Orphans
 import Control.Lens.TH
@@ -51,6 +55,7 @@ import NonEmpty (NonEmpty(..))
 import Safe
 import System.IO.Unsafe
 import Types.Common
+import Step.Common
 import Utils
 
 
@@ -100,34 +105,6 @@ newtype TBIndex a =
 instance (Binary a)  => Binary (TBIndex a)
 instance (NFData a)  => NFData (TBIndex a)
 
-data Union a
-  = Many [a]
-  | ISum [a]
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
-
-instance (Binary k) => Binary (Union k)
-
-instance (NFData k) => NFData (Union k)
-data Access a
-  = IProd (Maybe UnaryOperator) a
-  | Nested (NonEmpty (Rel a)) (Union (Access a))
-  | Rec Int  (Union (Access a))
-  | Point Int
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Generic)
-
-instance (Binary k) => Binary (Access k)
-
-instance (NFData k) => NFData (Access k)
-
-data Constant
-  = CurrentTime
-  | CurrentDate
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData Constant
-
-instance Binary Constant
-
 data DiffPosition
   = DiffPosition3D (Double,Double,Double)
   | DiffPosition2D (Double,Double)
@@ -148,18 +125,6 @@ instance Binary DiffPosition
 instance NFData DiffPosition
 instance NFData DiffShowable
 
-
-data UnaryOperator
-  = IsNull
-  | Not UnaryOperator
-  | Range Bool UnaryOperator
-  | BinaryConstant BinaryOperator Constant
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData UnaryOperator
-
-instance Binary UnaryOperator
-
 type CorePrim = Prim KPrim (Text, Text)
 
 type CoreKey = FKey (KType CorePrim)
@@ -171,6 +136,55 @@ showableDef (Primitive (KSerial:xs) i) =
 showableDef (Primitive (KArray:xs) i) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
+
+type VarDef = (Text,KType CorePrim)
+
+data FPlugAction
+  = StatefullPlugin [(([VarDef],[VarDef]),FPlugAction )]
+  | IOPlugin  (ArrowReaderM IO)
+  | PurePlugin (ArrowReaderM Identity)
+  | DiffPurePlugin (ArrowReaderDiffM Identity)
+  | DiffIOPlugin (ArrowReaderDiffM IO)
+instance Eq (FPlugins) where
+
+instance Show (FPlugins) where
+
+instance Ord (FPlugins) where
+
+
+instance Eq (FPlugAction ) where
+
+instance Show (FPlugAction ) where
+
+instance Ord (FPlugAction ) where
+
+type ArrowReader  = ArrowReaderM IO
+
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (TBData Text Showable) m )) (Union (Access Text),Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
+
+type WherePredicate = WherePredicateK Key
+
+type WherePredicateK k = TBPredicate k Showable
+
+type ArrowReaderM m  = Parser (Kleisli (ReaderT ((TBData Text Showable)) m )) (Union (Access Text),Union (Access Text)) () (Maybe (TBData  Text Showable))
+
+type PluginTable v = Parser (Kleisli (ReaderT ((TBData Text Showable)) Identity)) (Union (Access Text),Union (Access Text)) () v
+
+type PrePlugins = FPlugins
+type Plugins = (Int,PrePlugins)
+
+
+data FPlugins =
+    FPlugins
+      { _pluginName  :: Text
+      , _pluginTable :: Text
+      , _plugAction :: FPlugAction
+      }
+
+
+instance KeyString Key where
+  keyString = keyValue
+
 type SqlOperationK = SqlOperationTK (Text, Text)
 
 data SqlOperationTK t k
@@ -178,11 +192,10 @@ data SqlOperationTK t k
   | RecJoin (MutRec [[Rel k]]) (SqlOperationTK t k)
   | FKInlineTable k t
   | FunctionField k Expr [Rel k]
+  | PluginField (Int,FPlugins)
   deriving (Eq, Ord, Show, Functor, Foldable, Generic)
 
-instance Binary k => Binary (SqlOperationK k)
 
-instance NFData k => NFData (SqlOperationK k)
 
 isFunction :: SqlOperationK k -> Bool
 isFunction (FunctionField _ _ _) = True
@@ -199,6 +212,9 @@ pathRelRel (FKJoinTable rel _) = Set.fromList rel
 pathRelRel (FKInlineTable r _) = Set.singleton $ Inline r
 pathRelRel (RecJoin l rel) = pathRelRel rel
 pathRelRel (FunctionField r e a) = S.singleton $ RelFun r e a
+pathRelRel (PluginField i) = error "not implemented use pathrelInput"
+
+
 
 pathRelRel' :: Ord k => SqlOperationK k -> MutRec [Set (Rel k)]
 pathRelRel' (RecJoin l rel)
@@ -267,11 +283,8 @@ instance Binary STime
 
 instance NFData STime
 
-instance (NFData l) => NFData (TableK l)
-
 instance NFData (TableType)
 
-instance (NFData l) => NFData (TableTransform l)
 
 data GeomType
   = MultiGeom GeomType
@@ -471,6 +484,7 @@ data TableK k
         , _rawDescriptionL :: [k]
         , __inlineFKS :: [SqlOperationK k]
         , __functionRefs :: [SqlOperationK k]
+        , _pluginRefs :: [SqlOperationK k]
         , _rawFKSL :: [SqlOperationK k]
         , _rawAttrsR :: [k] }
   | Project (TableK k)
@@ -487,21 +501,9 @@ data TableTransform k
            (BoolCollection (Rel k, [(k, AccessOp Showable)]))
   deriving (Eq, Ord, Functor, Generic, Show)
 
-type AccessOp a = Either (FTB a, BinaryOperator) UnaryOperator
 
 unRecRel (RecJoin _ l) = l
 unRecRel l = l
-
-data BoolCollection a
-  = AndColl [BoolCollection a]
-  | OrColl [BoolCollection a]
-  | PrimColl a
-  deriving (Show, Eq, Ord, Functor, Foldable, Generic, Traversable)
-
-instance NFData a => NFData (BoolCollection a)
-
-instance Binary a => Binary (BoolCollection a)
-
 
 rawUnion (Project i (Union l)) = l
 rawUnion _ = []
@@ -529,6 +531,8 @@ tableProp f i = f i
 inlineFKS = tableProp __inlineFKS
 
 functionRefs = tableProp __functionRefs
+
+pluginFKS = tableProp _pluginRefs
 
 rawIsSum = tableProp __rawIsSum
 
@@ -628,9 +632,6 @@ data KVMetadata k = KVMetadata
 
 kvempty = KVMetadata "" "" []  [] [] [] [] [] []
 
-instance Binary k => Binary (KVMetadata k)
-
-instance NFData k => NFData (KVMetadata k)
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _) = tableMeta s
@@ -918,6 +919,46 @@ newKey table name ty =
   newKey' [FRead,FWrite] (tableUnique table)  (maximum (keyPosition <$> rawAttrs table)) name ty
 
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
+
+splitIndexPK ::
+     Eq k
+  => BoolCollection (Rel k, [(k, AccessOp Showable)])
+  -> [k]
+  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
+splitIndexPK (OrColl l) pk =
+  if F.all (isNothing . snd) al
+    then Nothing
+    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
+  where
+    al = (\l -> (l, splitIndexPK l pk)) <$> l
+splitIndexPK (AndColl l) pk =
+  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
+splitIndexPK (PrimColl (p@(Inline i), op)) pk =
+  if elem i pk
+    then Just (PrimColl (p, op))
+    else Nothing
+-- splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --error (show (l,op,pk))
+splitIndexPK i pk = Nothing -- error (show (i,pk))
+
+splitIndexPKB ::
+     Eq k
+  => BoolCollection (Rel k, [(k, AccessOp Showable)])
+  -> [k]
+  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
+splitIndexPKB (OrColl l) pk =
+  if F.all (isNothing . snd) al
+    then Nothing
+    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
+  where
+    al = (\l -> (l, splitIndexPKB l pk)) <$> l
+splitIndexPKB (AndColl l) pk =
+  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
+splitIndexPKB (PrimColl (p@(Inline i), op)) pk =
+  if not (elem i pk)
+    then Just (PrimColl (p, op))
+    else Nothing
+splitIndexPKB i pk = Just i
+
 
 relAccesGen' :: Access k -> [Rel k]
 relAccesGen' (IProd i l) = [Inline l]

@@ -84,9 +84,11 @@ import Data.Tuple
 import GHC.Generics
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty)
-import Types
+import Types.Common
+import Types.Primitive
+import Step.Common
+import Patch
 import qualified Types.Index as G
-import Types.Index (PathTID(..))
 import Utils
 import Debug.Trace
 import Control.Applicative
@@ -235,8 +237,8 @@ firstRowOperation f DropRow = DropRow
 firstRowOperation f (PatchRow i) = PatchRow $ firstPatch f i
 
 data RowPatch k a
-  = RowPatch   { unRowPatch :: (G.TBIndex a, RowOperation k a) }
-  | BatchPatch { targetRows :: [G.TBIndex a]
+  = RowPatch   { unRowPatch :: (TBIndex a, RowOperation k a) }
+  | BatchPatch { targetRows :: [TBIndex a]
                , operation  :: RowOperation k a }
   | PredicatePatch { targetPredicate :: TBPredicate k a
                , operation  :: RowOperation k a }
@@ -290,6 +292,20 @@ instance Address (RowPatch k v) where
 -- type TBIdx k a = Map (Set k) [PValue k a]
 type TBIdx k a = [PathAttr k a]
 
+data PathAttr k a
+  = PAttr k
+        (PathFTB a)
+  | PFun k
+        (Expr, [Rel k])
+        (PathFTB a)
+  | PInline k
+        (PathFTB (TBIdx k a))
+  | PFK [Rel k]
+        [PathAttr k a]
+        (PathFTB (TBIdx k a))
+  deriving (Eq, Ord, Show, Functor, Generic)
+
+
 patchEditor i
   | L.length i == 0 = Keep
   | L.length i == 1 = maybe Keep Diff $ safeHead i
@@ -312,8 +328,8 @@ checkPatch fixed@(WherePredicate b, pk) d =
     (Nothing, Just l) -> splitMatch (l, pk) d
     (Nothing, Nothing) -> True
   where
-    notPK = fmap WherePredicate $ G.splitIndexPKB b pk
-    isPK = fmap WherePredicate $ G.splitIndexPK b pk
+    notPK = fmap WherePredicate $ splitIndexPKB b pk
+    isPK = fmap WherePredicate $ splitIndexPK b pk
 
 indexFilterR ::
      (Patch a,a ~Index a,G.IndexConstr k a ,Show k, Ord k) => [k] -> TBPredicate k a -> RowPatch k a -> Bool
@@ -415,36 +431,6 @@ editor Nothing Nothing = Keep
 upperPatch = PInter False
 
 lowerPatch = PInter True
-
-class Address f where
-  type Idx f
-  type Content f
-  index :: f -> Idx f
-  content :: f -> Content f
-  rebuild :: Idx f -> Content f -> f
-
-
-class Compact f where
-  compact :: [f] -> [f]
-
-class Patch f where
-  type Index f
-  diff :: f -> f -> Maybe (Index f)
-  diff' :: f -> f -> (Index f)
-  diff' i j = justError "cant diff" $ diff i j
-  apply :: f -> Index f -> f
-  apply i = either (\i -> error $ "no apply: " ++ i) fst . applyUndo i
-  applyIfChange :: f -> Index f -> Maybe f
-  applyIfChange i = either (const Nothing) (Just . fst) . applyUndo i
-  applyUndo :: f -> Index f -> Either String (f, Index f)
-  applyUndo i j =
-    maybe (Left "cant diff") Right $ liftA2 (,) o (flip diff i =<< o)
-    where
-      o = applyIfChange i j
-  create :: Index f -> f
-  create i = justError ("no create: ") . createIfChange $ i
-  createIfChange :: Index f -> Maybe f
-  patch :: f -> Index f
 
 data PatchIndex a =
   PatchIndex Int
@@ -607,19 +593,6 @@ data PValue k a
   | PRel { prel :: PathFTB (TBIdx k a)
          , pref :: PathFTB (TBIdx k a) }
   | PRef { pref :: PathFTB (TBIdx k a) }
-  deriving (Eq, Ord, Show, Functor, Generic)
-
-data PathAttr k a
-  = PAttr k
-        (PathFTB a)
-  | PFun k
-        (Expr, [Rel k])
-        (PathFTB a)
-  | PInline k
-        (PathFTB (TBIdx k a))
-  | PFK [Rel k]
-        [PathAttr k a]
-        (PathFTB (TBIdx k a))
   deriving (Eq, Ord, Show, Functor, Generic)
 
 patchvalue (PAttr _ v) = v

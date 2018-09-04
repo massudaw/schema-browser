@@ -252,10 +252,10 @@ instance Compact (IndexMetadataPatch k v) where
 mapRowPatch f (RowPatch i ) = RowPatch $ Le.bimap (fmap f) (fmap f) i
 
 applyGiSTChange ::
-     (NFData k, NFData a, G.Predicates (G.TBIndex a), PatchConstr k a)
-  => (KVMetadata k,G.GiST (G.TBIndex a) (TBData k a))
+     (NFData k, NFData a, G.Predicates (TBIndex a), PatchConstr k a)
+  => (KVMetadata k,G.GiST (TBIndex a) (TBData k a))
   -> RowPatch k (Index a)
-  -> Either String ((KVMetadata k,G.GiST (G.TBIndex a) (TBData k a)),RowPatch k (Index a))
+  -> Either String ((KVMetadata k,G.GiST (TBIndex a) (TBData k a)),RowPatch k (Index a))
 applyGiSTChange (m,l) (RowPatch (patom,DropRow))=
   maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
     ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch . createRow' m <$> G.lookup (create <$> patom) l
@@ -291,7 +291,7 @@ recAttr
     => [k]
     -> TB k a
     -> [(AttributePath k (Either (FTB a, BinaryOperator) b, FTB a),TBIndex a)]
-recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (TB1 i,Equals),TB1 i), G.Idex [TB1 i])]) k
+recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (TB1 i,Equals),TB1 i), Idex [TB1 i])]) k
 {-recAttr un (IT i j )  = first (PathInline i) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( j)
@@ -309,7 +309,7 @@ recPred f (LeftTB1 i) = fmap (first (NestedPath PIdOpt )) . join $ recPred f <$>
 recPred f (ArrayTB1 i) = concat . F.toList $ Non.imap (\ix i -> fmap (first (NestedPath (PIdIdx ix ))) $ recPred f i ) i
 
 applySecondary
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex a) , a ~ Index a, PatchConstr k a)  =>  RowPatch k (Index a)-> RowPatch k (Index a) -> TableRep k a -> TableRep k a
+  ::  (NFData k,NFData a,G.Predicates (TBIndex a) , a ~ Index a, PatchConstr k a)  =>  RowPatch k (Index a)-> RowPatch k (Index a) -> TableRep k a -> TableRep k a
 applySecondary (RowPatch (patom,DropRow )) (RowPatch (_,CreateRow v)) (TableRep (m,sidxs,l))
   = TableRep (m,M.mapWithKey didxs sidxs,l)
   where
@@ -357,39 +357,12 @@ searchPK (WherePredicate b) (pk, g)= (\p -> G.projectIndex pk  (WherePredicate p
 type DBVar = DBVar2 Showable
 type Collection k v = (IndexMetadata k v ,GiST (TBIndex v ) (TBData k v))
 
-type PrePlugins = FPlugins Text
-type Plugins = (Int,PrePlugins)
-type VarDef = (Text,KType CorePrim)
-
-
-data FPlugins k =
-    FPlugins
-      { _pluginName  :: Text
-      , _pluginTable :: Text
-      , _plugAction :: FPlugAction k
-      }
-
-data FPlugAction k
-  = StatefullPlugin [(([VarDef],[VarDef]),FPlugAction k) ]
-  | IOPlugin  (ArrowReaderM IO)
-  | PurePlugin (ArrowReaderM Identity)
-  | DiffPurePlugin (ArrowReaderDiffM Identity)
-  | DiffIOPlugin (ArrowReaderDiffM IO)
-
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (TBData Text Showable) m )) (Union (Access Text),Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
-
-
 pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
 
-pluginActionDiff :: FPlugins a-> TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
+pluginActionDiff :: FPlugins -> TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
 pluginActionDiff = pluginActionDiff' . _plugAction
 
-pluginStatic' (IOPlugin  a) = staticP a
-pluginStatic' (DiffIOPlugin a) = staticP a
-pluginStatic' (DiffPurePlugin a) = staticP a
-pluginStatic' (PurePlugin  a) = staticP a
-pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
 
 pluginRun b@(IOPlugin _) = Right (pluginAction' b)
 pluginRun b@(PurePlugin _ ) = Right (pluginAction' b)
@@ -401,7 +374,13 @@ pluginActionDiff' (DiffPurePlugin a ) = return . dynPure a
 pluginAction' (IOPlugin   a ) = dynIO a
 pluginAction' (PurePlugin  a) = return . dynPure a
 
-staticP ~(P s d) = s
+checkPredFull inf t predi i
+      = if maybe False (G.checkPred i) pred then Just i else Nothing
+  where
+    pred = predGen (liftAccessU inf t predi)
+    predGen inp =  WherePredicate . fmap fixrel <$> conv
+      where conv = genPredicateFullU True inp
+
 
 dynIO url inp =
     runReaderT (dynPK url ()) inp
@@ -412,6 +391,24 @@ dynPure url inp = runIdentity $
 dynP ~(P s d) = d
 
 dynPK =  runKleisli . dynP
+
+staticP (P i _ ) = i
+pluginStatic' (IOPlugin  a) = staticP a
+pluginStatic' (DiffIOPlugin a) = staticP a
+pluginStatic' (DiffPurePlugin a) = staticP a
+pluginStatic' (PurePlugin  a) = staticP a
+pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
+
+
+pathRelInputs inf table (PluginField (_,FPlugins _ _ a)) =  S.fromList  ((concat $ genRel M.empty . liftAccess inf table <$> F.toList (fst $ pluginStatic' a)) <> (concat . fmap (fmap Output .relAccesGen') . fmap ( liftAccess inf table) . L.filter (isJust. filterEmpty)  $ F.toList (snd $ pluginStatic' a)))
+pathRelInputs _ _ i = pathRelRel i
+
+genRel :: Map Int (Union (Access k)) -> Access k -> [Rel k]
+genRel s (Rec ix j) = concat $ genRel (M.insert ix j s) <$> F.toList j
+genRel s (Nested i j) = concat $ fmap (RelAccess (F.toList i)) . genRel s <$> F.toList j
+genRel s (IProd _ i) = [RelAccess [Inline i] (Inline i) ]
+genRel s (Point ix) = concat $ genRel (M.delete ix s) <$> maybe [] F.toList (M.lookup ix s)
+
 
 
 localInf :: (InformationSchema -> InformationSchema ) -> TransactionM a -> TransactionM a
@@ -500,7 +497,7 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
-fetchData i = liftIO . atomically .writeTChan (patchVar i) . force  . fmap (FetchData (dbRefTable i)  )
+fetchData i = liftIO . atomically .writeTChan (patchVar i) . {-force  . -}fmap (FetchData (dbRefTable i)  )
 
 putPatch m = liftIO. atomically . putPatchSTM m
 
@@ -510,9 +507,9 @@ mapModification f (AsyncTableModification d e ) = AsyncTableModification  (fmap 
 mapModification f (BatchedAsyncTableModification  d e ) = BatchedAsyncTableModification (fmap f d) (mapModification f <$> e)
 mapModification f (FetchData d e) = FetchData (fmap f d) (firstPatchRow f e)
 
-putPatchSTM m =  writeTChan m . force
+putPatchSTM m =  writeTChan m -- . force
 putIdx m = liftIO .atomically . putIdxSTM m
-putIdxSTM m =  writeTChan m . force
+putIdxSTM m =  writeTChan m -- . force
 
 typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
 typeCheckValuePrim f (KSerial :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
@@ -701,7 +698,7 @@ genPredicateFull'
   -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
 genPredicateFull' i s (Rec ix l) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.insert ix l s) <$> F.toList l)
 genPredicateFull' i s (Point ix) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.delete ix  s) <$> F.toList (maybe [] F.toList $ M.lookup ix s))
-genPredicateFull' i s (IProd b l) =  (\i -> PrimColl (Inline l,Right i ))  <$> b
+genPredicateFull' i s (IProd b l) =  Just . maybe (PrimColl (Inline l ,Right Exists)) (\i -> PrimColl (Inline l,Right i )) $ b
 genPredicateFull' i s (Nested p l) = fmap (\(a,b) -> (RelAccess (F.toList p) a , b )) <$> genPredicateFullU' i s l
 genPredicateFull' _ s i = error (show i)
 
@@ -832,7 +829,7 @@ patchRow' m o v =  RowPatch (G.getIndex m v,PatchRow (diff' o v))
 createRow' m v =  RowPatch (G.getIndex m v,CreateRow v)
 dropRow' m v = RowPatch (G.getIndex m v,DropRow )
 
-createUn :: (Show k ,Ord k) => KVMetadata k -> [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
+createUn :: (Show k ,Ord k) => KVMetadata k -> [k] -> [TBData k Showable] -> G.GiST (TBIndex Showable) (TBData k Showable)
 createUn m un   =  G.fromList  (justError ("empty"  ++ show un) .transPred) .  L.filter (isJust . transPred)
   where transPred =   G.notOptionalM . G.getUnique  un
 

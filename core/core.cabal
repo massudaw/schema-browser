@@ -19,6 +19,7 @@ library
   exposed-modules:
     NonEmpty
     Query
+    Patch
     Types
     Types.Common
     Types.Primitive
