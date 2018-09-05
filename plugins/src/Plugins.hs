@@ -773,10 +773,10 @@ costPlugins  = FPlugins pname tname $ StatefullPlugin
     reduced = nameI 0 $  atAnyM "child" [atom,prod,seq]
     prod =  proc t -> do
       c <- catMaybes <$>  atMA "product" (callI 0 reduced) -< ()
-      returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
+      returnA -< (\c -> Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)) <$> nonEmpty c
     seq = proc t -> do
-      c <- catMaybes .traceShowId <$> atMA "sequence"  (callI 0 reduced)-< ()
-      returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
+      c <- catMaybes <$> atMA "sequence"  (callI 0 reduced)-< ()
+      returnA -< (\c -> Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)) <$> nonEmpty c
     atom = atMR "atomic" $ proc i ->  do
       c <- idxK "cost" -<()
       t <- idxK "trust" -<()
