@@ -142,6 +142,7 @@ getFrom table allFields b = do
     comp = recComplement inf m b allFields
   join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ b)
+    liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ comp)
     v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
     let newRow = apply b v
     resFKS  <- getFKS inf mempty table  [newRow] comp

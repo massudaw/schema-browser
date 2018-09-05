@@ -754,7 +754,9 @@ recComplement inf =  filterAttrs []
       | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) = const Nothing
       | otherwise = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV
       where notPKOnly k =   if S.unions ((S.map _relOrigin) <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
-    notEmpty i = if M.null i then Nothing else Just i
+    notEmpty i = if M.null readable then Nothing else Just i
+      where readable = M.filterWithKey (\k _ -> not $ F.any (L.null . keyModifier ._relOrigin) k) i
+
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
       | L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result

@@ -662,7 +662,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
       fks <- buildFKS inf isSum UI.div constr table refs plugmods ftb pluginMap  oldItems srefs
       mapM (\(s,(i,_)) -> element (getElement  i) #  sink UI.class_ (facts $ (\i -> "col-xs-" <> show (fst i)) <$> getLayout i)) fks
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
-      let vertical = (\i -> (min (fst i )  12,max (snd i)  1 ) ) . foldl1 horizontalL <$> sequenceA(getLayout . fst .snd <$>  fks)
+      let vertical = (\i -> (min (fst i ) 12,max (snd i) 1)) . foldl1 horizontalL <$> sequenceA(getLayout . fst .snd <$>  fks)
       return $ LayoutWidget (validateRow inf table (filter (not. S.null . fst) fks)) listBody  vertical
   element listBody
     # set UI.class_ "row"
