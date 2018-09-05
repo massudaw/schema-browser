@@ -141,15 +141,22 @@ getFrom table allFields b = do
     m = tableMeta table
     comp = recComplement inf m b allFields
   join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
-    liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ b)
     liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ comp)
-    v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
-    let newRow = apply b v
-    resFKS  <- getFKS inf mempty table  [newRow] comp
-    let
-      result = either (const Nothing) (diff b) (resFKS newRow)
-    traverse (modifyTable m [] . pure . (FetchData table .RowPatch. (G.getIndex m b,).PatchRow)) result
-    return result ) comp
+
+    ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
+      <- createTable mempty (tableMeta table)
+    let n = (\c -> recComplement inf m c allFields) =<< new
+        new = G.lookup (G.getIndex m b) reso
+    (maybe (return $ diff b =<< new) (\comp -> do
+      v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
+      let newRow = apply b v
+      resFKS  <- getFKS inf mempty table  [newRow] comp
+      let
+        output = (resFKS newRow)
+        result = either (const Nothing) (diff b)  output
+      traverse (modifyTable m [] . pure . (FetchData table .RowPatch. (G.getIndex m b,).PatchRow)) result
+      traverse (\i -> liftIO . putStrLn $ "Remaining complement"  <> (ident .renderTable $ i)) $ (\c -> recComplement inf m c allFields) =<<  (applyIfChange b =<< result )
+      return result ) n)) comp
 
 
 modifyTable :: KVMetadata Key ->  [IndexMetadataPatch Key Showable] -> [TableModification (RowPatch Key Showable)] -> TransactionM ()
@@ -225,11 +232,12 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
       evalFun i = maybe (Left $( [],S.toList  $ pathRelRel f)  )  (Right . flip addAttr i) (evaluate  a b funmap c i)
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
-getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins _ t  c)) tbf =  do
+getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins s t  c)) tbf =  do
+  liftIO $ putStrLn $ show (s,t)
   let
     -- Only evaluate pure plugins
     evalPlugin (PurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
-    evalPlugin (DiffPurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
+    evalPlugin (DiffPurePlugin a) v = if isJust (checkPredFull inf t (traceShowId $ fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
     evalPlugin (StatefullPlugin j) v = F.foldl' (\i j -> evalPlugin j =<< i) (Right v) (snd <$> j)
     evalPlugin i v = Right v
   return (me >=> evalPlugin c ,old)
@@ -397,7 +405,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             then do
               liftIO $ putStrLn $ "No new fields";
               return (nidx,reso)
-            else return (nidx,createUn (tableMeta table) (rawPK table) resK <> reso)
+            else return (nidx,snd $ F.foldl' (\i j -> either error fst $ applyGiSTChange i j) (m,reso) newRes)
     (nidx,ndata) <- case hasIndex of
       Just (sq,idx) ->
         if (sq > G.size reso)

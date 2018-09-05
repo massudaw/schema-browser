@@ -76,7 +76,7 @@ anyP ps =
 atMR k (P (fsum, ssum) (Kleisli a)) =
   P (nest fsum, nest ssum) (Kleisli ((\v -> do
       i <- ask
-      let o = unSOptional . indexTB1 ind $ i
+      let o = unSOptional  =<<  indexTB1M ind  i
       traverse (\i -> local (unTB1 . fromJust .unSOptional . indexTB1 ind) (a v)) o)))
   where
     unTB1 (TB1 i) = i
@@ -253,8 +253,17 @@ idxA l =
 idxR = idxK
 
 
-indexAttr l =
-  justError (show ("cant indexAttr ", l)) . kvFind (\i -> S.map (keyString . _relOrigin) i == S.fromList (iprodRef <$> l))
+indexAttrM l =
+   kvFind (\i -> S.map (keyString . _relOrigin) i == S.fromList (iprodRef <$> l))
+
+indexAttr l = justError (show ("cant indexAttr ", l)) . indexAttrM l
+
+indexTB1M l v = do
+  i <- indexAttrM l v
+  case i of
+    Attr _ l -> Nothing
+    FKT l i j -> Just j
+    IT l j -> Just j
 
 
 indexTB1 l v =

@@ -10,6 +10,7 @@ module Plugins (plugList) where
 import qualified NonEmpty as Non
 import Data.Time.Format
 import System.Process
+import Debug.Trace
 import Data.Time
 import Data.Semigroup
 import Control.Monad.Catch
@@ -774,7 +775,7 @@ costPlugins  = FPlugins pname tname $ StatefullPlugin
       c <- catMaybes <$>  atMA "product" (callI 0 reduced) -< ()
       returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
     seq = proc t -> do
-      c <- catMaybes <$> atMA "sequence"  (callI 0 reduced)-< ()
+      c <- catMaybes .traceShowId <$> atMA "sequence"  (callI 0 reduced)-< ()
       returnA -< Just $ Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)
     atom = atMR "atomic" $ proc i ->  do
       c <- idxK "cost" -<()

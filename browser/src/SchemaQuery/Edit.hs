@@ -50,7 +50,9 @@ updateFrom m a pk b = do
       v <- i a b
       tellPatches m (pure v)
       return v
-    Nothing -> patchFrom m ((pk ,PatchRow b))
+    Nothing -> do
+      let bf = filter (\k -> F.any (L.elem FWrite . keyModifier ._relOrigin) (index k)) b
+      patchFrom m ((pk ,PatchRow bf))
   return v
 
 patchFrom m  r   = do
@@ -83,7 +85,6 @@ insertFrom  m a   = do
     Nothing -> (insertEd $ schemaOps inf)  m a
   tellPatches m (pure v)
   return  v
-
 
 matchDelete inf m a =
  let
