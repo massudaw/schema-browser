@@ -770,13 +770,25 @@ costPlugins  = FPlugins pname tname $ StatefullPlugin
                      , PAttr "progress" (PAtom . SDouble $ realToFrac (progress v))
                      , PAttr "duration" (PAtom . SDouble $ realToFrac (duration v))
                         ]) <$> vm
-    reduced = nameI 0 $  atAnyM "child" [atom,prod,seq]
-    prod =  proc t -> do
+    reduced = nameI 0 $  atAnyM "child" [atom,product_,sequence,sum_]
+
+    costConjunction :: [ProjectExpr] -> Cost
+    costConjunction ps =
+      Cost $ sum $ zipWith (*) costs accTrusts
+        where
+          costs = (getCost . cost) <$> ps
+          accTrusts = product <$> L.inits ((getTrust . trust) <$> ps)
+
+    progressProduct c = (Progress $ sum $ (\ i -> getProgress (progress i) * realToFrac (duration i ) ) <$> c) / (realToFrac $ sum $ duration <$> c)
+    product_ =  proc t -> do
       c <- catMaybes <$>  atMA "product" (callI 0 reduced) -< ()
-      returnA -< (\c -> Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)) <$> nonEmpty c
-    seq = proc t -> do
+      returnA -< (\c -> Atomic undefined (costConjunction c) (product $ trust <$> c) (progressProduct c) (sum $ duration<$> c)) <$> nonEmpty c
+    sequence = proc t -> do
       c <- catMaybes <$> atMA "sequence"  (callI 0 reduced)-< ()
-      returnA -< (\c -> Atomic undefined (sum $ cost <$> c) (sum $ trust <$> c) (sum $ progress <$> c) (sum $ duration<$> c)) <$> nonEmpty c
+      returnA -< (\c -> Atomic undefined (costConjunction c) (product $trust <$> c) (progressProduct c) (sum $ duration<$> c)) <$> nonEmpty c
+    sum_ = proc t -> do
+      c <- catMaybes <$> atMA "sum"  (callI 0 reduced)-< ()
+      returnA -< (\c -> Atomic undefined (sum $ cost <$> c) (product $ trust <$> c) (progressProduct c) (sum $ duration<$> c)) <$> nonEmpty c
     atom = atMR "atomic" $ proc i ->  do
       c <- idxK "cost" -<()
       t <- idxK "trust" -<()

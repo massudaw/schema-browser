@@ -55,9 +55,24 @@ act :: (Monoid s, Monad m) => (a -> m b) -> Parser (Kleisli m) s a b
 act a = P mempty (Kleisli a)
 
 atAny k = atP k . anyP
-atAnyM k = atMR k . anyP
+atAnyM k  =  fmap join . atMR k . anyPM
 
 allP = id
+
+anyPM ps =
+  P
+    (ISum (concat $ fmap unMany fsum), ISum (concat $ fmap unMany ssum))
+    (Kleisli
+       (\i ->
+          runMaybeT $
+          foldr1 ((<|>)) (fmap ($i) asum)))
+  where
+    unMany (Many i)=  i
+    unMany (ISum l) = error (show ("ISum" ,l))
+    asum = fmap (\(P s (Kleisli j)) -> fmap MaybeT j) ps
+    fsum = fmap (\(P s _) -> fst s) ps
+    ssum = fmap (\(P s _) -> snd s) ps
+
 
 anyP ps =
   P
@@ -116,7 +131,7 @@ atMA i (P s (Kleisli j)) =
           mapM (\env -> local (const env) (j i)) =<<
           (return .
            maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) .
-           unSOptional . indexTB1 ind) =<<
+            join . fmap unSOptional . indexTB1M ind) =<<
           ask))
   where
     ind = splitIndex Nothing i
