@@ -843,7 +843,7 @@ indexerRel field =
 renderRel :: Show k => Rel k -> String
 renderRel (Inline k) = show k
 renderRel (Output k) = renderRel k ++ "="
-renderRel (RelFun k expr rel) = show k ++ " = " ++ renderFun expr rel
+renderRel (RelFun k expr rel) = renderRel k ++ " = " ++ renderFun expr rel
   where
     renderFun :: Show k => Expr -> [Rel k] -> String
     renderFun e ac = go e
@@ -856,8 +856,8 @@ renderRel (RelComposite l ) =  L.intercalate ","  (renderRel <$> l)
 renderRel (RelAccess i l) =
   renderRel i ++ "." ++ renderRel l
 renderRel (Rel i Equals k)
-  | show i == show k = show i
-renderRel (Rel i op k) = renderRel i <> renderBinary op <> show k
+  | show i == show k = renderRel i
+renderRel (Rel i op k) = renderRel i <> renderBinary op <> renderRel k
 
 
 makeLenses ''KV

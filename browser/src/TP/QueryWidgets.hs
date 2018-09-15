@@ -254,7 +254,7 @@ getRelOrigin :: [Column k () ] -> [k ]
 getRelOrigin =  fmap _relOrigin . concatMap keyattr
 
 attributeLabel :: Column CoreKey () -> String
-attributeLabel = L.intercalate "," . fmap renderRel .  F.toList . index
+attributeLabel =  renderRel .  RelComposite . F.toList . index
 
 labelCaseDiff
   ::  InformationSchema
@@ -448,7 +448,7 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems =  fmap (
                   where ts = S.fromList $ relUnComp t
               inputs = sequenceA $ search (fmap snd . recoverValue) <$> S.toList l
            (el,(i,o)) <- pluginUI inf (fmap kvlist . nonEmpty . catMaybes <$> inputs) plug
-           label <- flabel #  set text (L.intercalate "," $ renderRel <$> S.toList l)
+           label <- flabel #  set text (renderRel . RelComposite $  S.toList l)
            plug <- UI.div # set children [label,el]
 
            let
