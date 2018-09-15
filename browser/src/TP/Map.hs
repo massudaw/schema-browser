@@ -81,7 +81,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
               (l,r) = break(=='=') i
               (tnew,j) = break (=='|') l
               nest [i] = keyRef (T.pack i)
-              nest (i:xs) = RelAccess [keyRef (T.pack i)] ( nest xs)
+              nest (i:xs) = RelAccess (keyRef (T.pack i)) ( nest xs)
           filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable ) (recLookup k row)
           filtering tb res = (\t -> filter (\row -> all (`filteringPred` row) (catMaybes t))) <$> fmap (parseMany tb ) (triding filterInpT ) <*> fmap G.toList res
         map <-UI.div

@@ -368,7 +368,7 @@ indexFilterPatch (Inline l, ops) lo =
     create'  = create
     matching f = G.match (G.getOp l ops) (Right (create' f))
 
-indexFilterPatch (RelAccess l n, op) lo =
+indexFilterPatch (RelAccess (RelComposite l) n, op) lo =
   case L.find ((Set.fromList l ==) . index) lo of
     Just i ->
       case i of
@@ -723,7 +723,7 @@ createTB1 k =
 
 pattrKey :: Ord k => PathAttr k t -> Set.Set (Rel k)
 pattrKey (PAttr s _) = Set.singleton $ Inline s
-pattrKey (PFun s l _) = Set.singleton $ RelFun s (fst l) (snd l)
+pattrKey (PFun s l _) = Set.singleton $ RelFun (Inline s) (fst l) (snd l)
 pattrKey (PInline s _) = Set.singleton $ Inline s
 pattrKey (PFK s _ _) = Set.fromList s
 

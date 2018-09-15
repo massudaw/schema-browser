@@ -18,6 +18,7 @@ module Types.Common
   , ifkttable
   , mapFValue
   , mapFAttr
+  , relUnComp
   , replaceRecRel
   , testPM
   , traFAttr
@@ -227,7 +228,7 @@ instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
         | S.empty == j = P.EQ
       comp i j = P.compare i j
 
-testPM =  originalRel <$> [(relSortL [Inline 3]),(relSortL [Inline 1]),(relSortL [Inline 2]),(relSortL [Output (Inline 4),Rel (RelAccess [Inline (3 :: Int)] (Inline 3)) (Flip Contains) 4]), (relSortL [Inline 4]),relSortL [Rel (Inline 3) Contains 5]]
+testPM =  originalRel <$> [(relSortL [Inline 3]),(relSortL [Inline 1]),(relSortL [Inline 2]),(relSortL [Output (Inline 4),Rel (RelAccess (Inline (3 :: Int)) (Inline 3)) (Flip Contains) (Inline 4)]), (relSortL [Inline 4]),relSortL [Rel (Inline 3) Contains (Inline 5)]]
 
 
 topSortRels :: (Show k,Ord k) => [Set (Rel k)] ->  ([Set (Rel k)],[Int])
@@ -241,15 +242,15 @@ topSortRels l = ((l!!) <$> traceShowId sorted,sorted)
     outputs i = S.fromList $ concat $ catMaybes $ _relOutputs <$> S.toList i
     findDeps (l,ix) = findDep ix <$> S.toList l
     findDep ix (RelAccess l _)
-      = maybe [] (fmap (,ix) )$ Map.lookup (outputs $ S.fromList l) outputMap
+      = maybe [] (fmap (,ix) )$ Map.lookup (outputs $ S.singleton l) outputMap
     findDep ix rel@(Rel r _ _)
       | not (isRelAccess r) && isNothing (_relOutputs rel) = maybe [] (fmap (,ix)) $ Map.lookup (outputs (S.singleton r)) outputMap
     findDep ix (Rel r _ _) = findDep ix r
     findDep ix (RelFun _ _ l) = concat $ findDep ix . fix <$> l
-      where fix (Inline i) =  (RelAccess [Inline i] (Inline i))
+      where fix (Inline i) =  (RelAccess (Inline i) (Inline i))
             fix i = i
     findDep ix (Inline i) = [(ix,ix)]
-    findDep ix (Output (RelAccess i _ ) ) = maybe [] (fmap (ix,)) $ Map.lookup (outputs $ S.fromList i) outputMap
+    findDep ix (Output (RelAccess i _ ) ) = maybe [] (fmap (ix,)) $ Map.lookup (outputs $ S.singleton i) outputMap
     findDep ix (Output i) = maybe [] (fmap (ix,)) $ Map.lookup (outputs $ S.singleton i) outputMap
     findDep ix c = []
 
@@ -359,35 +360,37 @@ data Rel k
   | Output { _relAccess :: Rel k }
   | Rel { _relAccess :: Rel k
         , _relOperator :: BinaryOperator
-        , _relTip :: k }
-  | RelAlias { _relOri :: k
-             , _relReference :: [Rel k] }
-  | RelAccess { _relReference :: [Rel k]
-              , _relAccess :: Rel k }
-  | RelFun { _relOri :: k
+        , _relTip :: Rel k  }
+  | RelComposite [Rel k]
+  | RelAccess { _relAccess :: Rel k
+              , _relTip :: Rel k }
+  | RelFun { _relAccess :: Rel k
            , _relExpr :: Expr
            , _relReference :: [Rel k] }
   deriving (Eq, Show, Ord, Functor, Traversable, Foldable, Generic)
 
 _relTarget (Rel _ _ i) = i
+-- _relTarget (RelComposite i ) = _relTarget <$> i
 _relTarget (RelAccess _ i) = _relTarget i
 _relTarget i = error (show i)
 
+relUnComp (RelComposite l) = l 
+relUnComp i = [i]
 
 _relOrigin (Rel i _ _) = _relOrigin i
+-- _relOrigin (RelComposite i ) = _relOrigin <$> i
 _relOrigin (Inline i) = i
 _relOrigin (Output i) = _relOrigin i
 _relOrigin (RelAccess _ i) = _relOrigin i
-_relOrigin (RelFun i _ _) = i
-_relOrigin (RelAlias i _) = i
+_relOrigin (RelFun i _ _) = _relOrigin i
 
 -- TODO Fix Rel to store proper relaaccess
 _relInputs (Rel i _ _) = _relInputs i
 _relInputs (Inline i) = Just [i]
 _relInputs (Output i) = Nothing
-_relInputs (RelAccess i _) = Just $ concat (catMaybes $ _relOutputs <$> i)
-_relInputs (RelFun _ _ l) = nonEmpty $ concat $ catMaybes $ fmap _relOutputs l
-_relInputs (RelAlias i l) = Just $ fmap _relOrigin l
+_relInputs (RelAccess i _) = _relOutputs i
+_relInputs (RelFun _ _ l) =  _relOutputs (RelComposite l )
+_relInputs (RelComposite l ) = nonEmpty $ concat $ catMaybes $ fmap _relInputs l
 
 _relOutputs (Rel _ (Flip (AnyOp Equals)) _) = Nothing
 _relOutputs (Rel _ IntersectOp _) = Nothing
@@ -401,8 +404,8 @@ _relOutputs (Rel _ _ _) = Nothing
 _relOutputs (Inline i) = Just [i]
 _relOutputs (Output i) = _relOutputs i
 _relOutputs (RelAccess i _) = Nothing -- Just [i]
-_relOutputs (RelFun i _ _) = Just [i]
-_relOutputs (RelAlias i _) = Nothing
+_relOutputs (RelFun i _ _) = _relOutputs i
+_relOutputs (RelComposite l ) = nonEmpty $ concat $ catMaybes $ fmap _relOutputs l
 
 sortValues :: (P.Poset k ,Ord k ,Show v,Show k) => (v -> Set (Rel k) ) -> [v] -> [v]
 sortValues f  =  fmap snd . P.sortBy (P.comparing fst) . toAscListPO . PM.fromList .  fmap (\i -> (relSort $ f i ,i))
@@ -433,9 +436,8 @@ type Expr = FExpr Text Text
 data FExpr r k
   = Value Int
   | ConstantExpr k
-  | Function r
-             [FExpr r k]
-  deriving (Eq, Ord, Show, Generic)
+  | Function r [FExpr r k]
+  deriving (Eq, Ord, Show, Generic,Functor,Foldable,Traversable)
 
 instance (Binary k, Binary j) => Binary (FExpr k j)
 
@@ -629,7 +631,7 @@ mapFromTBList = PM.fromList . fmap (\i -> (relSort $ Set.fromList (keyattr i), i
 -- mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),valueattr i))
 keyattr :: TB k a -> [Rel k]
 keyattr (Attr i _) = [Inline i]
-keyattr (Fun i l _) = [RelFun i (fst l) (snd l)]
+keyattr (Fun i l _) = [RelFun (Inline i) (fst l) (snd l)]
 keyattr (FKT i rel _) = rel
 keyattr (IT i _) = [Inline i]
 
@@ -679,7 +681,8 @@ restrictTable f n =  (rebuildTable . unkvlist) n
 tableNonRef :: Ord k => KV k a -> KV k a
 tableNonRef = restrictTable  nonRefTB
 
-isRelAccess (RelAccess i _ ) = L.any isRelAccess i
+isRelAccess (RelAccess i _ ) = isRelAccess i
+isRelAccess (RelComposite i ) = L.any isRelAccess i
 isRelAccess (Rel _ _ _) = True
 isRelAccess _ = False
 
@@ -716,8 +719,7 @@ aattr (IT _ i) = go i
         -- TODO : Make a better representation for inline tables , to support product and sum tables properly
             of
         TB1 i ->
-          concat $
-          fmap maybeToList $
+          concatMap maybeToList $
           filter isJust $
           fmap (traverse unSOptional) $
           concat $ fmap aattr $ F.toList $ unkvlist i
@@ -765,7 +767,7 @@ findFun l v =
   L.find (((pure . Inline $ l) ==) . fmap mapFunctions . S.toList .originalRel. fst) $
   PM.toList $ _kvvalues $ (v)
   where
-    mapFunctions (RelFun i _ _) = Inline i
+    mapFunctions (RelFun i _ _) = i
     mapFunctions j = j
 
 -- findFun l v = fmap recoverAttr' . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ Map.toList $ _kvvalues $ v
@@ -785,7 +787,7 @@ findFKAttr l v =
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
 recLookup p@(Inline l) v = _tbattr <$> kvLookup (S.singleton p) v
 recLookup n@(RelAccess l nt) v =
-  join $ fmap join . traverse (recLookup nt) <$> refLookup (S.fromList l) v
+  join $ fmap join . traverse (recLookup nt) <$> refLookup (S.singleton l) v
 
 kvLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (TB k a)
 -- kvLookup rel  (KV i) = Map.lookup rel i
@@ -832,7 +834,7 @@ indexerRel :: Text -> Rel Text
 indexerRel field =
   L.head $
   foldr
-    (\i -> fmap (RelAccess (Inline <$> i) ))
+    (\i -> fmap (RelAccess (RelComposite $ Inline <$> i) ))
     (Inline <$> last vec)
     (init vec)
   where
@@ -850,10 +852,9 @@ renderRel (RelFun k expr rel) = show k ++ " = " ++ renderFun expr rel
         go (Function i e) =
           T.unpack i ++ "(" ++ L.intercalate "," (fmap go e) ++ ")"
         go (Value i) = renderRel $ justError "no value" $ ac `atMay` i
-renderRel (RelAlias k rel) =
-  show k ++ " = " ++ L.intercalate "," (renderRel <$> rel) ++ " as "
+renderRel (RelComposite l ) =  L.intercalate ","  (renderRel <$> l)
 renderRel (RelAccess i l) =
-  L.intercalate "," (renderRel <$> i) ++ "." ++ renderRel l
+  renderRel i ++ "." ++ renderRel l
 renderRel (Rel i Equals k)
   | show i == show k = show i
 renderRel (Rel i op k) = renderRel i <> renderBinary op <> show k

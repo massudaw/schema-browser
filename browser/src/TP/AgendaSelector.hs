@@ -9,9 +9,7 @@ module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef) where
 
 import GHC.Stack
 import Environment
-import Control.Arrow
 import Step.Host
-import Control.Monad.Writer as Writer
 import TP.View
 import qualified Data.Interval as Interval
 import qualified Data.HashMap.Strict as HM
@@ -22,7 +20,6 @@ import Data.Functor.Identity
 import Types.Patch
 import Control.Arrow
 import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
-import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
 import Data.Time.ISO8601
@@ -73,7 +70,7 @@ data Mode
 
 
 eventWidgetMeta inf =  do
-    importUI =<<  mapM js
+    importUI =<< mapM js
        ["fullcalendar-3.5.0/lib/jquery-ui.min.js"
        ,"fullcalendar-3.5.0/lib/moment.min.js"
        ,"fullcalendar-3.5.0/fullcalendar.min.js"
@@ -130,8 +127,8 @@ calendarView
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
      -> t2 (t, TableK Key, NonEmpty (FTB Showable),
-          TBData Key Showable -> [Maybe a ])
-    -> Tidings (S.Set (TableK Key) )
+          TBData Key Showable -> [Maybe a])
+    -> Tidings (S.Set (TableK Key))
      -> Mode
      -> [Char]
      -> UTCTime
@@ -146,7 +143,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     edits <- traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,fields,proj)-> do
-            let pred = WherePredicate $ AndColl $ [timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
+            let pred = WherePredicate . AndColl $ [timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
             reftb <- ui $ refTables' inf t Nothing pred
@@ -156,7 +153,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
             let tdi = tidings tdib evsel
             ui $ onEventIO evsel hselg
             traverseUI
-              (\i ->calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList (primary i))) v
+              (\i ->calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap proj $ G.toList (primary i))) v
                                   ) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
@@ -180,7 +177,7 @@ calendarSelRow readSel (agenda,resolution,incrementT) = do
       evdd = eventDragDrop innerCalendar
       evs =  fmap (first readSel) <$> unions [evr,evdd,evd]
     bhevs <- ui $ stepper [] evs
-    return $(tidings bhevs evs,readSel <$> evc, innerCalendar)
+    return (tidings bhevs evs,readSel <$> evc, innerCalendar)
 
 
 addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
@@ -189,7 +186,7 @@ addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
     reftb <- ui $ refTables' inf t Nothing pred
     let v = reftb ^. _2
     traverseUI
-      (\i -> calendarAddSource innerCalendar  t (concat . fmap (catMaybes) $ fmap proj $ G.toList (primary i))) v
+      (\i -> calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap proj $ G.toList (primary i))) v
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

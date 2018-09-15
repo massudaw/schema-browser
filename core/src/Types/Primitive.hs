@@ -2,7 +2,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -145,18 +144,19 @@ data FPlugAction
   | PurePlugin (ArrowReaderM Identity)
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
-instance Eq (FPlugins) where
 
-instance Show (FPlugins) where
+instance Eq FPlugins where
 
-instance Ord (FPlugins) where
+instance Show FPlugins where
+
+instance Ord FPlugins where
 
 
-instance Eq (FPlugAction ) where
+instance Eq FPlugAction  where
 
-instance Show (FPlugAction ) where
+instance Show FPlugAction where
 
-instance Ord (FPlugAction ) where
+instance Ord FPlugAction  where
 
 type ArrowReader  = ArrowReaderM IO
 
@@ -193,6 +193,7 @@ data SqlOperationTK t k
   | FKInlineTable k t
   | FunctionField k Expr [Rel k]
   | PluginField (Int,FPlugins)
+  | Column k
   deriving (Eq, Ord, Show, Functor, Foldable, Generic)
 
 
@@ -211,7 +212,7 @@ pathRelRel :: Ord k => SqlOperationK k -> Set (Rel k)
 pathRelRel (FKJoinTable rel _) = Set.fromList rel
 pathRelRel (FKInlineTable r _) = Set.singleton $ Inline r
 pathRelRel (RecJoin l rel) = pathRelRel rel
-pathRelRel (FunctionField r e a) = S.singleton $ RelFun r e a
+pathRelRel (FunctionField r e a) = S.singleton $ RelFun (Inline r) e a
 pathRelRel (PluginField i) = error "not implemented use pathrelInput"
 
 
@@ -219,7 +220,7 @@ pathRelRel (PluginField i) = error "not implemented use pathrelInput"
 pathRelRel' :: Ord k => SqlOperationK k -> MutRec [Set (Rel k)]
 pathRelRel' (RecJoin l rel)
   | L.null (unMutRec l) = MutRec [[pathRelRel rel]]
-  | otherwise = fmap ((pathRelRel rel :) . fmap (Set.fromList)) l
+  | otherwise = fmap ((pathRelRel rel :) . fmap Set.fromList) l
 
 type Column k a = TB k a
 
@@ -227,7 +228,6 @@ type Key = CoreKey
 
 data FKey a = Key
   { keyValue :: Text
-  , keyTranslation :: (Maybe Text)
   , keyModifier :: [FieldModifier]
   , keyPosition :: Int
   , keyStatic :: Maybe (FExpr Text (FTB Showable))
@@ -283,7 +283,7 @@ instance Binary STime
 
 instance NFData STime
 
-instance NFData (TableType)
+instance NFData TableType
 
 
 data GeomType
@@ -352,10 +352,10 @@ instance Ord (FKey a) where
   compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a) where
-  show k = T.unpack $ maybe (keyValue k) id (keyTranslation k)
+  show k = T.unpack $ keyValue k
 
 showKey k =
-  maybe (keyValue k) (\t -> keyValue k <> "-" <> t) (keyTranslation k) <> "::" <>
+  (keyValue k)  <>  "::" <>
   T.pack (show $ keyFastUnique k) <>
   "::" <>
   T.pack (show $ keyStatic k) <>
@@ -538,7 +538,7 @@ rawIsSum = tableProp __rawIsSum
 
 rawTableType  = tableProp _rawTableTypeL
 
-translatedName tb = maybe (rawName tb) id (rawTranslation tb)
+translatedName tb = fromMaybe (rawName tb) (rawTranslation tb)
 
 rawFullName t  = rawSchema t <> "." <> rawName t
 
@@ -651,14 +651,14 @@ tableMeta t =
   where
     rec = filter isRecRel (rawFKS t)
     same = filter ((tableName t ==) . fkTargetTable) rec
-    notsame = filter (not . (tableName t ==) . fkTargetTable) rec
+    notsame = filter ((tableName t /=) . fkTargetTable) rec
     paths = fmap (fmap (fmap F.toList) . pathRelRel') notsame
     paths' =
       (\i ->
          if L.null i
            then []
            else [MutRec i]) $
-      concat $ fmap ((unMutRec) . fmap (fmap F.toList) . pathRelRel') same
+      concatMap (unMutRec . fmap (fmap F.toList) . pathRelRel') same
 
 
 -- Intersections and relations
@@ -695,12 +695,12 @@ kOptional = Le.over (keyTypes . keyFunc) (KOptional :)
 kArray = Le.over (keyTypes . keyFunc) (KArray :)
 
 
-unKOptional (Key a v c m n d (Primitive (KOptional:cs) e)) =
-  Key a v c m n d (Primitive cs e)
-unKOptional (Key a v c m n d (Primitive (KSerial:cs) e)) =
-  Key a v c m n d (Primitive cs e)
-unKOptional (Key a v c m n d (Primitive [] e)) =
-  Key a v c m n d (Primitive [] e)
+unKOptional (Key a  c m n d (Primitive (KOptional:cs) e)) =
+  Key a  c m n d (Primitive cs e)
+unKOptional (Key a  c m n d (Primitive (KSerial:cs) e)) =
+  Key a  c m n d (Primitive cs e)
+unKOptional (Key a  c m n d (Primitive [] e)) =
+  Key a  c m n d (Primitive [] e)
 unKOptional i = i -- error ("unKOptional" <> show i)
 
 
@@ -780,7 +780,7 @@ liftRelFK l rel f =
     f
   where
     defaultTy :: [KTypePrim] -> FTB [w]
-    defaultTy l  = foldr (\i j ->   i . j ) TB1 (match  <$> l) $ []
+    defaultTy l  = foldr (.)  TB1 (match  <$> l) $ []
     match KArray  = ArrayTB1 . Non.fromList . L.replicate 50
     match KOptional = LeftTB1 . Just
     isOptional (LeftTB1 i) = True
@@ -801,7 +801,7 @@ mergeFKRel :: [Rel CoreKey ] -> KType [(Rel CoreKey , KType CorePrim)]
 mergeFKRel ls =
   Primitive
     (F.foldr mergeRel [] ((\i -> _keyFunc $ keyType (_relOrigin i)) <$> ls))
-    ((\i -> (i, keyType (_relTarget i))) <$> ls)
+    ((\i -> (i, relType (_relTarget i))) <$> ls)
   where
     mergeRel (KOptional:o) (KOptional:kl) = KOptional : mergeRel o kl
     mergeRel (KArray:o) (KArray:kl) = KArray : mergeRel o kl
@@ -830,7 +830,7 @@ mergeOpt i j = error ("mergeOpt" <> show (i, j))
 
 relType :: Show a => Rel (FKey (KType a)) -> KType a
 relType (Inline k) = keyType k
-relType (RelAccess xs n) =
+relType (RelAccess (RelComposite xs) n) =
   Primitive (_keyFunc (mergeFKRef $ keyType . _relOrigin <$> xs) ++ ty) at
   where
     Primitive ty at = relType n
@@ -894,7 +894,7 @@ instance P.Poset (FKey i) where
       LT -> P.LT
       GT -> P.GT
 
-keyRef k = Inline k
+keyRef = Inline
 
 iprodRef (IProd _ l) = l
 
@@ -910,15 +910,15 @@ renderUnary i = error (show i)
 
 accesRelGen' :: Rel k -> Access k
 accesRelGen' (Inline i) = IProd Nothing i
-accesRelGen' (RelAccess l m) =
+accesRelGen' (RelAccess (RelComposite l) m) =
   Nested (Non.fromList l) (Many [(accesRelGen' m)])
 
 newKey' mode tun max name ty =
   let un = max + 1
-  in  Key name Nothing mode un Nothing tun ty
+  in  Key name mode un Nothing tun ty
 
-newKey table name ty =
-  newKey' [FRead,FWrite] (tableUnique table)  (maximum (keyPosition <$> rawAttrs table)) name ty
+newKey table =
+  newKey' [FRead,FWrite] (tableUnique table)  (maximum (keyPosition <$> rawAttrs table))
 
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
@@ -956,7 +956,7 @@ splitIndexPKB (OrColl l) pk =
 splitIndexPKB (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (PrimColl (p@(Inline i), op)) pk =
-  if not (elem i pk)
+  if notElem i pk
     then Just (PrimColl (p, op))
     else Nothing
 splitIndexPKB i pk = Just i
@@ -965,11 +965,11 @@ splitIndexPKB i pk = Just i
 relAccesGen' :: Access k -> [Rel k]
 relAccesGen' (IProd i l) = [Inline l]
 relAccesGen' (Nested l (Many m)) =
-  RelAccess (F.toList l)  <$> (concat  $ relAccesGen' <$> F.toList m)
+  RelAccess (RelComposite $ F.toList l)  <$> (concat  $ relAccesGen' <$> F.toList m)
 relAccesGen' (Rec ix v ) = concat $ relAccesGen' <$> F.toList v
 relAccesGen' (Point ix ) = [] -- error "Point not implemented"
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l) = Inline l
 relAccesGen (Nested l (Many [m])) =
-  RelAccess (F.toList l) (relAccesGen m)
+  RelAccess (RelComposite $ F.toList l) (relAccesGen m)

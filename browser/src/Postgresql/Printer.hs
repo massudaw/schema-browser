@@ -386,7 +386,7 @@ indexFieldL inf m e c p@(Inline l) v =
   case findAttr l (restrictTable nonFK v) of
     Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
     Nothing -> error $ "not attr inline" ++ show (l,v)
-indexFieldL inf m e c n@(RelAccess l nt) v =
+indexFieldL inf m e c n@(RelAccess (RelComposite l) nt) v =
   case kvLookup (S.fromList l) v of
     Just a -> case a of
         t@(IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  do

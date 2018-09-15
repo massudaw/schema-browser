@@ -156,6 +156,8 @@ nonEmpty i = Just i
 safeTail [] = []
 safeTail i = tail i
 
+buildMap f = M.fromListWith mappend . fmap  f
+
 unFinite :: Interval.Extended a -> Maybe a
 unFinite (Interval.Finite i) = Just i
 unFinite i = Nothing

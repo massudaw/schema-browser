@@ -317,7 +317,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItems preoldItems = do
   let
 
     search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show (a ,t , M.keys wl)) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
-    search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList t)  wl)
+    search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList (relUnComp t))  wl)
     search f i = error (show i)
     -- Add information if the patch is Keep
     refs = sequenceA $ search recoverValue <$> snd rel
@@ -444,7 +444,8 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems =  fmap (
                                Nothing -> v
               search f t@(Inline _) = plugattr (S.singleton t) $ maybe (previous (S.singleton t)) f $ M.lookup (S.singleton t) wl
               search f (Output t) =  previous (S.singleton t)
-              search f (RelAccess t m) =plugattr (S.fromList t) $ maybe (previous (S.fromList t)) f $ M.lookup (S.fromList t) wl
+              search f (RelAccess t m) =plugattr ts $ maybe (previous ts) f $ M.lookup ts  wl
+                  where ts = S.fromList $ relUnComp t
               inputs = sequenceA $ search (fmap snd . recoverValue) <$> S.toList l
            (el,(i,o)) <- pluginUI inf (fmap kvlist . nonEmpty . catMaybes <$> inputs) plug
            label <- flabel #  set text (L.intercalate "," $ renderRel <$> S.toList l)
@@ -1244,7 +1245,7 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
     where
       prim (Attr k v) =  buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
-      buildPrim o rel = PrimColl (keyRef (_relTarget rel),[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
+      buildPrim o rel = PrimColl (_relTarget rel,[(_relOrigin $ _relTarget rel,Left  (o,Flip $ _relOperator rel))])
 
 
 fkUITablePrim ::
@@ -1417,7 +1418,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           let
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey
-            swapKey k = maybe k _relTarget (L.find ((==k)._relOrigin) rel)
+            swapKey k = maybe k (_relOrigin . _relTarget) (L.find ((==k)._relOrigin) rel)
             replaceKeyP :: PathAttr CoreKey Showable  -> PathAttr CoreKey Showable
             replaceKeyP = firstPatchAttr swapKey
 

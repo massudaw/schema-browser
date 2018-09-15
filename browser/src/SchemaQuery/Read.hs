@@ -196,16 +196,16 @@ paginateTable table pred tbf = do
   snd <$> check 0 (nidx,ndata)
 
 predicate
-  :: [Rel (FKey (KType a1))]
+  :: Show a1 => [Rel (FKey (KType a1))]
      -> TBPredicate (FKey (KType a1)) a
      -> Maybe (TBPredicate (FKey (KType a1)) a)
 predicate i (WherePredicate l ) =
-   fmap WherePredicate (go (test i) l)
+   fmap WherePredicate (go (test (RelComposite i)) l)
   where
     go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
     go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
     go pred (PrimColl l) = PrimColl <$> pred l
-    test f (RelAccess p i ,j)  = if p == f then Just ( i ,fmap (mapLeft (fmap (removeArray (_keyFunc $ mergeFKRef $ fmap (keyType . _relOrigin) $ p)))) <$> j) else Nothing
+    test f (RelAccess p i ,j)  = if p == f then Just ( i ,fmap (mapLeft (fmap (removeArray (_keyFunc $ relType  p)))) <$> j) else Nothing
     test v f = Nothing
     removeArray (KOptional :i)  o = removeArray i o
     removeArray (KArray : i)  (AnyOp o) = o
@@ -253,7 +253,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
       genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
       primPredicate o k  = do
         i <- unSOptional ._tbattr  =<< lkAttr k o
-        return $ PrimColl (Inline (_relTarget k) ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
+        return $ PrimColl (_relTarget k ,[(_relOrigin $ _relTarget k,Left (i,Flip $ _relOperator k))])
       lkAttr k v =  kvLookup (S.singleton (Inline (_relOrigin k))) (tableNonRef v)
       refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
       predm = refs <> predicate i predtop
@@ -342,9 +342,9 @@ tableLoader' table  page fixed tbf = do
         where
           go pred (AndColl l) = AndColl (go pred <$> l)
           go pred (OrColl l) = OrColl (go pred <$> l)
-          go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
-          predicate (RelAccess i j ,_ ) = (\a -> (a, [(_relOrigin a,Right (Not IsNull))])) <$> i
-          predicate i  = [i]
+          go pred (PrimColl l) = PrimColl $ pred l
+          predicate (RelAccess i j ,_ ) = (i, maybe [] ((\a -> (a,Right (Not IsNull)))<$>) $ _relInputs i)
+          predicate i  = i
     (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) ( restrictTable nonFK  tbf) page token size presort (unestPred predicate)
     resFKS  <- getFKS inf predicate table res tbf
     let result = fmap resFKS   res
@@ -678,7 +678,6 @@ createFresh  tname inf i ty@(Primitive l  atom)  =
                     Le.& _inlineFKS Le.%~  (path:)
       let newinf =  inf
             Le.& tableMapL . Le.ix tname Le.%~ alterTable
-            Le.& keyUnique Le.%~ M.insert (keyFastUnique k) k
             Le.& keyMapL Le.%~ HM.insert (tname,i) k
       return newinf
   where tableO = lookTable inf tname

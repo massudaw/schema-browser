@@ -150,8 +150,8 @@ reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
-  | any (\j -> not $ isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) ( keyType (_relTarget j) )) ks =  const False
-  | otherwise = (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) ))
+  | any (\j -> not $ isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) ( relType (_relTarget j) )) ks =  const False
+  | otherwise = (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (relType (_relTarget j) ))
 
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
@@ -162,7 +162,7 @@ isReflexive r@(FKJoinTable  ks  _ )
 isReflexive l  = isPathReflexive l
 
 isPathReflexive (FKJoinTable  ks _)
-  | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) )) ks
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (relType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _ _)= True
 isPathReflexive (FunctionField _ _ _)= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
@@ -283,7 +283,7 @@ sup' = unFinite . Interval.upperBound
 
 
 backPathRef ::  SqlOperation -> TBData Key Showable ->  [Column Key Showable]
-backPathRef (FKJoinTable rel t) = justError ("no back path ref "  ++ show rel ). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (_relOrigin<$> rel)
+backPathRef (FKJoinTable rel t) = justError ("no back path ref "  ++ show rel ). backFKRef (M.fromList $ fmap (\i -> (_relOrigin $ _relTarget i ,_relOrigin i)) rel) (_relOrigin<$> rel)
 
 backFKRefType
   :: Show a =>
@@ -307,9 +307,9 @@ reflectFK rel table =
   kvlist <$> backFKRefType relTable relType (_relOrigin <$> rel) table
       where
         Primitive _ c = mergeFKRel rel
-        relTable = M.fromList $ (\i -> (_relTarget i, _relOrigin i)) <$> rel
+        relTable = M.fromList $ (\i -> (_relOrigin $ _relTarget i, _relOrigin i)) <$> rel
         unKSerial (Primitive l c ) = Primitive (filter  (/= KSerial) l) c
-        relType = M.fromList $ zip (_relTarget <$> rel ) (unKSerial .snd <$> c)
+        relType = M.fromList $ zip (_relOrigin . _relTarget <$> rel ) (unKSerial .snd <$> c)
 
 
 backFKRef
@@ -349,7 +349,7 @@ tbpredFK rel un  pk2 v  = tbjust  .  Tra.traverse (Tra.traverse unSOptional) . f
   -> Maybe a-}
 searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) )
   where
-    relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,_relOrigin i)) rel
+    relTable = M.fromList $ fmap (\(Rel i _ j ) -> (_relOrigin j,_relOrigin i)) rel
     lookGist rel un pk  v =  join res
       where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
 
@@ -373,7 +373,7 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
+            idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relOrigin . _relTarget .fst )) ref
             tbel = G.lookup idx table
 
 

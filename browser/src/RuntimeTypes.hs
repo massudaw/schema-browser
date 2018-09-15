@@ -110,10 +110,6 @@ data InformationSchemaKV k v
   -- Mapping from keys to backend key
   , _backendKey :: Map KeyUnique PGKey
   -- Full Key from unique id
-  , _keyUnique :: Map KeyUnique k
-  -- all top level tables
-  , _pkMapL :: Map (Set k) Table
-  -- all tables by name
   , _tableMapL :: HM.HashMap Text Table
   -- Cache storage DB references
   , mvarMap :: TVar (Map (KVMetadata k) (DBRef Key v ))
@@ -136,8 +132,6 @@ instance Ord InformationSchema where
 
 recurseLookup :: (k -> InformationSchema -> Maybe b) -> InformationSchema -> k -> Maybe b
 recurseLookup l inf un = l un  inf <|> F.foldl' (<|>) Nothing (flip (recurseLookup l) un <$> F.toList (depschema inf))
-
-recoverKey = recurseLookup (\un inf -> M.lookup un (_keyUnique inf))
 backendsKey = recurseLookup (\un inf -> M.lookup un (_backendKey inf))
 
 conn  = rootconn
@@ -163,7 +157,6 @@ tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
 tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> F.foldl' mappend mempty (fmap (tableMap . snd) (HM.toList $ depschema s))
 
 keyMap = _keyMapL
-pkMap = _pkMapL
 
 data DBRef k v =
   DBRef  { dbRefTable :: TableK k
@@ -187,17 +180,13 @@ data DBVar2 v =
   , collectionTid :: R.Tidings (TableRep Key Showable )
   }
 
-
-
 type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KV k (),PageTokenF v)
 
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k (AccessOp v , FTB v)])
 
-
 instance (Show k ,Show v) => Patch (InformationSchemaKV  k v )  where
   type Index (InformationSchemaKV k v) = [TableModificationU k v]
-
 
 type RefTables = ( R.Tidings (IndexMetadata CoreKey Showable)
                  , R.Tidings (TableRep CoreKey Showable)
@@ -406,8 +395,8 @@ pathRelInputs _ _ i = pathRelRel i
 
 genRel :: Map Int (Union (Access k)) -> Access k -> [Rel k]
 genRel s (Rec ix j) = concat $ genRel (M.insert ix j s) <$> F.toList j
-genRel s (Nested i j) = concat $ fmap (RelAccess (F.toList i)) . genRel s <$> F.toList j
-genRel s (IProd _ i) = [RelAccess [Inline i] (Inline i) ]
+genRel s (Nested i j) = concat $ fmap (RelAccess (RelComposite $ F.toList i)) . genRel s <$> F.toList j
+genRel s (IProd _ i) = [RelAccess (Inline i) (Inline i) ]
 genRel s (Point ix) = concat $ genRel (M.delete ix s) <$> maybe [] F.toList (M.lookup ix s)
 
 
@@ -631,7 +620,7 @@ liftASch inf s tname (Inline l) = Inline $  lookKey  l
     tb = inf s tname
     lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
-liftASch inf s tname (RelAccess i c) = RelAccess (F.toList $ pathRelRel rel) (liftASch inf sch st c)
+liftASch inf s tname (RelAccess (RelComposite i) c) = RelAccess (RelComposite $ F.toList $ pathRelRel rel) (liftASch inf sch st c)
   where
     ref = liftASch inf s tname <$> i
     tb = inf s tname
@@ -700,7 +689,7 @@ genPredicateFull'
 genPredicateFull' i s (Rec ix l) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.insert ix l s) <$> F.toList l)
 genPredicateFull' i s (Point ix) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.delete ix  s) <$> F.toList (maybe [] F.toList $ M.lookup ix s))
 genPredicateFull' i s (IProd b l) =  Just . maybe (PrimColl (Inline l ,Right Exists)) (\i -> PrimColl (Inline l,Right i )) $ b
-genPredicateFull' i s (Nested p l) = fmap (\(a,b) -> (RelAccess (F.toList p) a , b )) <$> genPredicateFullU' i s l
+genPredicateFull' i s (Nested p l) = fmap (\(a,b) -> (RelAccess (RelComposite $ F.toList p) a , b )) <$> genPredicateFullU' i s l
 genPredicateFull' _ s i = error (show i)
 
 genPredicateFullU t = genPredicateFullU' t M.empty
@@ -763,7 +752,7 @@ recComplement inf =  filterAttrs []
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
-        merged = filterAttrs (_relTarget <$> rel) m2 <$> tb <*> tb1
+        merged = filterAttrs (_relOrigin . _relTarget <$> rel) m2 <$> tb <*> tb1
         FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
     go _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
@@ -802,7 +791,7 @@ filterTBData :: (KVMetadata Key -> S.Set (Rel Key) -> TB Key a -> Bool) ->  Info
 filterTBData  pred inf =  filterAttrs S.empty
   where
     filterAttrs l m = mapKV (go m) . kvFilterWith (\i v -> pred m i v || not  (S.null $ (S.map _relOrigin i `S.intersection` l) ))
-    go m (FKT l  rel  tb) = FKT l rel $ filterAttrs (S.fromList $ _relTarget <$> rel) m2  <$> tb
+    go m (FKT l  rel  tb) = FKT l rel $ filterAttrs (S.fromList $ _relOrigin . _relTarget <$> rel) m2  <$> tb
       where
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec desc: " <> show (rel ,_kvjoins m))$ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)

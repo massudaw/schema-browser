@@ -1,6 +1,6 @@
-{-# LANGUAGE RecordWildCards, Arrows, RankNTypes, RecursiveDo,
-  TypeFamilies, FlexibleContexts, OverloadedStrings, TupleSections
-  #-}
+{-# LANGUAGE Arrows, RankNTypes, TypeFamilies, FlexibleContexts,
+  OverloadedStrings, TupleSections #-}
+
 module SchemaQuery.Arrow
   (
    fromR
@@ -74,7 +74,7 @@ innerJoinR (P j k) (P l n) srel alias
         let origin = sourceTable inf (JoinV j l InnerJoin srel alias)
             target = sourceTable inf l
         let
-          rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target j)) <$>  srel
+          rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
           joinFK :: TBData Key Showable ->  Maybe (Column Key Showable)
@@ -101,7 +101,7 @@ leftJoinR (P j k) (P l n) srel alias
         let
           origin = sourceTable inf (JoinV j l LeftJoin srel alias)
           target = sourceTable inf l
-          rel = (\(Rel i o j ) -> Rel (lkKey origin <$> i ) o (lkKey target j) )<$>  srel
+          rel = (\(Rel i o j ) -> Rel (lkKey origin <$> i ) o (lkKey target <$> j) )<$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
           joinFK :: TBData Key Showable ->  Column Key Showable

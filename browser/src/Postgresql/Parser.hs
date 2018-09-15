@@ -219,7 +219,6 @@ instance TF.ToField Showable where
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
 
--- parseAttrJSON inf i v | traceShow (i,v) False = undefined
 parseAttrJSON inf (Attr i _ )  v = do
   let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
   s<- parseShowableJSON  parsePrimitiveJSON tyun  v

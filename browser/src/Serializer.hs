@@ -6,8 +6,14 @@ module Serializer where
 import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Set as S
+import Postgresql.Types
+import GHC.Word
+import Postgresql.Sql.Types
+import Postgresql.Sql.Parser
 import Data.Monoid -- hiding((<>))
 import qualified Data.Semigroup as S
+import qualified Data.Aeson as A
+import Text (renderShowable)
 import Control.Arrow
 import Data.Interval (intersection)
 import Data.Functor.Contravariant.Divisible
@@ -21,7 +27,7 @@ import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.Dynamic
 import qualified Data.Foldable as F
-import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import qualified Data.Interval as Interval
 import Data.Time
 import Control.Category
@@ -140,6 +146,74 @@ encodeT = encodeIso isoTable
 class DecodeTable a where
   isoTable :: SIso (Union (Reference Text)) (TBData Text Showable) a
 
+instance DecodeShowable FieldModifier where
+  decodeS (SText i) = map i
+    where
+       map "read" = FRead
+       map "write" = FWrite
+  encodeS i = SText $ unmap i
+    where
+       unmap FRead = "read"
+       unmap FWrite = "write"
+  isoS = SIso PBoolean (tell . pure .encodeS ) (decodeS. onlyLast )
+
+instance DecodeShowable (FExpr Text Text)  where
+  decodeS (SText i) =  justError "cannot parse expr" $ parseExpr (BS.pack . T.unpack $ i)
+  encodeS i = SText $ renderExpr i
+
+  isoS = SIso PText (tell . pure .encodeS ) (decodeS. onlyLast )
+
+
+renderExpr i = case i of 
+  ConstantExpr i -> i
+ 
+parseDefValue i v = fromShowable i <$> (A.decode . BSL.pack . T.unpack $ v)
+
+parseExpr v = case  parseValue v of
+  Left v -> Nothing
+  Right v ->toExpr v
+  where 
+    toExpr v =  case v of
+      Lit v ->  if T.null v then Nothing else Just (ConstantExpr v)
+      ApplyFun t l -> Function t <$> (traverse toExpr l)
+      Cast i j -> toExpr i
+      i -> error (show i)
+
+instance DecodeTable (FKey (KType (Prim (Text,Text,Maybe Word32) (Text,Text)))) where
+  isoTable = iassoc6 
+    (IsoArrow (\(i,j,k,l,m,n) -> Key i j k (join $ traverse (parseDefValue (mapKType n)) <$> l) m n) (\(Key i j k l m n) -> (i,j,k,fmap (T.pack . renderShowable) <$>  l,m,n))) 
+    (identity <$$> prim "column_name") 
+    (prim "field_modifiers") 
+    (identity <$$> prim "ordinal_position") 
+    (prim "defaults") 
+    (identity <$$> prim "table") 
+    (iassoc 
+      (IsoArrow (\(i,j) -> Primitive i j) (\(Primitive i j ) -> (i,j))) 
+      (iassoc3 
+        (IsoArrow (\(i,j,k) -> i <> j <> k ) (\l -> (l,l,l)))  
+          (ifTyArr KOptional . identity <$$> prim "is_nullable") 
+          (ifTyArr KArray . identity <$$> prim "is_array") 
+          (ifTyArr KInterval . identity <$$> prim "is_range"))
+      (identity <$$> nestWith "col_type" 
+        (itotal $ isplit 
+          (IsoArrow ty unty) 
+          (nestWith "primitive" $ iassoc3 id (identity <$$>prim "schema_name" ) (identity <$$>prim "data_name") (prim "typmod"))
+          (nestWith "composite" $ iassoc id (identity <$$> prim "schema_name" ) (identity <$$>prim "data_name"))
+        )
+      )
+    )
+
+      where 
+        ifTyArr i = let 
+            ifTy True =  [i]
+            ifTy False = []
+            unifTy l =  F.elem i l
+                   in IsoArrow ifTy unifTy
+        ty (Left i) = AtomicPrim i
+        ty (Right i ) = RecordPrim i 
+        unty (AtomicPrim i ) = Left i
+        unty (RecordPrim j ) = Right j  
+
 
 class IsoProfunctor f => IsoApplicative f where
   ipure :: f a
@@ -169,6 +243,7 @@ isplit4 (IsoArrow f g) a b c d = isplit (IsoArrow f g )  (isplit3 id a b c) d
 
 isplit5 :: IsoDivisible f => ((a :|: b :|: c :|: d :|: e ) |-> g) -> f (Maybe a)  -> f (Maybe b) -> f (Maybe c) -> f (Maybe d) -> f (Maybe e) -> f (Maybe g)
 isplit5 (IsoArrow f g) a b c d e = isplit (IsoArrow f g )  (isplit4 id a b c d) e
+
 
 iassoc3 :: IsoApplicative f => ((a,b,c) |-> d) -> f a  -> f b -> f c -> f d
 iassoc3 (IsoArrow f g)  a b c = iassoc   (IsoArrow f2 g2) a (iassoc  id  b c)
@@ -241,7 +316,7 @@ nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs
           keyset = S.fromList ix
           lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). kvLookup  keyset $ v
           mk = kvSingleton . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
-          reflectOp a r@(Rel (Inline i) op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (r,a)). kvLookup (S.singleton (Inline l)) <$> a)
+          reflectOp a r@(Rel (Inline i) op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (r,a)). kvLookup (S.singleton l) <$> a)
 
 
 nestWith :: (Functor f, DecodeTB1 f) =>
@@ -357,6 +432,11 @@ instance B.Binary a => DecodeShowable (Binary a) where
   decodeS (SBinary i) = Binary $ B.decode (BSL.fromStrict i)
   encodeS (Binary i) = SBinary (BSL.toStrict $ B.encode i)
   isoS = SIso PBinary (tell . pure .encodeS ) (decodeS. onlyLast )
+
+instance DecodeShowable Word32 where
+  decodeS (SNumeric i) = fromIntegral i
+  encodeS = SNumeric . fromIntegral 
+  isoS = SIso (PInt 8) (tell . pure .encodeS ) (decodeS. onlyLast )
 
 instance DecodeShowable Int where
   decodeS (SNumeric i) = i

@@ -124,7 +124,7 @@ childrenRefsUnique
 childrenRefsUnique  source inf pre (RecJoin i j@(FKJoinTable _ _) ) = childrenRefsUnique source inf pre j
 childrenRefsUnique  source _  _    (RecJoin _ _ ) = []
 childrenRefsUnique  source _  _    (FunctionField _ _ _ ) = []
-childrenRefsUnique  source inf pre (FKInlineTable rel target) = concat $ childrenRefsUnique targetTable inf (pre .RelAccess [Inline rel] ) <$> fks
+childrenRefsUnique  source inf pre (FKInlineTable rel target) = concat $ childrenRefsUnique targetTable inf (pre .RelAccess (Inline rel) ) <$> fks
   where
     fks = rawFKS targetTable
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
@@ -145,11 +145,11 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
         outputs = filter (isJust . _relOutputs ) rel
         inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         predK = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(_relOrigin o,Left (pkIndex t ,Flip op))])) <$> outputs)
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))])) <$> outputs)
         predScanOut = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess rel o) ,  [(_relOrigin o,Left (pkIndex t ,Flip op))] )) <$> outputs)
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess (RelComposite rel) o) ,  [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))] )) <$> outputs)
         predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(_relOrigin o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))])) <$> inputsOnly )
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $

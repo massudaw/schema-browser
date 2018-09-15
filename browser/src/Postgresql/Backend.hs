@@ -128,7 +128,6 @@ attrPatchName pre (PInline k p ) = sqlPatchFTB atom (maybe "" (\i -> i <> ".") p
     atom k c ty (PAtom i)  = mapM_ (attrPatchName (Just k)) i
 attrPatchName pre i = error $ show (pre,i)
 
-
 inpVariable :: (KType (Prim PGType (Text, Text)), FTB Showable) -> Text -> UpdateOperations
 inpVariable i j = tell [(Just i,j)]
 

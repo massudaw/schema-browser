@@ -25,8 +25,6 @@ type DatabaseM ix i a = Parser (Kleisli TransactionM) ix i  a
 
 type PluginM ix s m  i a = Parser (Kleisli (RWST (s,Index s) (Index s) ()  m )) ([ix],[ix]) i  a
 
-instance (Show u ,Patch a) => Patch (M.Map u a ) where
-  type Index  (M.Map u a) = [(u,Index a)]
 
 data RowModifier
   = RowCreate
@@ -52,6 +50,7 @@ data View i k
   | WhereV (View i k) [(Rel k,AccessOp Showable)]
   | ProjectV (View i k) (Union (AttributePath k MutationTy))
   deriving(Eq,Show,Ord)
+
 
 tablesV (FromV i) = [(i,[])]
 tablesV (JoinV i j  _ _ _ ) = tablesV i <> tablesV j
@@ -223,8 +222,12 @@ isum  lsp = irecordU ISum $ P ( concat $ fmap (fst .staticP) ls, concat $ fmap (
   where unKleisli (Kleisli op) = op
         ls =  lsp
 
-arow :: (Show (Index s),Show s,Show k ,Monad m) =>
-  RowModifier
+arow
+  :: (Show (Index s)
+     ,Show s
+     ,Show k
+     ,Monad m)
+  => RowModifier
   -> PluginM (AttributePath k MutationTy) (Atom (TBData k s)) m i a
   -> PluginM (Row RowModifier k ) (Atom (TBData k s)) m i a
 arow  m  p = P (fmap (Row m) tidxi ,fmap (Row m) tidxo) op
@@ -236,6 +239,8 @@ mapUnion f i = maybeToList $ f <$> nonEmpty i
 mapUnionU f i = manyU . maybeToList $ f <$> nonEmptyU i
 nonEmptyU (Many i) = Many <$> nonEmpty i
 
+instance (Show u, Patch a) => Patch (M.Map u a) where
+  type Index (M.Map u a) = [(u,Index a)]
 
 -- Table
 

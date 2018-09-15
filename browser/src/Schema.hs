@@ -35,6 +35,8 @@ import Control.Exception
 import qualified Control.Lens as Le
 import Control.Lens ((&),(%~))
 import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.ToField (ToField)
+import Database.PostgreSQL.Simple.FromField (FromField)
 import Data.Time
 import RuntimeTypes
 import Data.Vector (Vector)
@@ -71,17 +73,9 @@ queryAuthorization conn schema user = do
 
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
-fromShowable2 i v = case  parseValue v of
-            Left v -> Nothing
-            Right v ->toExpr v
-  where toExpr v =  case v of
-              Lit v -> ConstantExpr . fromShowable i <$>  (A.decode $ BSL.pack $ T.unpack v)
-              ApplyFun t l -> Function t <$> (traverse toExpr l)
-              Cast i j -> toExpr i
-              i -> error (show i)
+fromShowable2 i v = join (traverse (parseDefValue i) <$> parseExpr v)
 
-
-testSerial  =(=="nextval"). fst . T.break(=='(')
+testSerial = (=="nextval"). fst . T.break(=='(')
 
 readFModifier :: Text -> FieldModifier
 readFModifier "read" = FRead
@@ -95,31 +89,80 @@ readTableType "VIEW" = ReadOnly
 keyTables ,keyTablesInit :: TVar DatabaseSchema ->  (Text ,AuthCookie User) -> (Text -> SchemaEditor) ->  R.Dynamic InformationSchema
 keyTables schemaVar (schema ,user) authMap =  maybe (keyTablesInit schemaVar (schema,user) authMap ) return.  HM.lookup schema  =<< liftIO (atomically $ readTVar .globalRef =<< readTVar schemaVar )
 
+schemaPropsQuery conn schema = do
+  [(schemaId, color)] <- query conn
+    "SELECT oid , color \
+    \ FROM metadata.schema \
+    \ LEFT JOIN metadata.schema_style st ON st.schema = schema.oid \
+    \ WHERE name = ?" (Only schema)
+  return $ SchemaProperties schemaId schema color
+
+tablePropsQuery conn schema = do
+	tables <-  query conn  "SELECT t.table_name,t.oid,t.table_type,d.description,tr.translation,pks,scopes,s.table_name is not null\
+    \ FROM metadata.tables t \ 
+    \ LEFT JOIN metadata.table_description d on table_schema = t.schema_name and d.table_name = t.table_name \
+    \ LEFT JOIN metadata.table_name_translation tr on tr.\"table\" = t.oid\
+    \ LEFT JOIN metadata.pks p on p.schema_name = t.schema_name and p.table_name = t.table_name \ 
+    \ LEFT JOIN metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name \ 
+    \ WHERE t.schema_name = ?" (Only schema)
+	return . HM.fromList $ (\(name,oid,ty,desc,trans,pks,scopes,is_sum) -> (name,(oid,readTableType ty,maybe [] V.toList  desc,trans,maybe [] V.toList pks,maybe [] V.toList scopes,is_sum))) <$> tables
+
+tableColumnsQuery
+  :: (ToField a1,
+      FromField a2, 
+      Ord a2) 
+     => Connection
+     -> a1
+     -> IO
+          [(a2, FKey (KType (Prim (Text, Text, Maybe Word32) (Text, Text))))]
+tableColumnsQuery conn schema= do
+   let 
+    convertColumns (toid,t,c,op,mod) = ((t,c), (\def ->  Key c (V.toList $ fmap readFModifier mod) op def toid ))
+    tableColumns =
+          " SELECT\
+          \   \"table\",\
+          \   table_name,\
+          \   column_name,\
+          \   ordinal_position,\
+          \   field_modifiers\
+          \ FROM metadata.columns2 \
+          \ WHERE table_schema = ?"
+   uniqueMap <- fmap  convertColumns <$>  query conn tableColumns (Only schema)
+   let convertColumnsType i@(t,c,j,k,l,m,d,z,b,typ) = (t, key defty ty )
+          where 
+            defty = do 
+              i <- m 
+              def <- listToMaybe. T.splitOn "::" $ i
+              if testSerial def 
+                then Nothing 
+                else fromShowable2 (mapKType ty) .  BS.pack . T.unpack $ def
+            key = justError "no key" $ M.lookup (t,c) (M.fromList uniqueMap)
+            ty = createType (j,k,l,maybe False testSerial m,d,z,b,typ)
+   fmap convertColumnsType <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
+
+buildTMap schema keyMap rsch = HM.singleton schema keyMap <> foldr mappend mempty (tableMap <$> F.toList  rsch)
 
 keyTablesInit schemaRef  (schema,user) authMap = do
        liftIO $ putStrLn $ "Loading Schema: " <> T.unpack schema
        schemaVar <- liftIO$ readTVarIO schemaRef
        let conn = schemaConn schemaVar
        let ops  = authMap schema
-       [Only schemaId] <- liftIO $ query  conn "SELECT oid FROM metadata.schema where name = ?" (Only schema)
-       resTT <- liftIO$ M.fromList .fmap (\(name,oid,ty) -> (name,(oid,readTableType ty))) <$> query conn "SELECT table_name,oid,table_type FROM metadata.tables where schema_name = ? " (Only schema)
-       color <- liftIO$ query conn "SELECT color FROM metadata.schema_style where schema = ? " (Only schemaId)
-       uniqueMap <- liftIO$ fmap (\(toid,t,c,op,mod,tr) -> ((t,c), (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def toid ))) <$>  query conn "select t.oid ,o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o join metadata.tables t on o.table_name = t.table_name and o.table_schema = t.schema_name  left join metadata.table_translation tr on o.column_name = tr.column_name   where table_schema = ? "(Only schema)
-
-       res2 <- liftIO$ fmap (\i@(t,c,j,k,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join$ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,d,z,b,typ))) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
-
+       tableMap0 <- liftIO $ tablePropsQuery conn schema 
+       schemaProps <- liftIO $ schemaPropsQuery conn schema
+       columns <- liftIO $ tableColumnsQuery conn schema
+       
        let
-          keyList = fmap (\(t,k)-> ((t,keyValue k),k)) res2
-          tableKeys = M.fromListWith mappend ((\(t,k) -> (t,[k])) <$> res2)
+        keyList = (\(t,k)-> ((t,keyValue k),k)) <$> columns 
+        tableKeys = buildMap  (\(t,k) -> (t,[k]))  columns
 
-       plugs <- if not $ L.elem schema ["code","metadata"]
+       plugs <- if notElem schema ["code","metadata"]
           then do
-             code <- liftIO$ indexSchema (schemaRef) "code"
+             code <- liftIO$ indexSchema schemaRef "code"
              allPlugs <- loadPlugins' code
-             let plugs = concat $ newFields . snd <$> L.filter (\i-> isJust $ M.lookup (_pluginTable $ snd i) resTT) allPlugs
+             let plugs = concat $ newFields . snd <$> L.filter (\i-> isJust $ HM.lookup (_pluginTable $ snd i) tableMap0) allPlugs
                  newFields (FPlugins  _ t (StatefullPlugin l))= concat $ mapKeys . fst <$> l
                    where
-                     (oid,_) = justLook t resTT
+                     (oid,_,_,_,_,_,_) = justError "no key" $ HM.lookup t tableMap0
                      max = maximum (keyPosition <$> justLook t tableKeys)
                      mapKeys (i,o) = zipWith (\un (name,ty) -> let k = newKey' [] oid un name ty  in ((t,name),k)) [max + 1 ..] (i <> o)
                  newFields _ = []
@@ -128,22 +171,12 @@ keyTablesInit schemaRef  (schema,user) authMap = do
 
        let
           keyMap = HM.fromList $ (fmap (typeTransform ops) <$> keyList) <> fst plugs
+          backendKeys = M.fromList $ (\k -> (keyFastUnique k ,k)) . snd   <$>  keyList
           lookupKey' map t c = justError ("nokey" <> show (t,c)) $ HM.lookup (t,c) map
           lookupKey ::  Text -> Text ->  Key
           lookupKey = lookupKey' keyMap
 
-          lookupPK :: Functor f => f (Int,Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Int,Vector Key,Vector Key,Bool))
-          lookupPK = fmap  (\(o,t,c,s,b)-> (t,(o,vector  t c,vector t s,b)) )
-            where vector t = maybe V.empty (fmap (lookupKey t))
-          lookFk t k = V.toList $ fmap (lookupKey t) k
 
-
-       descMap <- liftIO$ M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ HM.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
-       transMap <- liftIO$ M.fromList   <$> query conn "SELECT \"table\",translation FROM metadata.table_name_translation WHERE schema = ? " (Only schemaId )
-       uniqueConstrMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
-       indexMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure) <$> query conn "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ? " (Only schema)
-
-       res <- liftIO$ lookupPK <$> query conn "SELECT oid,t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
 
        let
         schemaForeign :: Query
@@ -151,73 +184,66 @@ keyTablesInit schemaRef  (schema,user) authMap = do
        rslist <- liftIO $ query conn  schemaForeign (Only schema)
        rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaRef (s,user) authMap ) rslist
        let
-           sKeyMap s
-              | s == schema = keyMap
-              | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
-           lookRFk s t k = V.toList $ fmap  (lookupKey' (sKeyMap s) t) k
+           lookupFKey s t k =  lookupKey' (sKeyMap s) t k
+            where
+              sKeyMap s
+                | s == schema = keyMap
+                | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
 
        let
-          foreignKeys :: Query
-          foreignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = ?"
-          functionKeys :: Query
-          functionKeys = "select table_name,schema_name,column_name,cols,fun from metadata.function_keys where schema_name = ?"
+          foreignKeys, functionKeys, uniqueIndexes :: Query
+          foreignKeys = "SELECT origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks FROM metadata.fks WHERE origin_schema_name = ?"
+          functionKeys = "SELECT table_name,column_name,cols,fun FROM metadata.function_keys WHERE schema_name = ?"
+          uniqueIndexes = "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ?"
+          indexes = "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ?" 
+          convertFK (tp,sc,tc,kp,kc,rel) = (tp, pure (FKJoinTable (zipWith3 Rel (Inline . lookupKey tp <$> V.toList kp) (readBinaryOp <$> V.toList rel) (Inline . lookupFKey sc tc <$> V.toList kc)) (sc,tc)))
+          convertFunction (tp,tc,cols,fun) = (tp, pure (FunctionField tc (readFun fun) (indexerRel <$> V.toList cols )))
+          convertUnique (c,v) = (c,pure $ fmap (lookupKey c) . V.toList $ v)
+          convertIndexes (c,v) = (c,[V.toList v])
 
-       fks <- liftIO$ M.fromListWith mappend . fmap (\(tp,sc,tc,kp,kc,rel) -> (tp,  pure (FKJoinTable (zipWith3 Rel (Inline <$> lookFk tp kp) (readBinaryOp <$> V.toList rel) (lookRFk sc tc kc)) (sc,tc)))) <$> query conn foreignKeys (Only schema)
-
-       functionsRefs <- liftIO$ M.fromListWith mappend . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,  pure (FunctionField tc ( readFun fun) (indexerRel <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text [SqlOperationK Text] )
-
+       fks <- liftIO $ buildMap convertFK <$> query conn foreignKeys (Only schema)
+       functionsRefs <- liftIO $ buildMap convertFunction <$> query conn functionKeys (Only schema) 
+       uniqueConstrMap <- liftIO $ buildMap convertUnique <$> query conn uniqueIndexes  (Only schema)
+       indexMap <- liftIO $ buildMap convertIndexes  <$> query conn indexes (Only schema)
        let
            allKeys :: Map Text [Key]
-           allKeys =  M.fromListWith mappend  $ (\((t,_),k) -> (t,pure $ lookupKey t (keyValue k))) <$> HM.toList keyMap
-           createTable (c,(un,pksl,scpv,is_sum)) = (c ,Raw un schema tableType translation is_sum c constraints indexes  scp pks desc inlineFK [] (PluginField   <$>  filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
+           allKeys =  buildMap (\((t,_),k) -> (t,pure $ lookupKey t (keyValue k))) $ HM.toList keyMap
+           createTable c (un,tableType,desc,translation,pksl,scpv,is_sum) 
+             = (Raw un schema tableType translation is_sum c constraints indexes scp pks (lookupKey c . T.pack <$> desc) inlineFK [] (PluginField <$> filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
             where
-              pks = F.toList pksl
-              scp = F.toList scpv
+              pks = lookupKey c <$> pksl
+              scp = lookupKey c <$> scpv
               isInline (Primitive _ (RecordPrim _)) = True
               isInline _ = False
-              inlineFK =  (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
-              attr =  justLook c allKeys
-              indexes = fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap)
+              inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
+              attr = justLook c allKeys
+              constraints = fromMaybe [] $ M.lookup c uniqueConstrMap 
+              indexes = maybe []  (fmap (fmap (justError "no col" . flip M.lookup attrMap ))) $  M.lookup c indexMap
                 where attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
-              translation = M.lookup un transMap
-              constraints = fromMaybe [] (fmap ( fmap (lookupKey c )  . V.toList) <$> M.lookup c uniqueConstrMap)
-              desc = fromMaybe [] $ M.lookup  c descMap
-              (_,tableType) = justLook c resTT
-              allfks = fromMaybe []  $ computeRelReferences <$> M.lookup c fks
-           i3lnoFun = fmap createTable res :: [(Text,Table)]
-           tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
+              allfks = maybe [] computeRelReferences $ M.lookup c fks
+           tableMap1 = HM.mapWithKey createTable tableMap0 
+           tableMapPre = buildTMap  schema tableMap1  rsch
            addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (P.sortBy (P.comparing (relSort . pathRelRel))  $ fmap liftFun r)) table) ref
              where
-               ref =  M.lookup (tableName table) functionsRefs
-               liftFun (FunctionField k s a) = FunctionField (lookupKey' (sKeyMap ts) tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
+               ref =  M.lookup tn functionsRefs
+               liftFun (FunctionField k s a) = FunctionField (lookupFKey ts tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
                tn = tableName table
                ts = rawSchema table
-
-           i3l =fmap addRefs <$> i3lnoFun
+           i3l = addRefs <$> tableMap1
        ures <- fmap rights $ liftIO $ decodeViews conn schema
        let
-           i3 =  addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) <$>  HM.fromList i3l
-           pks = M.fromList $ (\(_,t)-> (S.fromList$ rawPK t ,t)) <$> HM.toList i3
-           i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
+           i3 =  addRecInit (buildTMap schema i3l rsch) <$>  i3l
            unionT (s,n ,_ ,SQLRSelect{}) = (n,id)
-           unionT (s,n,_,SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _)  (SQLRSelect _ (Just (SQLRReference _ j)) _ )  )
-             = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup t i3 )<$>  [i,j] )))
-       let
+           unionT (s,n,_,SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _)  (SQLRSelect _ (Just (SQLRReference _ j)) _ ))
+             = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup t i3) <$>  [i,j] )))
            i3u = foldr (uncurry HM.adjust. swap ) i3 (unionT <$> ures)
-           i2u = foldr (uncurry M.adjust. swap) i2 (first (\tn -> justError ("no union table" ++ show tn ). fmap (\(_,i,_,_) ->S.fromList $ F.toList i)  $ M.lookup tn (M.fromList res)) . unionT <$> ures)
 
        metaschema <- if schema /= "metadata"
           then Just <$> keyTables  schemaRef ("metadata",user) authMap
           else return Nothing
-
-       mvar <- liftIO$ atomically $ newTVar  M.empty
-       let inf = InformationSchema (SchemaProperties schemaId schema ((\(Only i ) -> i)<$> listToMaybe color)) user  keyMap backendKeys  (M.fromList $ (\i -> (keyFastUnique i,i)) <$> F.toList keyMap) (M.filterWithKey (\k v -> notElem (tableName v ) convert) i2u )  i3u mvar  conn metaschema  rsch ops schemaRef
-           backendKeys = M.fromList $ (\k -> (keyFastUnique k ,k)) . snd   <$>  keyList
-           convert = concatMap (\(_,_,_,n) -> deps  n) ures
-           deps (SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _ )  (SQLRSelect _ (Just (SQLRReference _ j)) _ ) ) =  [i,j]
-           deps SQLRSelect{} = []
-
-       var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar) (HM.insert schema inf )
+       mvar <- liftIO $ atomically $ newTVar M.empty
+       let inf = InformationSchema schemaProps user keyMap backendKeys i3u mvar conn metaschema rsch ops schemaRef
+       var <- liftIO $ atomically $ modifyTVar (globalRef schemaVar) (HM.insert schema inf)
        return inf
 
 computeRelReferences l = fst $ foldl transform  ([],M.empty)  $ P.sortBy (P.comparing (S.map _relOrigin . pathRelRel)) l
@@ -226,9 +252,10 @@ computeRelReferences l = fst $ foldl transform  ([],M.empty)  $ P.sortBy (P.comp
           = let
              r = alterRel <$> rels
             in (FKJoinTable (fst <$> r) j: l ,foldr mappend s (snd <$> r))
-           where alterRel rel@(Rel i j k) =  case M.lookup i s of
-                                Just r ->   (Rel (RelAccess  r i ) j k ,M.empty)
-                                Nothing ->  (rel, M.singleton i rels)
+           where 
+             alterRel rel@(Rel i j k) =  case M.lookup i s of
+                Just r -> (Rel (RelAccess  (RelComposite r) i ) j k ,M.empty)
+                Nothing -> (rel, M.singleton i rels)
 
 isUnion (Project _ (Union _ )) = True
 isUnion _ = False
@@ -252,7 +279,7 @@ addRecInit inf t = t & (rawFKSL %~ map path) . (_inlineFKS %~ map path)
           | tname pa == tableName t = [p]
           | S.member pa ts =  []
           | otherwise = openTable (S.insert pa ts) p (sname pa)
-        openTable :: Set (SqlOperation) -> [[Rel Key]] -> (Text,Text) -> [[[Rel Key]]]
+        openTable :: Set SqlOperation -> [[Rel Key]] -> (Text,Text) -> [[[Rel Key]]]
         openTable t p (st,nt) =
           join $ fmap (\pa-> openPath t (cons pa) (unRecRel pa)) fks
           where
@@ -331,31 +358,13 @@ lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (f
 
 idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
-{-
-addStats schema = do
-  let metaschema = meta schema
-  varmap <- liftIO$ atomically $ readTVar ( mvarMap schema)
-  let stats = "table_stats"
-  (dbpol,(_,polling))<- transactionNoLog metaschema $ selectFrom stats  Nothing Nothing [] mempty
-  let
-    row t s ls = tblist  $ [Attr "schema" (int (schemaId schema ) ), Attr "table" (int t) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
-    lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
-    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.getIndex row) tb)
-  mapM_ (\(m,_)-> do
-    var <- refTable schema (m)
-    let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (tableUnique $ (m))) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
-    R.onEventIO event (\i -> do
-      putPatch (patchVar $ iniRef dbpol) . pure  .PatchRow $ i
-      )) (M.toList  varmap)
-  return  schema
--}
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map
   where map = justError ("notype" <> T.unpack (showKey v)) $  backendsKey inf (keyFastUnique v)
 
 loadPlugins' :: InformationSchema -> R.Dynamic [Plugins]
-loadPlugins' code =  do
+loadPlugins' code =
   F.toList <$> transactionNoLog  code (SchemaQuery.select "plugin_code")
 
 loadPlugins :: InformationSchema -> R.Dynamic [Plugins]

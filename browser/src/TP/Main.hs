@@ -9,7 +9,6 @@ module TP.Main where
 import TP.Selector
 import TP.Extensions
 import ClientAccess
-
 import Query
 import Safe
 import GHC.IO.Unsafe
@@ -111,7 +110,7 @@ setup smvar bstate plugList w = void $ do
       expand False = "col-xs-12"
     mdo
       let
-        kitems = F.toList (pkMap inf)
+        kitems = filter (not . L.null . rawPK ) . concatMap F.toList $ F.toList (tableMap inf)
         schId = int $ schemaId inf
         initKey = pure (maybeToList $ (\s -> if schemaName inf == T.pack s then lookTable inf . T.pack<$> iniTable   else Nothing) =<< iniSchema )
         buttonStyle lookDesc k e = Just <$> do
@@ -124,7 +123,7 @@ setup smvar bstate plugList w = void $ do
       (sidebar,calendarT) <- calendarSelector
       tbChooser <- UI.div
           # set UI.class_ "col-xs-2"
-          # set UI.style ([("height","82vh"),("overflow-y","hidden")] ++ borderSchema inf)
+          # set UI.style ([("height","89vh"),("overflow-y","hidden")] ++ borderSchema inf)
           # set children [sidebar,posSel ^._1,getElement bset]
           # sink0 UI.style (facts $ noneShow <$> triding menu)
       let cliTables = (join . fmap (flip atMay six) <$> cliTid)
@@ -177,7 +176,7 @@ setup smvar bstate plugList w = void $ do
                     return  [label,getElement refId,getElement button ,dash]
               "Clients" -> do
                 let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
-                let pred = [(RelAccess [keyRef "selection"] $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess ([keyRef "selection"] ) $ RelAccess ([keyRef "selection"] ) ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
+                let pred = [(RelAccess (keyRef "selection") $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess (keyRef "selection" ) $ RelAccess (keyRef "selection") ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
                 clients <- metaTable inf "clients" pred
                 return [clients]
               "Exception" -> do
@@ -194,7 +193,7 @@ setup smvar bstate plugList w = void $ do
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
-      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","82vh"),("overflow-y","auto")] ++ borderSchema inf)
+      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","89vh"),("overflow-y","auto")] ++ borderSchema inf)
                        # sink0 UI.class_ (facts $ expand <$> triding menu)
       element body # set children [tbChooser,bd]
       return tfilter

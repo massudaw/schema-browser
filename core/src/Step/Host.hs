@@ -74,10 +74,10 @@ indexFieldRec n@(Nested l nt) v =
 indexFieldRec n v = error (show (n, v))
 
 hasProd :: (Access Key -> Bool) -> Union (Access Key) -> Bool
-hasProd p i = F.any p i
+hasProd p  = F.any p 
 
 findProd :: (Access Key -> Bool) -> Union (Access Key) -> Maybe (Access Key)
-findProd p i = F.find p i
+findProd p  = F.find p 
 
 isNested :: [Access Key] -> Access Key -> Bool
 isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (F.toList (_relOrigin <$> l))

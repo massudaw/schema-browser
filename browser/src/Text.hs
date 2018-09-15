@@ -69,7 +69,7 @@ renderPatch (PFK rel k v )
   ++  offset 1 (renderFTBPatch renderRowPatch v)++ [(0,"}")]
 renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch render v))]
 renderPatch (PInline k v ) = [(0,show k ++ " {")] ++ offset 1 (renderFTBPatch renderRowPatch v) ++ [(0,"}")]
-renderPatch (PFun k j v ) = [(0,renderRel (RelFun k (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch render v))]
+renderPatch (PFun k j v ) = [(0,renderRel (RelFun (Inline k) (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch render v))]
 
 
 

@@ -7,6 +7,7 @@ module Poller
 import qualified NonEmpty as Non
 import Control.Concurrent.Async
 import Control.Arrow
+import Control.Monad
 import Types
 import qualified Types.Index as G
 import Control.Monad.Writer
@@ -31,10 +32,8 @@ import Debug.Trace
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import Data.Time
-
 import RuntimeTypes
 import Data.Monoid hiding (Product(..))
-
 import qualified Data.Text as T
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -45,7 +44,7 @@ import qualified Data.HashMap.Strict as HM
 plugs :: TVar DatabaseSchema -> t1 -> t -> [PrePlugins] -> IO [Plugins]
 plugs schm authmap db plugs = do
   inf <- metaInf schm
-  regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
+  fmap fst $ runDynamic $ transactionNoLog inf  $ do
       db <- selectFrom "plugins"  Nothing mempty
       t <- currentState db
       let
@@ -56,7 +55,6 @@ plugs schm authmap db plugs = do
             pred :: TBPredicate Key Showable
             pred = WherePredicate $ AndColl [PrimColl $ fixrel (liftRel inf "plugins" $ keyRef "name" , Left (txt $ _pluginName p,Equals))]
       return regplugs
-  return regplugs
 
 
 
@@ -88,7 +86,7 @@ poller schmRef authmap user db plugs is_test = do
         lrel = liftRel metas "polling" .Inline
         TB1 (SNumeric schema) = index1 tb (lrel "schema")
         TB1 (SNumeric intervalms) = index1 tb (lrel "poll_period_ms")
-        TB1 (SText p) = index2 tb (liftRel metas "polling" $ RelAccess [keyRef "plugin"] (keyRef "name"))
+        TB1 (SText p) = index2 tb (liftRel metas "polling" $ RelAccess (keyRef "plugin") (keyRef "name"))
         pid = index1 tb (lrel "plugin")
     enabled = G.toList (primary polling)
     poll tb  = do
@@ -97,10 +95,10 @@ poller schmRef authmap user db plugs is_test = do
           indexRow polling = justError (show (tbpred tb )) $ G.lookup (tbpred tb) (primary polling)
           tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
-      schm <- atomically $ readTVar schmRef
+      schm <- readTVarIO schmRef
       (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , user ) authmap
       (startP,_,_,current) <- checkTime metas (indexRow polling )
-      flip traverse plug $ \(idp,p) -> do
+      forM plug $ \(idp,p) -> do
           let f = pluginStatic p
               elemp = pluginRun (_plugAction p)
               pname = _pluginName p
@@ -113,8 +111,8 @@ poller schmRef authmap user db plugs is_test = do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let
                           pred =  WherePredicate $ fixrel . first(liftRel inf a) <$> AndColl ( catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
-                          predFullIn =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (fst f)
-                          predFullOut =  WherePredicate . fmap fixrel . fmap (first (liftRel inf a)) <$>  genPredicateFullU True (snd f)
+                          predFullIn =  WherePredicate . fmap (fixrel . first (liftRel inf a)) <$>  genPredicateFullU True (fst f)
+                          predFullOut =  WherePredicate . fmap (fixrel . first (liftRel inf a)) <$>  genPredicateFullU True (snd f)
                       l <- currentIndex =<< (transactionNoLog inf $ selectFrom a  (Just 0)   pred)
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  (unIndexMetadata l)

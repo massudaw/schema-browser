@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -66,11 +65,16 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
     let
       legendStyle lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
-        in traverse (\(k@(c,tname,_,_)) -> do
+        in traverse (\k@(c,tname,_,_) -> do
           element  b # set UI.class_"col-xs-1"
-          label <- UI.div # set text  (T.unpack  lookDesc) # set UI.class_ "fixed-label col-xs-10"
-          UI.label # set children [b,label]
-            # set UI.style [("background-color",renderShowable c)]# set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+          label <- UI.div
+            # set text  (T.unpack  lookDesc)
+            # set UI.class_ "fixed-label col-xs-10"
+          UI.label
+            # set children [b,label]
+            # set UI.style [("background-color",renderShowable c)]
+            # set UI.class_ "table-list-item"
+            # set UI.style [("display","-webkit-box")]
             ) item
       chooser = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
