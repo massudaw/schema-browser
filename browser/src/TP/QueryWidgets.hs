@@ -301,7 +301,7 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItems oldItems= do
     nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) .  relOutputSet $ k) wl
     restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
     reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
-      where frel = filter (\i -> isJust $ kvLookup (Inline (_relOrigin i)) ifk) rel
+      where frel = filter (\(Rel i _ _) -> isJust $ kvLookup i ifk) rel
     convertConstr j =  fmap ((\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel)) j
   fkUITableGen inf table (fmap convertConstr <$>  restrictConstraint) plugItems nonInjRefs oldItems  i
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
@@ -315,8 +315,7 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
   fmap insertT <$> buildUIDiff (buildPrimitive (keyModifier i)) (const True) (keyType i) (fmap (fmap (fmap (\(PAttr _ v) -> v))) <$> plugItems) tdiv
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItems preoldItems = do
   let
-
-    search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show (a ,t , M.keys wl)) (L.find (\(k,i) -> S.singleton  t == relOutputSet k) $ M.toList wl)
+    search f (Inline t) = fmap (fmap (fmap _tbattr)) . f $ justError ("cant find: " <> show (a ,t , M.keys wl)) (M.lookup (Inline t) wl)
     search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup t  wl)
     search f i = error (show i)
     -- Add information if the patch is Keep
@@ -326,10 +325,9 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItems preoldItems = do
     liftKey = fmap (liftType (_keyFunc $ keyType i).join)
   -- Only executes if not all patches are Keep and all values are Just
   funinp <-  ui $ liftKey <$> mapEventDyn (liftIO . traverse ( evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes . fmap snd ) (filterE (not . all fst) $ rumors refs)
-  ini <- ui $ currentValue (facts preoldItems)
 
   -- FIXME : Function evaluation is producing Delete when using offset.
-  let pout = (\i j ->  ignoreDelete $ diff'  i j )<$> facts preoldItems <@> (fmap (Fun i rel) <$> funinp)
+  let pout = (\i j ->  ignoreDelete $ diff' i j )<$> facts preoldItems <@> (fmap (Fun i rel) <$> funinp)
       ignoreDelete Delete  = Keep
       ignoreDelete i = i
 

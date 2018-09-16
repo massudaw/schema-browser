@@ -103,7 +103,6 @@ module Types.Common
   , readBinaryOp
   , renderRel
   , renderBinary
-    -- ,valueattr
   ) where
 
 import Control.Applicative
@@ -146,7 +145,7 @@ import Utils
 
 newtype KV k a
   = KV
-  { _kvvalues :: PM.POMap (RelSort k) (TB k a)
+  { _kvvalues :: PM.POMap (RelSort k) (AValue k a)
   } deriving (Eq, Ord, Functor, Foldable, Traversable, Show, Generic)
 
 instance (PartialOrd k , Ord k , Ord v ) => Ord (PM.POMap k v) where
@@ -185,7 +184,7 @@ sortedFields
   :: (P.Poset k ,Show a,Show k,Ord k)
   => KV k a
   -> [(Rel k , TB k a)]
-sortedFields = fmap (first originalRel) .P.sortBy (P.comparing fst) . toAscListPO . _kvvalues
+sortedFields = fmap (\i -> (originalRel $ fst i, recoverAttr (first originalRel i))) . P.sortBy (P.comparing fst) . toAscListPO . _kvvalues
 
 
 isInline (Inline i ) = True
@@ -234,12 +233,12 @@ testPM =  originalRel <$> [(relSortL (Inline 3)),(relSortL (Inline 1)),(relSortL
 
 
 topSortRels :: (Show k,Ord k) => [Set (Rel k)] ->  ([Set (Rel k)],[Int])
-topSortRels l = ((l!!) <$> traceShowId sorted,sorted)
+topSortRels l = ((l!!) <$> sorted,sorted)
   where
-    edgeList = traceShowId $ concat $ concat $ deps
+    edgeList = concat $ concat $ deps
     sorted = topSort (buildG (0,L.length l - 1 ) edgeList)
     edges = zip  l [0..]
-    outputMap = traceShowId $ Map.fromListWith (<>) $ fmap pure . first outputs <$> edges
+    outputMap = Map.fromListWith (<>) $ fmap pure . first outputs <$> edges
     deps = findDeps <$> edges
     outputs i = S.fromList $ concat $ catMaybes $ _relOutputs <$> S.toList i
     findDeps (l,ix) = findDep ix <$> S.toList l
@@ -261,48 +260,47 @@ kvlist :: Ord k => [TB k a] -> KV k a
 kvlist = KV . mapFromTBList
 
 kvToMap :: Ord k => KV k a -> Map.Map k (FTB a)
-kvToMap = Map.mapKeys _relOrigin . fmap _tbattr . Map.fromList .fmap (first originalRel).  PM.toList . _kvvalues
+kvToMap = Map.mapKeys _relOrigin . fmap _aprim . Map.fromList .fmap (first originalRel).  PM.toList . _kvvalues
 
 kvkeys :: Ord k => KV k a -> [Rel k]
 kvkeys = fmap originalRel . PM.keys . _kvvalues
 
-unkvlist :: KV k a -> [TB k a]
-unkvlist = F.toList . _kvvalues
+unkvlist :: Ord k => KV k a -> [TB k a]
+unkvlist = fmap (recoverAttr . first originalRel). PM.toList . _kvvalues
 
--- unkvlist = fmap (recoverAttr . first F.toList ) . Map.toList . _kvvalues
--- unkvmap = Map.fromList . fmap (\(i,j) -> (i, recoverAttr  (F.toList i,j))) . Map.toList . _kvvalues
 kvmap :: Ord k => Map.Map (Rel k) (TB k a) -> KV k a
-kvmap = KV . PM.fromList . fmap (first relSort ). Map.toList
+kvmap = KV . PM.fromList . fmap (first relSort . fmap valueattr). Map.toList
 
--- kvmap = KV . fmap valueattr
-unKV :: Ord k => KV k a -> Map.Map (Rel k) (AValue k a)
-unKV =  Map.fromList .fmap (first originalRel ) . PM.toList . _kvvalues
+unKV :: Ord k => KV k a -> Map.Map (Rel k) (TB k a)
+unKV =  Map.fromList . fmap (\i ->  (originalRel (fst i),) . recoverAttr . first originalRel $ i ) . PM.toList . _kvvalues
 
-mapBothKV :: Ord b => (a -> b) -> (AValue a c -> AValue b d) -> KV a c -> KV b d
-mapBothKV k f (KV n) = KV (PM.mapKeys (relSortMap k) $ fmap f n)
+mapBothKV :: (Ord a,Ord b) => (a -> b) -> (TB a c -> TB b d) -> KV a c -> KV b d
+mapBothKV k f (KV n) = KV (PM.mapKeys (relSortMap k) $ PM.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) )  n)
 
-mapKV f (KV n) = KV (fmap f n)
+mapKV f (KV n) = KV (PM.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) ) n)
 
 mergeKV (KV i ) (KV j) = KV $ PM.unionWith const i j
 
 traverseKVWith
-  :: Applicative f =>
+  :: (Ord k ,Applicative f) =>
     (Rel k -> TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
-traverseKVWith f (KV n) = KV <$> PM.traverseWithKey (\i -> f (originalRel i))  n
+traverseKVWith f (KV n) = KV <$> PM.traverseWithKey (\i -> fmap valueattr . f (originalRel i) . recoverAttr . (originalRel i,))  n
 
 
 traverseKV
-  :: Applicative f =>
+  :: (Ord k ,Applicative f) =>
      (TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
-traverseKV f (KV n) = KV <$> traverse f n
+traverseKV f (KV n) = KV . fmap valueattr <$> traverse f (PM.mapWithKey (curry (recoverAttr . first originalRel )) n ) 
 
-trazipWithKV f (KV v1) (KV v2) = KV <$>  sequence (PM.intersectionWith f v1 v2)
 
-filterKV :: (TB k a -> Bool) -> KV k a -> KV k a
-filterKV i (KV n) = KV $ PM.filterWithKey (\k -> i) n
+trazipWithKV f (KV v1) (KV v2) = KV <$>  sequence (PM.intersectionWithKey (\k i j -> valueattr <$> f (conv k i) (conv k j) )  v1 v2)
+  where conv = curry (recoverAttr . first originalRel )
 
-findKV :: (TB k a -> Bool) -> KV k a -> Maybe (Rel k, TB k a)
-findKV i (KV n) = fmap (first originalRel) . L.find (i . snd) $ PM.toList n
+filterKV ::Ord k =>  (TB k a -> Bool) -> KV k a -> KV k a
+filterKV i (KV n) = KV $ PM.filterWithKey (curry ( i . recoverAttr . first originalRel) ) n
+
+findKV :: Ord k => (TB k a -> Bool) -> KV k a -> Maybe (Rel k, TB k a)
+findKV i (KV n) = fmap (\i -> (originalRel (fst i) , ). recoverAttr.  first originalRel $ i ) . L.find (i .recoverAttr . first originalRel ) $ PM.toList n
 
 
 type Column k a = TB k a
@@ -429,13 +427,13 @@ instance (PartialOrd k ,Binary k , Binary a) => Binary (PM.POMap k a) where
 
 instance Binary k => Binary (RelSort k )
 instance NFData k => NFData (RelSort k )
-instance (Ord k ,Binary a, Binary k) => Binary (KV k a)
+instance (Ord a,Ord k ,Binary a, Binary k) => Binary (KV k a)
 
 instance Binary k => Binary (Rel k)
 
 instance NFData k => NFData (Rel k)
 
-instance (Ord g ,Binary k, Binary g) => Binary (TB g k)
+instance (Ord k,Ord g ,Binary k, Binary g) => Binary (TB g k)
 
 instance Binary a => Binary (FTB a)
 
@@ -453,14 +451,20 @@ instance (Binary k, Binary j) => Binary (FExpr k j)
 
 instance (NFData k, NFData j) => NFData (FExpr k j)
 
-type TBAttr k v = ([Rel k], AValue k v)
-
-type AValue k a = TB k a
-
-recoverAttr' = id
+type TBAttr k v = (Rel k, AValue k v)
 
 
-{-
+data AValue k a
+  = APrim {_aprim :: (FTB a) }
+  | ARef {_aref :: (FTB (KV k a))}
+  | ARel { _arel :: KV k a  , _aref :: (FTB (KV k a))}
+  deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
+
+recoverAttr ::  Ord k => TBAttr k a -> TB k a
+recoverAttr (Inline i,APrim v) = Attr i v
+recoverAttr (RelFun (Inline i) j k  ,APrim v) = Fun i (j,k) v
+recoverAttr (Inline i ,ARef v) = IT i v
+recoverAttr (i,ARel l v) = FKT l  (relUnComp i) v
 
 valueattr :: TB k a -> AValue k a
 valueattr (Attr i j) = APrim j
@@ -469,23 +473,15 @@ valueattr (IT _ v) = ARef v
 valueattr (FKT i  _ v) = ARel i v
 
 
+instance (Ord g,Ord k,Binary k ,Binary g) => Binary (AValue g k )
+instance (NFData k ,NFData g) => NFData (AValue g k )
+
+instance (NFData k, NFData a) => NFData (KV k a)
+
+instance (NFData k, NFData a) => NFData (TB k a)
+
+{-
 -- instance (Binary  a ,Binary k ) => Binary (AValue k a)
-data AValue k a
-  = APrim {_aprim :: (FTB a) }
-  | ARef {_aref :: (FTB (KV k a))}
-  | ARel { _arel :: KV k a  , _aref :: (FTB (KV k a))}
-  deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
-
-instance (Binary k ,Binary g) => Binary (AValue g k )
-
-recoverAttr' :: Ord k => (Set.Set (Rel k), AValue k a) -> TB k a
-recoverAttr' = recoverAttr . first F.toList
-recoverAttr ::  Ord k => TBAttr k a -> TB k a
-recoverAttr ([Inline i],APrim v) = Attr i v
-recoverAttr ([RelFun i j k ] ,APrim v) = Fun i (j,accesRelGen' <$> k) v
-recoverAttr ([Inline i] ,ARef v) = IT i v
-recoverAttr (i,ARel l v) = FKT l  i v
-
 splitAttr :: TB k a -> TBAttr k a
 splitAttr  i = (keyattr i ,valueattr i)
 
@@ -507,8 +503,8 @@ firstATB :: Ord k => (c -> k) -> AValue c a -> AValue k a
 firstATB f (APrim i) = APrim i
 firstATB f (ARef i) = ARef (mapKey f i)
 firstATB f (ARel m  i) = ARel (mapKey' f m)  (mapKey f i)
-
 -}
+
 _tbattr (Attr _ v ) = v
 _tbattr (Fun _ _ v) = v
 _tbattr i = error "not a attr"
@@ -539,35 +535,34 @@ _fkttable (Fun i _ _) = error "hit fun"
 
 
 
-traFAttr :: Applicative f => (FTB a -> f (FTB b)) -> TB k a -> f (TB k b)
+traFAttr :: (Ord k ,Applicative f) => (FTB a -> f (FTB b)) -> TB k a -> f (TB k b)
 traFAttr f (Attr i v) = Attr i <$> f v
 traFAttr f (IT i v) = IT i <$> traverse (traFValue f) v
 traFAttr f (FKT i rel v) =
   liftA2 (\a b -> FKT a rel b) (traFValue f i) (traverse (traFValue f) v)
 
-traFValue :: Applicative f => (FTB a -> f (FTB b)) -> KV k a -> f (KV k b)
+traFValue :: (Ord k ,Applicative f) => (FTB a -> f (FTB b)) -> KV k a -> f (KV k b)
 traFValue f k = traverseKV (traFAttr f) k
 
 traMap g f = runIdentity . g (Identity . f)
 
-mapFAttr :: (FTB a -> (FTB b)) -> TB k a -> (TB k b)
+mapFAttr :: Ord k => (FTB a -> (FTB b)) -> TB k a -> (TB k b)
 mapFAttr = traMap traFAttr
 
-mapFValue f k = KV . fmap (traMap traFAttr f) . _kvvalues $ k
 
--- mapFValue f k = KV . fmap (traMap traFAValue f) . _kvvalues   $  k
-mapKey' :: Ord b => (a -> b) -> KV a c -> KV b c
+mapFValue :: Ord k => (FTB a1 -> FTB a2) -> KV k a1 -> KV k a2
+mapFValue f k = KV . fmap (valueattr . traMap traFAttr f). PM.mapWithKey (curry (recoverAttr . first originalRel )) . _kvvalues $ k
+
+
+
+mapKey',firstKV :: (Ord c,Ord k) => (c -> k) -> KV c a -> KV k a
+firstKV f (KV m) = KV . PM.mapKeys (relSortMap f). PM.mapWithKey (curry (valueattr . firstTB f. recoverAttr . first originalRel))   $ m
+mapKey' = firstKV 
 mapKey f = fmap (mapKey' f)
-
-mapKey' f k = firstKV f $ k
-
-firstKV :: Ord k => (c -> k) -> KV c a -> KV k a
--- firstKV  f (KV m ) = KV . fmap (firstATB f)  . Map.mapKeys (Set.map (fmap f)) $ m
-firstKV f (KV m) = KV . fmap (firstTB f) . PM.mapKeys (relSortMap f) $ m
 
 secondKV f (KV m) = KV . fmap (fmap f) $ m
 
-firstTB :: Ord k => (c -> k) -> TB c a -> TB k a
+firstTB :: (Ord c,Ord k) => (c -> k) -> TB c a -> TB k a
 firstTB f (Attr k i) = Attr (f k) i
 firstTB f (Fun k i l) = Fun (f k) (fmap (fmap f) <$> i) l
 firstTB f (IT k i) = IT (f k) (mapKey f i)
@@ -636,9 +631,8 @@ instance Fractional a => Fractional (FTB a) where
   recip = fmap recip
 
 mapFromTBList :: Ord k => [TB k a] -> PM.POMap (RelSort k) (AValue k a)
-mapFromTBList = PM.fromList . fmap (\i -> (relSort $ keyattr i, i))
+mapFromTBList = PM.fromList . fmap (\i -> (relSort $ keyattr i, valueattr i))
 
--- mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),valueattr i))
 keyattr :: Ord k => TB k a -> Rel k
 keyattr (Attr i _) = Inline i
 keyattr (Fun i l _) = RelFun (Inline i) (fst l) (snd l)
@@ -665,7 +659,6 @@ addDefault = def
 
 recoverFK :: Ord k => [k] -> [Rel k] -> FTB (TBRef k s) -> Column k s
 recoverFK ori rel i
-  -- FKT (kvlist . catMaybes $ (\k -> Attr k <$> (fmap join . traverse (fmap _aprim . Map.lookup (S.singleton $ Inline k). _kvvalues . fst ) $ i)) <$> ori )rel   (fmap snd i)
  =
   FKT
     (kvlist . catMaybes $
@@ -673,7 +666,7 @@ recoverFK ori rel i
         Attr k <$>
         (fmap join .
          traverse
-           (fmap _tbattr . PM.lookup (relSort $ Inline k) . _kvvalues . fst.unTBRef) $
+           (fmap _aprim . PM.lookup (relSort $ Inline k) . _kvvalues . fst.unTBRef) $
          i)) <$>
      ori)
     rel
@@ -697,13 +690,13 @@ isRelAccess (Rel _ _ _) = True
 isRelAccess _ = False
 
 nonFK :: Ord k => TB k a -> [TB k a]
-nonFK (FKT i _ _) = concat (nonFK <$> _kvvalues i)
+nonFK (FKT i _ _) = concat (nonFK <$> unkvlist i)
 nonFK (IT j k) = [IT j (restrictTable nonFK <$> k)]
 nonFK (Fun _ (_,l)  _) | L.any isRelAccess  l = []
 nonFK i = [i]
 
 nonRefTB :: Ord k => TB k a -> [TB k a]
-nonRefTB (FKT i _ _) = concat (nonRefTB <$> _kvvalues i)
+nonRefTB (FKT i _ _) = concat (nonRefTB <$> unkvlist i)
 nonRefTB (IT j k) = [IT j (restrictTable nonRefTB <$> k)]
 nonRefTB (Fun _ _ _) = []
 nonRefTB i = [i]
@@ -748,48 +741,40 @@ instance Ord k => Monoid (KV k a) where
 
 findFK :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
 findFK l v =
-  fmap snd $
+  fmap (recoverAttr . first originalRel) $
     L.find (\(i, v) -> isFK v && S.map _relOrigin (S.fromList $ relUnComp $ originalRel i) == (S.fromList l)) $
-  PM.toList $ _kvvalues $ (v)
+  PM.toList $ _kvvalues $ v
   where
     isRel (Rel _ _ _) = True
     isRel _ = False
     isFK i =
       case i of
-        FKT _ _ _ -> True
-        IT _ _ -> True
-                   -- ARel _ _ -> True
-                   -- ARef  _  -> True
-        i -> False
+       ARel _ _ -> True
+       ARef  _  -> True
+       i -> False
 
--- findFK  l v =  fmap recoverAttr' $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ Map.toList $ _kvvalues $ v
 findAttr :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
 findAttr l v = kvLookup ( Inline  l) v <|> findFun l v
 
 
 
 addAttr :: Ord k => TB k v -> KV k v -> KV k v
-addAttr v i = KV $ PM.insert (relSort $ keyattr v) v (_kvvalues i)
+addAttr v i = KV $ PM.insert (relSort $ keyattr v) (valueattr v) (_kvvalues i)
 
 findFun :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
 findFun l v =
-  fmap snd .
+  fmap (recoverAttr .first originalRel ).
   L.find (((Inline  l) ==) . mapFunctions  . originalRel . fst) $
   PM.toList $ _kvvalues $ (v)
   where
     mapFunctions (RelFun i _ _) = i
     mapFunctions j = j
 
--- findFun l v = fmap recoverAttr' . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ Map.toList $ _kvvalues $ v
 findFKAttr :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
 findFKAttr l v =
   case L.find (\(k, v) -> not $ L.null $ L.intersect l k) $
        PM.toList $ PM.mapKeys (fmap _relOrigin. relUnComp . originalRel) $ _kvvalues $ (v) of
-    Just (k, FKT a _ _) ->
-      L.find
-        (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ relUnComp $ keyattr $ i)
-        (F.toList $ _kvvalues $ a)
-   -- Just (k,ARel a _ ) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (unkvlist a)
+    Just (k,ARel a _ ) ->   L.find (\i -> not $ Set.null $ Set.intersection (S.fromList l) $ relOutputSet $ keyattr $ i ) (unkvlist a)
     Just (k, i) -> error (show l)
     Nothing -> Nothing
 
@@ -797,21 +782,18 @@ findFKAttr l v =
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
 recLookup p@(Inline l) v = _tbattr <$> kvLookup p v
 recLookup n@(RelAccess l nt) v =
-  join $ fmap join . traverse (recLookup nt) <$> refLookup (S.singleton l) v
+  join $ fmap join . traverse (recLookup nt) <$> refLookup l v
 
 kvLookup :: Ord k => Rel k -> KV k a -> Maybe (TB k a)
--- kvLookup rel  (KV i) = Map.lookup rel i
-kvLookup rel (KV i) = recoverAttr' <$> PM.lookup (relSort $ rel) i
+kvLookup rel (KV i) = recoverAttr . (rel,) <$> PM.lookup (relSort $ rel) i
 
 
-refLookup :: Ord k => Set (Rel k) -> KV k a -> Maybe (FTB (KV k a))
--- refLookup rel (KV i) = _aref <$> Map.lookup rel i
-refLookup rel i = _fkttable <$> kvLookup (relComp  rel) i
+refLookup :: Ord k => Rel k -> KV k a -> Maybe (FTB (KV k a))
+refLookup rel i = _fkttable <$> kvLookup rel i
 
 attrLookup :: Ord k => Rel k -> KV k a -> Maybe (FTB a)
 attrLookup rel i = _tbattr <$> kvLookup rel i
 
--- attrLookup rel (KV i) = _aprim <$> Map.lookup rel i
 unTB1 :: FTB a -> a
 unTB1 (TB1 i) = i
 unTB1 i = fromMaybe (error "unTB1: ") . headMay . F.toList $ i
@@ -872,49 +854,50 @@ renderRel (Rel i op k) = renderRel i <> renderBinary op <> renderRel k
 
 makeLenses ''KV
 makeLenses ''TB
+makeLenses ''AValue
 
 
-recOverAttr ::
+recurseOverAttr ::
      Ord k
-  => [Set (Rel k)]
-  -> TB k a
+  => [(Rel k)]
+  -> AValue k a
   -> KV k a -> KV k a
-recOverAttr (k:[]) attr = KV . PM.insert (relSort $ relComp k) attr . _kvvalues
-recOverAttr (k:xs) attr =
+recurseOverAttr (k:[]) attr = KV . PM.insert (relSort k) attr . _kvvalues
+recurseOverAttr (k:xs) attr =
   KV . PM.alter
-    (fmap (Le.over ifkttable (fmap (recOverAttr xs attr ))))
-    (relSort (relComp k)) . _kvvalues
+    (fmap (Le.over aref (fmap (recurseOverAttr xs attr ))))
+    (relSort (k)) . _kvvalues
 
 recOverKV ::
-     Ord k => [Set (Rel k )]
-  -> [[Set (Rel k)]]
+     Ord k => [(Rel k )]
+  -> [[(Rel k)]]
   -> KV k b
   -> KV k b
 recOverKV tag tar (KV m) = KV $ foldr go m tar
   where
     go (k:[]) =
       PM.alter
-        (fmap (Le.over ifkttable (fmap (recOverAttr tag recv )))) (relSort $ relComp k)
+        (fmap (Le.over aref (fmap (recurseOverAttr tag recv )))) (relSort $ k)
       where
         recv = gt tag m
     go (k:xs) =
       PM.alter
-        (fmap (Le.over ifkttable (fmap (KV . go xs . _kvvalues))))
-        (relSort $ relComp k)
-    gt (k:[]) = justError "no key" . PM.lookup (relSort $ relComp k)
+        (fmap (Le.over aref (fmap (KV . go xs . _kvvalues))))
+        (relSort $ k)
+    gt (k:[]) = justError "no key" . PM.lookup (relSort $ k)
     gt (k:xs) =
       gt xs .
       _kvvalues .
-        L.head . F.toList . _fkttable . justError "no key" . PM.lookup (relSort $ relComp k)
+        L.head . F.toList . _aref . justError "no key" . PM.lookup (relSort $ k)
 
 replaceRecRel ::
      Ord k => KV k b
-  -> [MutRec [Set (Rel k)]]
+  -> [MutRec [(Rel k)]]
   -> KV k b
 replaceRecRel i = foldr (\(MutRec l) v -> foldr (\a -> recOverKV a l) v l) i
 
 kvSingleton  :: Ord k => TB k a -> KV k a
-kvSingleton i = KV $ PM.singleton (relSort $ keyattr i ) i
+kvSingleton i = KV $ PM.singleton (relSort $ keyattr i ) (valueattr i)
 
 kvSize :: Ord k => KV k a ->  Int
 kvSize (KV i) = PM.size i
@@ -923,22 +906,32 @@ kvNull :: Ord k => KV k a ->  Bool
 kvNull (KV i) = PM.null i
 
 kvFind :: Ord k =>  (Rel k -> Bool) -> KV k a ->  Maybe (TB k a)
-kvFind pred (KV item) = safeHead . F.toList $ PM.filterWithKey (\k _ -> pred (originalRel k) ) item
+kvFind pred (KV item) = fmap (recoverAttr .first originalRel).  safeHead . PM.toList $ PM.filterWithKey (\k _ -> pred (originalRel k) ) item
 
 kvFilter :: Ord k =>  (Rel k -> Bool) -> KV k a ->  KV k a
 kvFilter pred = kvFilterWith (\i _ -> pred i)
 
 kvFilterWith :: Ord k =>  (Rel k -> TB k a -> Bool) -> KV k a ->  KV k a
-kvFilterWith pred (KV item) = KV $ PM.filterWithKey (\i -> pred (originalRel i)) item
+kvFilterWith pred (KV item) = KV $ PM.filterWithKey (\i -> pred (originalRel i) . recoverAttr . (originalRel i,) ) item
 
 tbUn :: Ord k => Set k -> KV k a -> KV k a
-tbUn un = kvFilter pred
-  where
+tbUn un = kvFilter pred where
     pred k = S.isSubsetOf (relOutputSet k) un
 
 
+getAtt :: Ord a1 => Set a1 -> KV a1 a2 -> [TB a1 a2]
 getAtt i k  = filter ((`S.isSubsetOf` i) . relOutputSet  . keyattr ) . unkvlist  $ k
 
-alterKV k fun (KV i ) = KV <$> (PM.alterF fun k i)
 
+alterAtF
+  :: (Ord k, Applicative f) =>
+     Rel k
+     -> (FTB (KV k a) -> f (FTB (KV k a))) -> KV k a -> f (KV k a)
 alterAtF k fun i= alterKV k (traverse (Le.traverseOf ifkttable fun))  i
+
+alterKV
+  :: (Functor f, Ord k) =>
+     Rel k
+     -> (Maybe (TB k a) -> f (Maybe (TB k a))) -> KV k a -> f (KV k a)
+alterKV k fun (KV i ) = KV <$> (PM.alterF (\ i -> fmap (fmap valueattr) $ fun (recoverAttr .(k,) <$> i)) (relSort k) i)
+

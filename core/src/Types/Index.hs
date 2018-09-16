@@ -366,7 +366,7 @@ data AttributePath  k b
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k (AccessOp a ,FTB a))
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
 indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
-  = case  refLookup (Set.fromList [Inline key]) r of
+  = case  refLookup (Inline key) r of
     Nothing -> Nothing
     Just i ->  fmap (PathInline key .fmap (Many . pure) ) $ recPred $ indexPredIx (nt , eq ) <$> i
   where
@@ -401,7 +401,7 @@ indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
 indexPred (n@(RelAccess k nt ) ,eq) r
-  = case  refLookup (Set.fromList $ relUnComp k)  r of
+  = case  refLookup  k  r of
     Nothing ->False
     Just i  ->recPred $ indexPred (nt , eq) <$> i
   where

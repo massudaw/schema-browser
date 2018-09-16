@@ -98,8 +98,7 @@ renderPostgres = go
 joinKType (Primitive l (Primitive  i a)) = Primitive (l ++ i) a
 
 buildAccess :: Rel Key -> KType (Prim KPrim (Text,Text))
-buildAccess n@(RelAccess (RelComposite i) o) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef $ buildAccess <$> i )
-buildAccess n@(RelAccess i o) =  joinKType $ const (buildAccess o ) <$> (buildAccess i )
+buildAccess n@(RelAccess i o) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef $ buildAccess <$> relUnComp i )
 buildAccess (Inline l) = keyType l
 buildAccess (Rel l _ op ) = buildAccess l
 

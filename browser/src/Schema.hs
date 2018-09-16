@@ -254,7 +254,7 @@ computeRelReferences l = fst $ foldl transform  ([],M.empty)  $ P.sortBy (P.comp
             in (FKJoinTable (fst <$> r) j: l ,foldr mappend s (snd <$> r))
            where 
              alterRel rel@(Rel i j k) =  case M.lookup i s of
-                Just r -> (Rel (RelAccess  (RelComposite r) i ) j k ,M.empty)
+                Just r -> (Rel (RelAccess  (relComp r) i ) j k ,M.empty)
                 Nothing -> (rel, M.singleton i rels)
 
 isUnion (Project _ (Union _ )) = True

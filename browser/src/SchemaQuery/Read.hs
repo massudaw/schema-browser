@@ -200,7 +200,7 @@ predicate
      -> TBPredicate (FKey (KType a1)) a
      -> Maybe (TBPredicate (FKey (KType a1)) a)
 predicate i (WherePredicate l ) =
-   fmap WherePredicate (go (test (RelComposite i)) l)
+   fmap WherePredicate (go (test (relComp i)) l)
   where
     go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
     go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
@@ -220,7 +220,7 @@ getFKRef inf predtop (me,old) set (FKInlineTable  r j ) tbf =  do
     case nonEmpty (concat $ fmap F.toList nextRef) of
       Just refs -> do
         joinFK <- getFKS rinf predtop table  refs tbf
-        let joined = alterAtF (relSort $ (Inline r)) (traverse joinFK)
+        let joined = alterAtF (Inline r) (traverse joinFK)
         return (me >=> joined,old <> S.singleton r)
       Nothing ->
         return (me ,old <> S.singleton r)
@@ -294,7 +294,7 @@ getFKS
 getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (pluginCheck  f tbf) )) (return (return ,S.empty )) sorted
   where
     pluginCheck i@(PluginField _) tbf = Just mempty
-    pluginCheck i tbf  = refLookup (pathRelRel i) tbf
+    pluginCheck i tbf  = refLookup (relComp $ pathRelRel i) tbf
 
     sorted =  sortValues (relComp . pathRelInputs inf (tableName table)) $ rawFKS table <> functionRefs table <> pluginFKS table
 

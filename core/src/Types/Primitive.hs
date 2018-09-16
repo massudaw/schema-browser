@@ -830,8 +830,8 @@ mergeOpt i j = error ("mergeOpt" <> show (i, j))
 
 relType :: Show a => Rel (FKey (KType a)) -> KType a
 relType (Inline k) = keyType k
-relType (RelAccess (RelComposite xs) n) =
-  Primitive (_keyFunc (mergeFKRef $ keyType . _relOrigin <$> xs) ++ ty) at
+relType (RelAccess xs n) =
+  Primitive (_keyFunc (mergeFKRef $ relType <$> relUnComp xs) ++ ty) at
   where
     Primitive ty at = relType n
 relType i = error (show i)
@@ -870,7 +870,7 @@ atTBValue ::
   -> (FTB (TBRef k b) -> f (FTB (TBRef k b)))
   -> (KV k b)
   -> f (KV k b)
-atTBValue l f g h v = alterKV (relSort $ RelComposite l) (traverse modify) v
+atTBValue l f g h v = alterKV (relComp l) (traverse modify) v
   where
     modify i =
       case i of

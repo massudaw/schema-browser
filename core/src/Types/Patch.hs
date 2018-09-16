@@ -251,10 +251,10 @@ data RowOperation k a
   deriving (Show, Eq,Ord, Functor, Generic)
 
 instance (NFData k, NFData a) => NFData (RowPatch k a)
-instance (Ord k, Binary k, Binary a) => Binary (RowPatch k a)
+instance (Ord a,Ord k, Binary k, Binary a) => Binary (RowPatch k a)
 
 instance (NFData k, NFData a) => NFData (RowOperation k a)
-instance (Ord k, Binary k, Binary a) => Binary (RowOperation k a)
+instance (Ord a,Ord k, Binary k, Binary a) => Binary (RowOperation k a)
 
 instance (Ord k, Compact v, Show v, Show k, Patch v, Ord v, v ~ Index v) =>
          Compact (RowOperation k v) where
@@ -682,9 +682,6 @@ groupSplit2 :: Ord b => (a -> b) -> (a -> c) -> [a] -> [(b, [c])]
 groupSplit2 f g =
   fmap (\i -> (f $ justError "cant group" $ safeHead i, g <$> i)) . groupWith f
 
-instance (NFData k, NFData a) => NFData (KV k a)
-
-instance (NFData k, NFData a) => NFData (TB k a)
 
 patchTB1 :: PatchConstr k a => TBData k a -> TBIdx k (Index a)
 patchTB1 k = patchAttr <$> unkvlist k
