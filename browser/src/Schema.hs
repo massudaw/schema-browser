@@ -223,7 +223,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
               allfks = maybe [] computeRelReferences $ M.lookup c fks
            tableMap1 = HM.mapWithKey createTable tableMap0 
            tableMapPre = buildTMap  schema tableMap1  rsch
-           addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (P.sortBy (P.comparing (relSort . pathRelRel))  $ fmap liftFun r)) table) ref
+           addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r)) table) ref
              where
                ref =  M.lookup tn functionsRefs
                liftFun (FunctionField k s a) = FunctionField (lookupFKey ts tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)

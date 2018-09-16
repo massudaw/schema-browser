@@ -51,7 +51,7 @@ updateFrom m a pk b = do
       tellPatches m (pure v)
       return v
     Nothing -> do
-      let bf = filter (\k -> F.any (L.elem FWrite . keyModifier ._relOrigin) (index k)) b
+      let bf = filter (\k -> F.any (L.elem FWrite . keyModifier ._relOrigin) (relUnComp $ index k)) b
       patchFrom m ((pk ,PatchRow bf))
   return v
 
@@ -162,7 +162,7 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = do
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel = fmap (_relOrigin. head. F.toList) $ kvkeys pk
+    pkrel =  _relOrigin <$> kvkeys pk
   recoverFK pkrel rel2 <$> (tbEditRef (tbRefFun rel2) m2 (liftFK g) (liftFK f))
 
 type RelOperations b
@@ -216,7 +216,7 @@ tbInsertEdit m f@(FKT pk rel2 t2) = do
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel = fmap (_relOrigin. head. F.toList) . kvkeys  $ pk
+    pkrel = fmap (_relOrigin ) . kvkeys  $ pk
   recoverFK  pkrel rel2 <$> tbInsertRef (tbRefFun rel2) m2 (liftFK f)
 
 tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)

@@ -43,7 +43,7 @@ newtype TRow = TRow (TBData Key Showable)
 instance ToJS (KV T.Text Showable)
 
 instance A.ToJSON TRow  where
-  toJSON (TRow kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (unKV kv)
+  toJSON (TRow kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . relUnComp) (unKV kv)
 
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =

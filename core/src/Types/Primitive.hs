@@ -856,8 +856,8 @@ array f = ArrayTB1 . fmap f
 
 opt i = LeftTB1 . fmap i
 
-keyattrs :: Ord k => TB k b -> Set (Rel k)
-keyattrs = S.fromList . keyattr
+keyattrs :: Ord k => TB k b -> (Rel k)
+keyattrs = keyattr
 
 replaceRel rel (Attr k v) =
   (justError "no replaceRel" $ L.find ((== k) . _relOrigin) rel, v)
@@ -870,14 +870,14 @@ atTBValue ::
   -> (FTB (TBRef k b) -> f (FTB (TBRef k b)))
   -> (KV k b)
   -> f (KV k b)
-atTBValue l f g h v = alterKV (relSort $ Set.fromList l) (traverse modify) v
+atTBValue l f g h v = alterKV (relSort $ RelComposite l) (traverse modify) v
   where
     modify i =
       case i of
         Attr k j -> Attr k <$> f j
         IT l j -> IT l <$> g j
         t@(FKT l i j) ->
-          recoverFK (concat $ fmap _relOrigin . keyattr <$> (unkvlist l)) i <$>
+          recoverFK (_relOrigin . keyattr <$> (unkvlist l)) i <$>
             h ( liftFK t)
 
 {-

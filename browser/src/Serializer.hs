@@ -305,7 +305,7 @@ prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
 prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (onlyLast . execWriter . fsp) ) (fmap (bsp. Last. Just) . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
-          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . kvLookup (S.singleton $ Inline ix)
+          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . kvLookup (Inline ix)
           mk = kvSingleton . Attr ix
 
 nestJoin :: (Functor f, DecodeTB1 f) =>
@@ -313,10 +313,10 @@ nestJoin :: (Functor f, DecodeTB1 f) =>
 nestJoin ix nested = SIso (Many [JoinTable ix kp])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          keyset = S.fromList ix
+          keyset = relComp $ S.fromList ix
           lk v =  _fkttable . justError ("no attr: " ++ show (keyset ,v)). kvLookup  keyset $ v
           mk = kvSingleton . (\a -> FKT (kvlist $ reflectOp a <$> ix ) ix a)
-          reflectOp a r@(Rel (Inline i) op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (r,a)). kvLookup (S.singleton l) <$> a)
+          reflectOp a r@(Rel (Inline i) op l) =  Attr i  $ joinFTB (_tbattr . justError ("no reflect attr" ++ show (r,a)). kvLookup l <$> a)
 
 
 nestWith :: (Functor f, DecodeTB1 f) =>
@@ -324,7 +324,7 @@ nestWith :: (Functor f, DecodeTB1 f) =>
 nestWith ix nested = SIso (Many [InlineTable (Primitive l "") ix (kp)])  (tell . mk. (execWriter . fs) . fmap (execWriter . fsp) ) (fmap bsp . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = nested
-          lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). kvLookup (S.singleton $ Inline ix)
+          lk =  _fkttable . justError ("no attr: " ++ show (S.singleton $ Inline ix)). kvLookup (Inline ix)
           mk = kvSingleton . IT ix
 
 nest :: (Functor f, DecodeTable a, DecodeTB1 f) =>

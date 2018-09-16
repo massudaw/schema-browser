@@ -58,7 +58,7 @@ plugs schm authmap db plugs = do
 
 
 
-index1 tb item = justError ("no item" <> show (item,tb)) $ attrLookup (S.fromList [item]) (tableNonRef tb)
+index1 tb item = justError ("no item" <> show (item,tb)) $ attrLookup (item) (tableNonRef tb)
 
 index2 tb item = justError ("no item" <> show (item,tb)) $ recLookup item tb
 

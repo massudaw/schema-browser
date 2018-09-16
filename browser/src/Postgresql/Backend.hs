@@ -71,7 +71,7 @@ insertPatch  inf conn i  t = either error (\i ->  liftIO $ if not $ L.null seria
       directAttr :: [TB Key Showable]
       directAttr = direct aattr attrs
       projKey :: [TB Key a ] -> [Key]
-      projKey = fmap _relOrigin . concat . fmap keyattr
+      projKey = fmap _relOrigin . fmap keyattr
       serialTB = kvlist serialAttr
       all1 f [] = False
       all1 f i = all f i
@@ -271,8 +271,8 @@ getRow table  delayed (Idex idx) = do
            [] -> error "empty query"
            _ -> error "multiple result query"
 
-filterReadable = kvFilter (\k -> attr k)
-  where attr = F.all (\k -> L.elem FRead (keyModifier (_relOrigin k)))
+filterReadable = kvFilter (\k -> attr (relOutputSet k))
+  where attr = F.all (\k -> L.elem FRead (keyModifier k))
 
 selectAll
   ::

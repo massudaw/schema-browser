@@ -353,7 +353,7 @@ indexFilterPatch ::
   -> TBIdx k a
   -> Bool
 indexFilterPatch (Inline l, ops) lo =
-  case L.find ((Set.singleton (Inline l) ==) . index) lo
+  case L.find ((Inline l ==) . index) lo
   -- case Map.lookup (Set.singleton (Inline l)) lo of
         of
     Just i ->
@@ -368,8 +368,8 @@ indexFilterPatch (Inline l, ops) lo =
     create'  = create
     matching f = G.match (G.getOp l ops) (Right (create' f))
 
-indexFilterPatch (RelAccess (RelComposite l) n, op) lo =
-  case L.find ((Set.fromList l ==) . index) lo of
+indexFilterPatch (RelAccess l n, op) lo =
+  case L.find ((l ==) . index) lo of
     Just i ->
       case i of
         PInline k f -> L.any (indexFilterPatchU (n, op)) f
@@ -491,12 +491,12 @@ instance PatchConstr k a => Patch (TB k a) where
   patch = patchAttr
 
 instance (Ord k) => Address (PathAttr k a) where
-  type Idx (PathAttr k a) = Set.Set (Rel k)
+  type Idx (PathAttr k a) = Rel k
   index = pattrKey
 
 instance (Ord k) => Address (TB k a) where
-  type Idx (TB k a) = Set.Set (Rel k)
-  index = keyattrs
+  type Idx (TB k a) = Rel k
+  index = keyattr
 
 instance PatchConstr k a => Patch (TBData k a) where
   type Index (TBData k a) = TBIdx k (Index a)
@@ -721,11 +721,11 @@ createTB1 k =
         maybe [] id . fmap compactAttr . nonEmpty . snd <$>
         groupSplit2 index id k))
 
-pattrKey :: Ord k => PathAttr k t -> Set.Set (Rel k)
-pattrKey (PAttr s _) = Set.singleton $ Inline s
-pattrKey (PFun s l _) = Set.singleton $ RelFun (Inline s) (fst l) (snd l)
-pattrKey (PInline s _) = Set.singleton $ Inline s
-pattrKey (PFK s _ _) = Set.fromList s
+pattrKey :: Ord k => PathAttr k t -> (Rel k)
+pattrKey (PAttr s _) = Inline s
+pattrKey (PFun s l _) = RelFun (Inline s) (fst l) (snd l)
+pattrKey (PInline s _) =  Inline s
+pattrKey (PFK s _ _) = RelComposite s
 
 applyRecordChange ::
      PatchConstr d a
@@ -1077,6 +1077,6 @@ recoverPFK ori rel i =
         (fmap join .
          traverse
            (fmap patchvalue .
-            L.find ((== Set.singleton (Inline k)) . index) . sourcePRef) $
+            L.find ((== Inline k) . index) . sourcePRef) $
               i)) <$> ori) <$>
       (fmap (\v -> targetPRef  v <> targetPRefEdit v) <$>  (filterPFK  ( \i -> not $ L.null $ targetPRef i <> targetPRefEdit i  ) i))

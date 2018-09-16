@@ -654,7 +654,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
       let ao :: Index (FTB (KV Text Showable))
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch (fromJust (findFK ["account" ] row )):) <$> b)
           ref :: [TB Text Showable]
-          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find (([Inline "fitid"]==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
+          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find ((Inline "fitid"==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: Maybe (TBIdx Text Showable)
           tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 

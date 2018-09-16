@@ -49,7 +49,7 @@ indexField p@(IProd b l) v =
     Nothing ->
       case findFK [l] (v) of
         Just (FKT ref _ _) ->
-          ((\l -> L.find ((== [l]) . fmap _relOrigin . keyattr) $ unkvlist ref) $
+          ((\l -> L.find ((== [l]) . fmap _relOrigin . relUnComp . keyattr) $ unkvlist ref) $
            l)
         Nothing -> findFKAttr [l] v
     i -> i

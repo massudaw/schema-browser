@@ -293,9 +293,9 @@ matchPrim (Mutation _ _ (AtomicPrim PText)) _   = True
 matchPrim i j = True
 
 attrMatch :: (Show k,Show a,Ord k) => AttributePath k MutationTy ->  TBData k a -> Bool
-attrMatch (PathAttr i p) v =  maybe False (matchFTB matchPrim p .  _tbattr) $ kvLookup (S.singleton $ Inline i)  v
-attrMatch (PathInline i p) v = maybe False (matchFTB patternMatch p .  _fkttable) $ kvLookup (S.singleton $ Inline i)  v
-attrMatch (PathForeign i p)  v = maybe False (matchFTB patternMatch p .  _fkttable) $ kvLookup (S.fromList i)  v
+attrMatch (PathAttr i p) v =  maybe False (matchFTB matchPrim p .  _tbattr) $ kvLookup (Inline i)  v
+attrMatch (PathInline i p) v = maybe False (matchFTB patternMatch p .  _fkttable) $ kvLookup (Inline i)  v
+attrMatch (PathForeign i p)  v = maybe False (matchFTB patternMatch p .  _fkttable) $ kvLookup (relComp i)  v
 
 -- matchFTB f i j | traceShow (i,j) False = undefined
 matchFTB f (TipPath i ) (TB1 v ) =  f i v

@@ -67,7 +67,7 @@ import qualified Types.Index as G
 import Types.Patch
 import Utils
 
-type ColumnTidings = Map (S.Set (Rel CoreKey )) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
+type ColumnTidings = Map (Rel CoreKey ) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
 
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
 genAttr inf k =
@@ -131,7 +131,7 @@ pluginUI inf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
 
       (preinp,(_,liftedE)) <- pluginUI  inf (liftA2 mergeKV <$>  unoldItems <*>  inp) (idp,FPlugins n tname aci)
 
-      let outputs fresh = attrB (fmap (\v -> justError ("no key " <> show fresh <> " in " <>  show v) . fmap snd $ findKV ((== (S.singleton $ Inline fresh)) . index) =<< (createIfChange v :: Maybe (TBData Key Showable))) <$> liftedE)  (genAttr inf fresh)
+      let outputs fresh = attrB (fmap (\v -> justError ("no key " <> show fresh <> " in " <>  show v) . fmap snd $ findKV ((== (Inline fresh)) . index) =<< (createIfChange v :: Maybe (TBData Key Showable))) <$> liftedE)  (genAttr inf fresh)
           attrB pre a = do
             -- wn <- tbCaseDiff inf (lookTable inf tname) []  a M.empty [] pre
             -- TrivialWidget v e <- labelCaseDiff inf a  pre (triding wn)
@@ -210,8 +210,8 @@ indexPluginAttrDiff a@(Attr i _ )  plugItems =  evs
 indexPluginAttrDiff i plugItems = pfks
   where
     prodRef = IProd Nothing
-    thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (keyattr i) )) .  fst) plugItems
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  index i)  . index ) ))) <$>  thisPlugs
+    thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (relUnComp $ keyattr i) )) .  fst) plugItems
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (relUnComp $ keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  index i)  . index ) ))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
@@ -250,11 +250,11 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
       KArray  -> let (i1,i2) = go l in (i1,i2*8)
       KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
-getRelOrigin :: [Column k () ] -> [k ]
-getRelOrigin =  fmap _relOrigin . concatMap keyattr
+getRelOrigin :: Ord k => [Column k () ] -> [k ]
+getRelOrigin =  fmap _relOrigin .  concatMap (relUnComp .keyattr)
 
 attributeLabel :: Column CoreKey () -> String
-attributeLabel =  renderRel .  RelComposite . F.toList . index
+attributeLabel =  renderRel .  index
 
 labelCaseDiff
   ::  InformationSchema
@@ -268,7 +268,7 @@ labelCaseDiff inf a o wid = do
       lref <- UI.div
         # set text (show $ keyattr  a)
       ltype <- UI.div
-        # set text (show $ keyType . _relOrigin <$> keyattr  a)
+        # set text (show $ relType $ keyattr  a)
       ldelta <- UI.div
         # sink text  (show <$> facts wid)
       UI.div # set children [lref,ltype,ldelta]
@@ -284,7 +284,7 @@ paintEditDiff o i e = element e # sink UI.style ( facts $ st <$> (cond <$> o <*>
         st (back,font)= [("background-color",back),("color",font)]
 
 
-filterConstr rel  = filter ((`S.isSubsetOf` S.fromList  rel) . S.map _relOrigin. S.unions . fst)
+filterConstr rel  = filter ((`S.isSubsetOf` S.fromList  rel). S.unions . fmap relOutputSet .fst)
 
 tbCaseDiff
   :: InformationSchema
@@ -298,14 +298,14 @@ tbCaseDiff
 tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItems oldItems= do
   let
     nonInj = S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
-    nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.fromList . concat .catMaybes . fmap _relOutputs $ F.toList k) wl
+    nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) .  relOutputSet $ k) wl
     restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
     reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
-      where frel = filter (\i -> isJust $ kvLookup (S.singleton (Inline (_relOrigin i))) ifk) rel
+      where frel = filter (\i -> isJust $ kvLookup (Inline (_relOrigin i)) ifk) rel
     convertConstr j =  fmap ((\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel)) j
   fkUITableGen inf table (fmap convertConstr <$>  restrictConstraint) plugItems nonInjRefs oldItems  i
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
-    let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.map _relOrigin. S.unions  .fst) constr
+    let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.unions . fmap relOutputSet . fst) constr
     iUITableDiff inf restrictConstraint plugItems oldItems i
 tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
   liftIO . putStrLn $ "Field Plugins: " <> show (i,fst <$> plugItems )
@@ -316,8 +316,8 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItems preoldItems = do
   let
 
-    search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show (a ,t , M.keys wl)) (L.find (\(k,i) -> S.singleton  t == S.map _relOrigin k) $ M.toList wl)
-    search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup (S.fromList (relUnComp t))  wl)
+    search f (Inline t) = fmap (fmap (fmap _tbattr)) . f . snd $ justError ("cant find: " <> show (a ,t , M.keys wl)) (L.find (\(k,i) -> S.singleton  t == relOutputSet k) $ M.toList wl)
+    search f (RelAccess t m) =  fmap (fmap (fmap joinFTB . join . fmap (traverse (recLookup m) . _fkttable))) . f $ justError ("cant find rel" <> show t) (M.lookup t  wl)
     search f i = error (show i)
     -- Add information if the patch is Keep
     refs = sequenceA $ search recoverValue <$> snd rel
@@ -364,7 +364,7 @@ anyColumns
    -> PluginRef (TBData CoreKey Showable)
    -> TBData Key ()
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> [(Set (Rel Key))]
+   -> [(Rel Key)]
    ->  UI (LayoutWidget  (Editor (TBIdx CoreKey Showable)))
 anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  mdo
 
@@ -422,16 +422,17 @@ buildFKS
    -> ColumnTidings
    -> PluginRef (TBData CoreKey Showable)
    -> TBData Key ()
-   -> Map (Set (Rel Key)) Plugins
+   -> Map (Rel Key) Plugins
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> [(Set (Rel Key))]
-   -> UI [(Set (Rel Key), (LayoutWidget (Editor (PathAttr CoreKey Showable)),
+   -> [(Rel Key)]
+   -> UI [(Rel Key, (LayoutWidget (Editor (PathAttr CoreKey Showable)),
                              Tidings (Maybe (Column CoreKey Showable))))]
-buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems =  fmap (fst) . F.foldl'  run (return ([],[]))
+buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems = fmap fst . F.foldl' run (return ([],[]))
   where
     meta = tableMeta table
-
-    replaceNonInj l = maybe [] (\j -> pure (Many ((IProd Nothing. _relOrigin <$> F.toList l)),  fst j))  aref
+    replaceNonInj :: Rel Key -> [(Union (Access (Key)),
+                        Tidings (Editor (PathAttr (FKey (KType CorePrim)) Showable)))]
+    replaceNonInj l = maybe [] (\j -> pure (Many (IProd Nothing . _relOrigin <$> relUnComp l ),  fst j))  aref
        where aref = M.lookup l refs
     previous i = (kvLookup i =<<) <$> oldItems
     run jm l = do
@@ -440,22 +441,17 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems =  fmap (
            let
               wl = M.fromList $ fmap (first triding) <$> w
               plugattr k v = case kvLookup k ftb of
-                               Just i  -> flip apply <$> compactPlugins' (indexPluginAttrDiff i  (plugmods ++ oplug) <> replaceNonInj k)  <*> v
-                               Nothing -> v
-              search f t@(Inline _) = plugattr (S.singleton t) $ maybe (previous (S.singleton t)) f $ M.lookup (S.singleton t) wl
-              search f (Output t) =  previous (S.singleton t)
-              search f (RelAccess t m) =plugattr ts $ maybe (previous ts) f $ M.lookup ts  wl
-                  where ts = S.fromList $ relUnComp t
-              inputs = sequenceA $ search (fmap snd . recoverValue) <$> S.toList l
+                 Just i  -> flip apply <$> compactPlugins' (indexPluginAttrDiff i  (plugmods ++ oplug) <> replaceNonInj k)  <*> v
+                 Nothing -> v
+              search f t@(Inline _) = plugattr t $ maybe (previous t) f $ M.lookup t wl
+              search f (Output t) =  previous t
+              search f (RelAccess t m) = plugattr t $ maybe (previous t) f $ M.lookup t  wl
+              inputs = sequenceA $ search (fmap snd . recoverValue) <$> relUnComp l
            (el,(i,o)) <- pluginUI inf (fmap kvlist . nonEmpty . catMaybes <$> inputs) plug
-           label <- flabel #  set text (renderRel . RelComposite $  S.toList l)
+           label <- flabel #  set text (renderRel l)
            plug <- UI.div # set children [label,el]
 
-           let
-              genOutput (IProd _ i) = [Inline i ]
-              genOutput (Nested l _) = F.toList l
-              genOutput i = error $ show ("genOutput",i)
-           let out = (S.empty ,(LayoutWidget (pure Keep) plug (pure (3,1)),pure Nothing))
+           let out = (relComp [] ,(LayoutWidget (pure Keep) plug (pure (3,1)),pure Nothing))
            liftIO $ putStrLn ("Plugin Output: "  <> show i)
            return (w <> [out],oplug ++ [(i,maybe Keep Diff <$> o)])
       let matchAttr m = do
@@ -472,7 +468,7 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems =  fmap (
                   out <- el # set children [getElement v,getElement  wn]
                   return $ LayoutWidget (triding wn) out (getLayout wn)
               return (w <> [(index m,(lab,oldref))] ,oplug)
-      justError "could not find attr" $ (matchPlug <$> M.lookup l plugs) <|>  (matchAttr <$> kvLookup l ftb )
+      justError ("could not find attr: " <> show l <> "\n plugs "<> unlines (show <$> M.keys plugs ) <> "\nattrs " <> unlines (show <$> kvkeys ftb) ) $ (matchPlug <$> M.lookup l plugs) <|>  (matchAttr <$> kvLookup l ftb )
 
 
 recoverValue (edit,old) = (\i j -> (isKeep j,join $ (applyIfChange i j) <|> (createIfChange j) <|> Just i ) ) <$> old <*> edit
@@ -495,7 +491,7 @@ tableConstraints (m ,gist) preoldItems ftb = constraints
   where
     constraintPred :: [Key]
                       -> Tidings (G.GiST (TBIndex Showable) a)
-                      -> ([Set (Rel Key)], Tidings (C.Predicate [TB Key Showable]))
+                      -> ([Rel Key], Tidings (C.Predicate [TB Key Showable]))
     constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate .  flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
     primaryConstraint = constraintPred (_kvpk m) (primary <$> gist)
     secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un .secondary<$>  gist)
@@ -553,8 +549,8 @@ rowTableHeaders  ftb = do
 validateRow :: WidgetValue f =>
      InformationSchema
   -> Table
-  -> [( S.Set (Rel CoreKey)
-      , ( f (Editor (PathAttr CoreKey Showable))
+  -> [( Rel CoreKey
+      , (f (Editor (PathAttr CoreKey Showable))
         , Tidings (Maybe (Column CoreKey Showable))))]
   -> Tidings (Editor (TBIdx CoreKey Showable))
 validateRow inf table fks =
@@ -591,8 +587,8 @@ plugKeyToRel
   -> Table
   -> TBData CoreKey ()
   -> (Union (Access Text),Union (Access Text))
-  -> Set (Rel Key)
-plugKeyToRel inf table ftb (i,o) = S.fromList (inp <> out)
+  -> (Rel Key)
+plugKeyToRel inf table ftb (i,o) = relComp (inp <> out)
   where
     liftAccess i = filter (isJust. filterEmpty) (F.toList (liftAccessU inf tname i))
     inp = concat $ genRel M.empty <$>  liftAccess i
@@ -617,8 +613,8 @@ rowTableDiff inf table constr refs plmods ftb@k ix oldItems= do
     pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ pluginFKS table)
 
   let
-    srefs :: [Set (Rel Key)]
-    srefs =  sortRels (M.keys pluginMap <> kvkeys ftb) -- $ replaceRecRel ftb (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+    srefs :: [Rel Key]
+    srefs =  sortRels (M.keys pluginMap <> kvkeys ftb)
     plugmods = first traRepl <$> plmods
 
     isSum = rawIsSum table
@@ -651,7 +647,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
     meta = tableMeta table
     pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ _pluginRefs table)
   let
-    srefs :: [Set (Rel Key)]
+    srefs :: [Rel Key]
     srefs =  sortRels (M.keys pluginMap <> kvkeys ftb )
     plugmods = first traRepl <$> plmods
 
@@ -664,7 +660,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
       mapM (\(s,(i,_)) -> element (getElement  i) #  sink UI.class_ (facts $ (\i -> "col-xs-" <> show (fst i)) <$> getLayout i)) fks
       listBody <- UI.div # set children (getElement .fst . snd  <$> fks)
       let vertical = (\i -> (min (fst i ) 12,max (snd i) 1)) . foldl1 horizontalL <$> sequenceA(getLayout . fst .snd <$>  fks)
-      return $ LayoutWidget (validateRow inf table (filter (not. S.null . fst) fks)) listBody  vertical
+      return $ LayoutWidget (validateRow inf table (filter (not. S.null .relOutputSet .  fst) fks)) listBody  vertical
   element listBody
     # set UI.class_ "row"
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
@@ -1273,7 +1269,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       let
         fields = allFields inf targetTable
         reflectRels = filter (isJust. _relOutputs) rel
-        matchReflect k = isJust $ L.find (\(Rel i _ _ )  -> S.singleton i == k) reflectRels
+        matchReflect k = isJust $ L.find (\(Rel i _ _ )-> i == k) reflectRels
         filterReflect m = filter  (matchReflect.index) m
         filterNotReflect m = kvFilter (not . matchReflect) m
         filterReflectKV m = kvFilter (matchReflect) m
@@ -1423,7 +1419,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
             replaceKeyP = firstPatchAttr swapKey
 
             staticold :: ColumnTidings
-            staticold = fmap (\(i,j) -> (patch <$>  liftA2 apply  (projectValue j) (projectEdit i),pure Nothing)) . M.mapKeys (S.map (fmap swapKey)) $ M.filterWithKey (\k _ -> all (\i ->  not (isInlineRel i ) &&  (_relOperator i == Equals)) k) nonInjRefs
+            staticold = fmap (\(i,j) -> (patch <$>  liftA2 apply  (projectValue j) (projectEdit i),pure Nothing)) . M.mapKeys (fmap swapKey) $ M.filterWithKey (\k _ -> all (\i ->  not (isInlineRel i ) &&  (_relOperator i == Equals)) (relUnComp k)) nonInjRefs
             projectEdit = fmap (fmap replaceKeyP . join . fmap (maybe Keep Diff . unLeftItensP ))
             projectValue = fmap (fmap replaceKey .join . fmap unLeftItens)
 
@@ -1477,7 +1473,7 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
     liftRelation o = o
-    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ join . fmap ( maybe Keep (\m -> Diff $ PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v) ) . S.map _relOrigin . index) .  nonRefPatch) <$> fst j )<$> F.toList i ) <$> M.toList nonInjRefs
+    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ join . fmap ( maybe Keep (\m -> Diff $ PFK rel [m] (patchChange m )).L.find ((== v) .  index) .  nonRefPatch) <$> fst j )<$> relUnComp i ) <$> M.toList nonInjRefs
       where patchChange (PAttr i k ) = fmap (const []) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j

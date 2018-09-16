@@ -170,7 +170,7 @@ escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
 
 tableAttr = sortPosition . unkvlist . tableNonRef
 
-sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
+sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) . relUnComp .keyattr))
 
 asNewTable
   :: (MonadReader [Address k] m,
@@ -387,7 +387,7 @@ indexFieldL inf m e c p@(Inline l) v =
     Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
     Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess (RelComposite l) nt) v =
-  case kvLookup (S.fromList l) v of
+  case kvLookup (relComp $ S.fromList l) v of
     Just a -> case a of
         t@(IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  do
           l <- lkTB t

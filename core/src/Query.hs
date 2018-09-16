@@ -240,7 +240,7 @@ recurseTB invSchema isRec table =
     fkSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ fks'
     funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ functionRefs table
-    nonFKAttrs =  kvFilter (\i -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
+    nonFKAttrs =  kvFilter (\i -> not $ S.isSubsetOf (relOutputSet i) (fkSet <> funSet)) items
     fklist = P.sortBy (P.comparing (S.map _relOrigin <$> pathRelRel )) fks' <> functionRefs table
     pt  = F.foldl' (\acc  fk ->
           let relFk =pathRelRel fk
@@ -266,8 +266,8 @@ eitherDescPK kv i
           pk = tbPK kv i
 
 tbDesc, tbPK :: Ord k => KVMetadata k -> TBData  k a ->  TBData  k a
-tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) )
-tbPK kv = kvFilter (\k -> S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) )
+tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (relOutputSet k) (S.fromList $ _kvdesc kv ) )
+tbPK kv = kvFilter (\k -> S.isSubsetOf (relOutputSet k) (S.fromList $ _kvpk kv ) )
 
 -- Combinators
 

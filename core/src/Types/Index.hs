@@ -374,9 +374,9 @@ indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = error (show ("IndexPredIx",i))
-indexPredIx (n@(RelAccess (RelComposite nk) nt ) ,eq) r
-  = case  relLookup (Set.fromList nk) r of
-    Just i ->  PathForeign nk  <$> recPred i
+indexPredIx (n@(RelAccess nk nt ) ,eq) r
+  = case  relLookup nk r of
+    Just i ->  PathForeign (relUnComp nk ) <$> recPred i
     Nothing -> Nothing
   where
     allRefs (TBRef (i,v))= Many . pure <$> (indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v)
@@ -386,7 +386,7 @@ indexPredIx (n@(RelAccess (RelComposite nk) nt ) ,eq) r
     recPred i = error (show ("IndexPredIx",i))
 -- indexPredIx  (a,i) r | traceShow (a,i,indexField a r) False = undefined
 indexPredIx (a@(Inline key),eqs) r =
-  case attrLookup (Set.singleton a ) (tableNonRef r) of
+  case attrLookup a  (tableNonRef r) of
     Nothing ->  Nothing
     Just rv  ->
       PathAttr key <$> recPred rv
@@ -400,9 +400,8 @@ indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
--- indexPred i j | traceShow (i,j) False = undefined
-indexPred (n@(RelAccess (RelComposite k) nt ) ,eq) r
-  = case  refLookup (Set.fromList k)  r of
+indexPred (n@(RelAccess k nt ) ,eq) r
+  = case  refLookup (Set.fromList $ relUnComp k)  r of
     Nothing ->False
     Just i  ->recPred $ indexPred (nt , eq) <$> i
   where
@@ -411,7 +410,7 @@ indexPred (n@(RelAccess (RelComposite k) nt ) ,eq) r
     recPred (ArrayTB1 i) = any recPred i
     recPred i = error (show ("RecPred",i))
 indexPred (a@(Inline key),eqs) r =
-  case attrLookup (Set.singleton a) (tableNonRef r) of
+  case attrLookup a (tableNonRef r) of
     Just rv ->
       match eq (Right rv)
     Nothing -> False

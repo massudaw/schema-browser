@@ -26,7 +26,7 @@ import qualified Data.Text as T
 import qualified Data.Set as S
 
 
-foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[]) $ P.sortBy (P.comparing (relSort . pathRelRel))fks)
+foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[]) $ P.sortBy (P.comparing (relSort . relComp . pathRelRel))fks)
 
 filterDuplicated  fun (i,l)  j = (i <> S.map _relOrigin (pathRelRel j) ,fun i j : l)
 
@@ -83,7 +83,7 @@ defaultTableData
 defaultTableData inf table v =
   let
     nonFKAttrs = nonFKS table
- in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (M.lookup (pathRelRel ix) (unKV v))) (rawFKS table)
+ in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (M.lookup (relComp $ pathRelRel ix) (unKV v))) (rawFKS table)
 
 defaultTableType
   :: InformationSchemaKV Key Showable
