@@ -1471,7 +1471,7 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
     liftRelation o = o
-    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ join . fmap ( maybe Keep (\m -> Diff $ PFK rel [m] (patchChange m )).L.find ((== v) .  index) .  nonRefPatch) <$> fst j )<$> relUnComp i ) <$> M.toList nonInjRefs
+    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ join . fmap ( maybe Keep (\m -> Diff $ PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v)) .  relOutputSet . index) .  nonRefPatch) <$> fst j )<$> relUnComp i ) <$> M.toList nonInjRefs
       where patchChange (PAttr i k ) = fmap (const []) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
