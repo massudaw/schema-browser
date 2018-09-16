@@ -722,7 +722,7 @@ pattrKey :: Ord k => PathAttr k t -> (Rel k)
 pattrKey (PAttr s _) = Inline s
 pattrKey (PFun s l _) = RelFun (Inline s) (fst l) (snd l)
 pattrKey (PInline s _) =  Inline s
-pattrKey (PFK s _ _) = RelComposite s
+pattrKey (PFK s _ _) = relComp s
 
 applyRecordChange ::
      PatchConstr d a

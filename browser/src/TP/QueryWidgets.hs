@@ -268,7 +268,7 @@ labelCaseDiff inf a o wid = do
       lref <- UI.div
         # set text (show $ keyattr  a)
       ltype <- UI.div
-        # set text (show $ relType $ keyattr  a)
+        # set text (show $ relType' $ keyattr  a)
       ldelta <- UI.div
         # sink text  (show <$> facts wid)
       UI.div # set children [lref,ltype,ldelta]
@@ -372,9 +372,9 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
         fks2 = M.fromList $ run <$> cols
         sumButtom itb =  do
           el <- UI.div
-          let prev = (join . fmap unLeftItens . join . fmap (M.lookup itb . unKV) <$> oldItems)
+          let prev = (join . fmap unLeftItens . join . fmap (kvLookup itb ) <$> oldItems)
               edit = ((maybe Delete Diff. unLeftItensP <=< maybe Keep Diff . L.find (\a -> index a == itb)) =<< ) <$> resei
-          element =<< labelCaseDiff inf (justError "no sum column" $ M.lookup itb (unKV fields)) prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j))<$> prev <*> edit)
+          element =<< labelCaseDiff inf (justError "no sum column" $ kvLookup itb fields) prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j))<$> prev <*> edit)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk <- buttonDivSetO (M.keys (unKV fields))  (fmap index <$> initialAttr)  marker sumButtom
@@ -556,7 +556,7 @@ validateRow inf table fks =
   sequenceTable fks <*>
   isValid fks
   where
-    -- ifValid i j | traceShow (i,j) False = undefined
+    -- ifValid i j | traceShow ("ifValid",i,j) False = undefined
     ifValid i j =
       if isJust j
         then i
@@ -569,7 +569,7 @@ checkDefaults inf table k  (r, i) =  applyDefaults inf table k  <$> facts i <#> 
 
 
 -- applyDefaults inf table k i j | traceShow (k,i,j) False = undefined
-applyDefaults inf table k i j = {-traceShow ("apply",j,i,join (applyIfChange i j) <|> join (createIfChange (def j))) $ -- traceShowIdPrefix (show k)  -}
+applyDefaults inf table k i j = {- traceShow ("apply",k,def j, index <$> defTable , j,i,join (applyIfChange i j) <|> join (createIfChange (def j))) $ -- traceShowIdPrefix (show k)  -}
   join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
   where
     defTable = defaultTableType inf table
