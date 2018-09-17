@@ -216,7 +216,7 @@ foldCompact f (x:xs) =
           Nothing -> (c:o,j)
   in reverse (i:l)
 
-instance (Compact i) => Compact (Editor i) where
+instance Compact i => Compact (Editor i) where
   compact l = [F.foldl' pred Keep l]
     where
       pred (Diff i) (Diff j) = maybe Keep Diff $ safeHead $ compact [i, j]
@@ -483,6 +483,22 @@ instance PatchConstr k a => Patch (AValue k a)  where
   -- patch = patchAValue
 -}
 
+instance PatchConstr k a => Patch (AValue k a) where
+  type Index (AValue k a) = PValue k (Index a)
+  diff (APrim i) (APrim j) = PPrim <$> diff i j  
+  diff (ARef i) (ARef j)  = PRef <$> diff i j  
+  diff (ARel i l) (ARel j m) = PRel <$> diff i j <*> diff l m 
+  applyUndo (APrim i) (PPrim j) = bimap APrim PPrim <$> applyUndo  i j 
+  applyUndo (ARef i) (PRef j) = bimap ARef PRef <$> applyUndo  i j 
+  applyUndo (ARel i j) (PRel l m) = (\(a,b) (c,d) -> (ARel a c , PRel b d)) <$> applyUndo  i l  <*> applyUndo j m 
+  createIfChange (PPrim i )= APrim <$> createIfChange i 
+  createIfChange (PRel i j )= ARel <$> createIfChange i  <*> createIfChange j 
+  createIfChange (PRef i )=  ARef <$> createIfChange i 
+  patch (APrim i)= PPrim (patch i)
+  patch (ARel i j)= PRel (patch i) (patch j)
+  patch (ARef i)= PRef (patch i) 
+
+
 instance PatchConstr k a => Patch (TB k a) where
   type Index (TB k a) = PathAttr k (Index a)
   diff = diffAttr
@@ -492,7 +508,12 @@ instance PatchConstr k a => Patch (TB k a) where
 
 instance (Ord k) => Address (PathAttr k a) where
   type Idx (PathAttr k a) = Rel k
+  type Content (PathAttr k a ) = PValue k a
   index = pattrKey
+  content (PAttr _ i ) =  PPrim i 
+  content (PFun _ _ i ) =  PPrim i 
+  content (PFK  _ i   j) = PRel i j 
+  content (PInline _ i ) = PRef i
 
 instance (Ord k) => Address (TB k a) where
   type Idx (TB k a) = Rel k
@@ -586,11 +607,13 @@ type PatchConstr k a
      , Show k
      , Ord k)
 
-type PAttr k a = ([Rel k], PValue k a)
+type PAttr k a = (Rel k, PValue k a)
+
+
 
 data PValue k a
   = PPrim { pprim :: PathFTB a }
-  | PRel { prel :: PathFTB (TBIdx k a)
+  | PRel { prel :: TBIdx k a
          , pref :: PathFTB (TBIdx k a) }
   | PRef { pref :: PathFTB (TBIdx k a) }
   deriving (Eq, Ord, Show, Functor, Generic)
@@ -731,19 +754,15 @@ applyRecordChange ::
   -> Either String (KV d a, TBIdx d (Index a))
 applyRecordChange i [] = Right (i, [])
 applyRecordChange v k =
-  add . swap <$>
-  getCompose
-    (traverseKVWith
-       (\key vi ->
-        let
-           edits = filter ((key ==). index) k
-        in Compose . fmap swap $ foldUndo vi edits) v)
+  add . swap <$> getCompose (traverseKVWith editAValue v)
   where
+    editAValue key vi =
+        let edits = filter ((key ==). index) k
+        in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (fmap content edits)
     add (v, p) =
       (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
         filter (isNothing . flip kvLookup v . index) k
       , p)
-    edit l (i, tr) = fmap (: tr) <$> applyUndoAttrChange i l
 
 patchSetE i
   | L.length i == 0 = Left "empty array"

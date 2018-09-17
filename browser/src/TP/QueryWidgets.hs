@@ -377,7 +377,7 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
           element =<< labelCaseDiff inf (justError "no sum column" $ kvLookup itb fields) prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j))<$> prev <*> edit)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
-      chk <- buttonDivSetO (M.keys (unKV fields))  (fmap index <$> initialAttr)  marker sumButtom
+      chk <- buttonDivSetO (kvkeys fields)  (fmap index <$> initialAttr)  marker sumButtom
       fks <- switchManyLayout (triding chk) fks2
       element chk # set UI.style [("display","inline-flex")]
       let
@@ -1217,7 +1217,7 @@ inlineTableUI inf constr pmods oldItems (RecordPrim na) = do
     let
       tablefields = allFields inf table
       convertConstr (_,j) =  (\i -> ([index i], C.contramap (\v -> kvlist (fmap addDefault (L.delete i attrs) ++ v)) <$> j )) <$> attrs
-        where attrs = F.toList $ unKV tablefields
+        where attrs = unkvlist tablefields
       table = lookTable rinf (snd na)
       rinf = fromMaybe inf (HM.lookup (fst na) (depschema inf))
     eiTableDiff rinf table (concat $ convertConstr <$> constr) M.empty pmods tablefields oldItems
@@ -1475,7 +1475,7 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
       where patchChange (PAttr i k ) = fmap (const []) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
-    emptyFKT = FKT  (kvlist []) rel (const (kvlist []) <$> fkref)
+    emptyFKT = FKT  mempty rel (const mempty <$> fkref)
     mergeRef (FKT r rel v) i = FKT (foldl' addAttrO r (nonRefTB i)) rel v
     addAttrO  i v = if isNothing (unSOptional (_tbattr v)) then i else  (addAttr v i)
     (targetSchema,target) = findRefTableKey table rel

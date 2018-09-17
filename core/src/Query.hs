@@ -333,10 +333,11 @@ tbpredFK
   -> [k]
   -> [k]
   -> KV k a1 ->  Maybe (TBIndex a1)
-tbpredFK rel un  pk2 v  = tbjust  .  Tra.traverse (Tra.traverse unSOptional) . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
-        where
-          flipTable = M.fromList . fmap swap .M.toList
-          tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
+tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fmap (first projectRel).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
+  where
+    projectRel k = justError (show k) $ M.lookup k (flipTable  rel )
+    flipTable = M.fromList . fmap swap .M.toList
+    tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
 
 {-searchGist ::
   (Functor t,  Ord a1,Ord (G.Tangent a1),G.Predicates a1,Show a ,Show a1,Ord k,  Show k,

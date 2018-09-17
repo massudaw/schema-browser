@@ -12,6 +12,7 @@
 
 module Types.Common
   ( TB(..)
+  , AValue(..)
   , TBRef(..)
   , _fkttable
   , _tbattr
@@ -21,7 +22,6 @@ module Types.Common
   , relComp
   , relUnComp
   , replaceRecRel
-  , testPM
   , traFAttr
   , traFValue
   , relSort
@@ -231,7 +231,6 @@ instance (Ord k, P.Poset k) => P.Poset (RelSort k) where
 
 testPM =  originalRel <$> [(relSortL (Inline 3)),(relSortL (Inline 1)),(relSortL (Inline 2)),(relSortL (relComp [Output (Inline 4),Rel (RelAccess (Inline (3 :: Int)) (Inline 3)) (Flip Contains) (Inline 4)])), (relSortL (Inline 4)),relSortL (Rel (Inline 3) Contains (Inline 5))]
 
-
 topSortRels :: (Show k,Ord k) => [Set (Rel k)] ->  ([Set (Rel k)],[Int])
 topSortRels l = ((l!!) <$> sorted,sorted)
   where
@@ -281,15 +280,19 @@ mapKV f (KV n) = KV (PM.mapWithKey (\k ->  valueattr . f . recoverAttr . (origin
 
 mergeKV (KV i ) (KV j) = KV $ PM.unionWith const i j
 
-traverseKVWith
-  :: (Ord k ,Applicative f) =>
-    (Rel k -> TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
-traverseKVWith f (KV n) = KV <$> PM.traverseWithKey (\i -> fmap valueattr . f (originalRel i) . recoverAttr . (originalRel i,))  n
 
+traverseKVWith
+  :: (Ord k ,Applicative f)
+    => (Rel k -> AValue k a1 -> f (AValue k a2)) 
+    -> KV k a1 
+    -> f (KV k a2)
+traverseKVWith f (KV n) = KV <$> PM.traverseWithKey (\i -> f (originalRel i) )  n
 
 traverseKV
-  :: (Ord k ,Applicative f) =>
-     (TB k a1 -> f (TB k a2)) -> KV k a1 -> f (KV k a2)
+  :: (Ord k ,Applicative f)
+    => (TB k a1 -> f (TB k a2)) 
+    -> KV k a1 
+    -> f (KV k a2)
 traverseKV f (KV n) = KV . fmap valueattr <$> traverse f (PM.mapWithKey (curry (recoverAttr . first originalRel )) n ) 
 
 
@@ -455,8 +458,8 @@ type TBAttr k v = (Rel k, AValue k v)
 
 
 data AValue k a
-  = APrim {_aprim :: (FTB a) }
-  | ARef {_aref :: (FTB (KV k a))}
+  = APrim {_aprim :: FTB a }
+  | ARef {_aref :: FTB (KV k a)}
   | ARel { _arel :: KV k a  , _aref :: (FTB (KV k a))}
   deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
