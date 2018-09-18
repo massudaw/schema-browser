@@ -259,7 +259,6 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
             else G.insert (el, G.tbpred m el) G.indexParam .
                  G.delete (G.notOptional i) G.indexParam) l
           Nothing -> G.update (G.notOptional i) (flip apply patom) l, RowPatch (ipa,PatchRow u))
-
     Nothing -> do
       el <-maybe (Left $ "cant create row" ++ show patom) Right $ createIfChange patom
       return $ (G.insert (el, i ) G.indexParam l,RowPatch (ipa,DropRow ))
@@ -281,13 +280,12 @@ recAttr
     -> TB k a
     -> [(AttributePath k (Either (FTB a, BinaryOperator) b, FTB a),TBIndex a)]
 recAttr un (Attr i k) = first (PathAttr i) <$> recPred (\i -> [(TipPath (Left (TB1 i,Equals),TB1 i), Idex [TB1 i])]) k
-{-recAttr un (IT i j )  = first (PathInline i) <$> recPred (\i ->
-  let nest = concat $ recAttr un <$> F.toList  (_kvvalues  i)
-  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( j)
--}
+recAttr un (IT i j )  = first (PathInline i) <$> recPred (\i ->
+  let nest = concat $ recAttr un <$> unkvlist i
+  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) j
 recAttr un f@(FKT l rel k) = first (PathForeign rel) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> unkvlist i
-   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> (liftFK f))
+  in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) ( fst .unTBRef <$> liftFK f)
 
 recPred
   :: (t -> [(PathIndex PathTID b, d)])
@@ -364,7 +362,7 @@ pluginAction' (IOPlugin   a ) = dynIO a
 pluginAction' (PurePlugin  a) = return . dynPure a
 
 checkPredFull inf t predi i
-  = traceShow (result ,i) result
+  =  result
   where
     result = if maybe False (G.checkPred i) pred then Just i else Nothing
     pred = predGen (liftAccessU inf t predi)

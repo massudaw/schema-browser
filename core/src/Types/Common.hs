@@ -40,6 +40,7 @@ module Types.Common
   , traverseKV
   , traverseKVWith
   , mergeKV
+  , mergeKVWith
   , trazipWithKV
   , traTable
   , keyattr
@@ -280,6 +281,11 @@ mapKV f (KV n) = KV (PM.mapWithKey (\k ->  valueattr . f . recoverAttr . (origin
 
 mergeKV (KV i ) (KV j) = KV $ PM.unionWith const i j
 
+mergeKVWith
+  :: Ord k =>
+     (AValue k a1 -> AValue k a2 -> v)
+     -> (AValue k a2 -> v) -> KV k a1 -> KV k a2 -> [(Rel k, v)]
+mergeKVWith diff create (KV v ) (KV o) = first originalRel <$> PM.toList (PM.intersectionWith  diff v o) <> (PM.toList $ fmap create $ PM.difference o v )
 
 traverseKVWith
   :: (Ord k ,Applicative f)

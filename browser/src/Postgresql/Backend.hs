@@ -62,7 +62,7 @@ insertPatch  inf conn i  t = either error (\i ->  liftIO $ if not $ L.null seria
         executeLogged  conn (fromString  iquery ) directAttr
         return []) checkAllFilled
     where
-      checkAllFilled = tableCheck  (tableMeta t) (traceShowId i)
+      checkAllFilled = tableCheck  (tableMeta t) i
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
       attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV i)
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
@@ -230,6 +230,8 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
         ini = compact (defs ++  patch j)
+      print ("insertMod","Def",defs)
+      print ("insertMod",ini)
       d <- insertPatch  inf (conn  inf) (create ini) table
       l <- liftIO getCurrentTime
       return    $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))

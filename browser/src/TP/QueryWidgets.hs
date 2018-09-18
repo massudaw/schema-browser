@@ -705,8 +705,8 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   errors <- printErrors e
-  --debug <- debugConsole   preoldItems tablebdiff
-  out <- UI.div # set children [listBody,panelItems,errors]-- ,debug]
+  debug <- debugConsole   preoldItems tablebdiff
+  out <- UI.div # set children [listBody,panelItems,errors,debug]
   return $ LayoutWidget tablebdiff out layout
 
 openClose open = do
@@ -771,7 +771,6 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
       crudEdi i j =  do
-        -- liftIO $print (diff i j)
         transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -844,7 +843,7 @@ debugConsole oldItemsi inscrudp = do
                   -- ("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud),
                   ("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
                   ,("Undo", maybe "" (onDiff (ident . renderRowPatch) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
-            else  return [] ) (triding debugBox)
+            else  return []) (triding debugBox)
     debug <- UI.div # sink children (facts debugT) # set UI.class_ "col-xs-12"
     UI.div #  set children [getElement debugBox,debug]
 

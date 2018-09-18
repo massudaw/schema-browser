@@ -114,6 +114,7 @@ recInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key 
 recInsert k1  v1 = do
    inf <- askInf
    ret <- traverseKV (tbInsertEdit k1) v1
+   liftIO $ print ("recInsert",ret)
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing mempty (Just (recPK inf k1 (allFields inf tb)))

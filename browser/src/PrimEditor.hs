@@ -110,7 +110,7 @@ instance (Show (Index a),Compact (Index a),Patch a ,PrimEditor a) => PrimEditor 
   primDiff i dl = mdo
     let update = fmap getTransaction <$> i
     a <- primDiff  update d
-    d <- ui $ accumT  Keep ((\i j -> maybe Keep id . safeHead . traceShow (i,j)$ compact [i,j]) <$> rumors (triding a))
+    d <- ui $ accumT  Keep ((\i j -> maybe Keep id . safeHead  $ compact [i,j]) <$> rumors (triding a))
     log <- UI.div # sinkDiff text (show <$> d )
     u <- UI.div # set children [getElement a, log]
     return (TrivialWidget d u)

@@ -186,6 +186,12 @@ data PathFTB a
   | PatchSet (Non.NonEmpty (PathFTB a))
   deriving (Show, Eq, Ord, Functor, Generic, Foldable, Traversable)
 
+data PatchFTBC  a 
+ = PAtomicC a
+ | POptC (Maybe (PathFTB a))
+ | PInterC (Extended (PathFTB a),Bool)
+ | PatchSetC (Non.NonEmpty (PathFTB a))
+
 isDiff (Diff _) = True
 isDiff i = False
 
@@ -456,10 +462,17 @@ instance (Show a, Show k, Compact a, Ord k) => Compact (PathAttr k a) where
 
 instance Address (PathFTB a) where
   type Idx (PathFTB a) = PathTID
+  type Content (PathFTB a) = PatchFTBC a 
+
   index (PIdx i _) = PIdIdx i
   index (PAtom i) = PIdAtom
   index (POpt i) = PIdOpt
   index (PInter i _) = PIdInter i
+
+  content (PIdx i v) =  POptC v
+  content (POpt v ) =  POptC v
+  content (PInter _ v) =  PInterC v
+  content (PAtom i) = PAtomicC i
 
 instance (Show a, Compact a) => Compact (PathFTB a) where
   compact = maybeToList . compactPatches
@@ -470,24 +483,11 @@ instance (Show k, Show a, Compact a, Ord k) => Compact (TBIdx k a) where
 instance Compact Showable where
   compact = id
 
-{-
-instance Address (PAttr k a) where
-  type Idx (PAttr k a) = Set.Set (Rel k)
-  index = Set.fromList . fst
-
-instance PatchConstr k a => Patch (AValue k a)  where
-  type Index (AValue k a) =  PValue k (Index a)
-  diff = diffAValue
-  -- applyUndo  =   applyUndoAValueChange
-  -- createIfChange = createAValueChange
-  -- patch = patchAValue
--}
-
 instance PatchConstr k a => Patch (AValue k a) where
   type Index (AValue k a) = PValue k (Index a)
   diff (APrim i) (APrim j) = PPrim <$> diff i j  
   diff (ARef i) (ARef j)  = PRef <$> diff i j  
-  diff (ARel i l) (ARel j m) = PRel <$> diff i j <*> diff l m 
+  diff (ARel i l) (ARel j m) = PRel <$> (diff i j <|> pure [] ) <*>   diff l m
   applyUndo (APrim i) (PPrim j) = bimap APrim PPrim <$> applyUndo  i j 
   applyUndo (ARef i) (PRef j) = bimap ARef PRef <$> applyUndo  i j 
   applyUndo (ARel i j) (PRel l m) = (\(a,b) (c,d) -> (ARel a c , PRel b d)) <$> applyUndo  i l  <*> applyUndo j m 
@@ -506,6 +506,7 @@ instance PatchConstr k a => Patch (TB k a) where
   createIfChange = createAttrChange
   patch = patchAttr
 
+
 instance (Ord k) => Address (PathAttr k a) where
   type Idx (PathAttr k a) = Rel k
   type Content (PathAttr k a ) = PValue k a
@@ -514,6 +515,11 @@ instance (Ord k) => Address (PathAttr k a) where
   content (PFun _ _ i ) =  PPrim i 
   content (PFK  _ i   j) = PRel i j 
   content (PInline _ i ) = PRef i
+  rebuild (RelFun (Inline i) j l ) (PPrim k ) =  PFun i (j,l) k
+  rebuild (Inline i) (PPrim k ) =  PAttr i k
+  rebuild (Inline i) (PRef k ) =  PInline i k
+  rebuild (RelComposite l) (PRel i k ) =  PFK l i k
+  rebuild r@(Rel _ _ _ ) (PRel i k ) =  PFK [r] i k
 
 instance (Ord k) => Address (TB k a) where
   type Idx (TB k a) = Rel k
@@ -652,28 +658,15 @@ firstPatchAttr f (PInline k a) = PInline (f k) (fmap (firstPatch f) a)
 firstPatchAttr f (PFK rel k b) =
   PFK (fmap (fmap f) rel) (fmap (firstPatchAttr f) k) (fmap (firstPatch f) $ b)
 
+instance (Ord k ,Compact v,Show k ,Show v) => Compact (PValue k v) where
+  compact  l = [foldl1 merge  l]
+    where 
+      merge (PRef i ) (PRef j ) = head $ PRef <$> compact [i ,j]
+      merge (PPrim i ) (PPrim j ) = head $ PPrim <$> compact [i ,j]
+      merge (PRel i k ) (PRel j l ) = head $ PRel (concat $ compact [i ,j] ) <$> (compact [k ,l])
 compactAttr ::
      (Show a, Show b, Compact b, Ord a) => [PathAttr a b] -> [PathAttr a b]
-compactAttr i = catMaybes . fmap recover . groupSplit2 projectors pathProj $ i
-  where
-    pathProj (PAttr i j) = Right (Right j)
-    pathProj (PFun i rel j) = Right (Right j)
-    pathProj (PInline i j) = Left j
-    pathProj (PFK i p j) = Right (Left (p, j))
-    projectors (PAttr i j) = Left (Right i)
-    projectors (PFun i r j) = Left (Left (i, r))
-    projectors (PInline i j) = Left (Right i)
-    projectors (PFK i l j) = Right i
-    recover (Left (Right i), j) =
-      (fmap (PAttr i) $ compactPatches . rights $ rights j) <|>
-      (fmap (PInline i) $ compactPatches $lefts j)
-    recover (Left (Left (i, r)), j) =
-      PFun i r <$> (compactPatches . rights $ rights j)
-    recover (Right i, l) =
-      PFK i (compactAttr (concat fs)) <$>
-      (join . fmap compactPatches $ nonEmpty sn)
-      where
-        (fs, sn) = unzip $ lefts $ rights l
+compactAttr i = (uncurry rebuild . fmap (head . compact)) <$>  groupSplit2 index content  i
 
 unPAtom (PAtom i) = i
 
@@ -714,21 +707,12 @@ difftable ::
   => TBData k a
   -> TBData k a
   -> Maybe (Index (TBData k a))
-difftable old@(v) o =
+difftable v o =
   if L.null attrs
     then Nothing
     else Just attrs
   where
-    attrs =
-      catMaybes $
-      F.toList $
-      Map.mergeWithKey
-        (\_ i j -> Just $ diffAttr (i) (j))
-        (const Map.empty)
-        (fmap (Just . patchAttr))
-        (unKV v)
-        (unKV $ o)
-    -- where attrs = catMaybes $ fmap sequence $ Map.toList $ Map.mergeWithKey (\_ i j -> Just $ diffAttr i j) (const Map.empty ) (fmap (Just. patchAttr  ) ) (unKV v) (unKV o)
+    attrs = uncurry rebuild <$> (catMaybes $ sequenceA <$> mergeKVWith diff (Just . patch) v o)
 
 createTB1 :: PatchConstr d a => (TBIdx d (Index a)) -> Maybe (TBData d a)
 createTB1 k =
@@ -741,7 +725,7 @@ createTB1 k =
         maybe [] id . fmap compactAttr . nonEmpty . snd <$>
         groupSplit2 index id k))
 
-pattrKey :: Ord k => PathAttr k t -> (Rel k)
+pattrKey :: Ord k => PathAttr k t -> Rel k
 pattrKey (PAttr s _) = Inline s
 pattrKey (PFun s l _) = RelFun (Inline s) (fst l) (snd l)
 pattrKey (PInline s _) =  Inline s
@@ -758,7 +742,7 @@ applyRecordChange v k =
   where
     editAValue key vi =
         let edits = filter ((key ==). index) k
-        in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (fmap content edits)
+        in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (content <$> edits)
     add (v, p) =
       (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
         filter (isNothing . flip kvLookup v . index) k
