@@ -2,7 +2,9 @@
 module Patch where
 
 import Utils
+import qualified Data.Foldable as F
 import Control.Applicative
+import Data.Maybe
 
 class Address f where
   type Idx f
@@ -14,6 +16,9 @@ class Address f where
 
 class Compact f where
   compact :: [f] -> [f]
+  compact = maybe [] (pure. foldl1 associate) . nonEmpty
+  associate :: f -> f -> f
+  associate i j = head $ compact [i,j]
 
 class Patch f where
   type Index f

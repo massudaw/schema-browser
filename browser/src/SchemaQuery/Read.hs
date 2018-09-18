@@ -141,7 +141,7 @@ getFrom table allFields b = do
     m = tableMeta table
     comp = recComplement inf m b allFields
   join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
-    liftIO . putStrLn $ "Loading complement"  <> (ident . renderTable $ comp)
+    liftIO . putStrLn $ "Loading complement\n "  <> (ident . renderTable $ comp)
 
     ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable mempty (tableMeta table)
@@ -155,7 +155,9 @@ getFrom table allFields b = do
         output = (resFKS newRow)
         result = either (const Nothing) (diff b)  output
       traverse (modifyTable m [] . pure . (FetchData table .RowPatch. (G.getIndex m b,).PatchRow)) result
-      traverse (\i -> liftIO . putStrLn $ "Remaining complement"  <> (ident .renderTable $ i)) $ (\c -> recComplement inf m c allFields) =<<  (applyIfChange b =<< result )
+      traverse (\i -> do
+        liftIO . putStrLn $ "Loaded Items\n " <> (maybe "" (renderTablePatch .PatchRow . firstPatch keyValue ) result )
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (\c -> recComplement inf m c allFields) =<<  (applyIfChange b =<< result )
       return result ) n)) comp
 
 

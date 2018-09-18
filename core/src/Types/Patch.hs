@@ -190,7 +190,7 @@ data PatchFTBC  a
  = PAtomicC a
  | POptC (Maybe (PathFTB a))
  | PInterC (Extended (PathFTB a),Bool)
- | PatchSetC (Non.NonEmpty (PathFTB a))
+ | PatchSetC (Non.NonEmpty (PatchFTBC a))
 
 isDiff (Diff _) = True
 isDiff i = False
@@ -474,6 +474,11 @@ instance Address (PathFTB a) where
   content (PInter _ v) =  PInterC v
   content (PAtom i) = PAtomicC i
 
+  rebuild (PIdIdx i) (POptC j)  = PIdx i j 
+  rebuild PIdAtom (PAtomicC j)  = PAtom j 
+  rebuild PIdOpt (POptC j)  = POpt j 
+  rebuild (PIdInter i) (PInterC j)  = PInter i j 
+
 instance (Show a, Compact a) => Compact (PathFTB a) where
   compact = maybeToList . compactPatches
 
@@ -661,25 +666,32 @@ firstPatchAttr f (PFK rel k b) =
 instance (Ord k ,Compact v,Show k ,Show v) => Compact (PValue k v) where
   compact  l = [foldl1 merge  l]
     where 
-      merge (PRef i ) (PRef j ) = head $ PRef <$> compact [i ,j]
-      merge (PPrim i ) (PPrim j ) = head $ PPrim <$> compact [i ,j]
-      merge (PRel i k ) (PRel j l ) = head $ PRel (concat $ compact [i ,j] ) <$> (compact [k ,l])
+      merge (PPrim i) (PPrim j) = head $ PPrim <$> compact [i ,j]
+      merge (PRef i) (PRef j) = head $ PRef <$> compact [i ,j]
+      merge (PRel i k) (PRel j l) = head $ PRel (concat $ compact [i ,j] ) <$> (compact [k ,l])
+
 compactAttr ::
      (Show a, Show b, Compact b, Ord a) => [PathAttr a b] -> [PathAttr a b]
 compactAttr i = (uncurry rebuild . fmap (head . compact)) <$>  groupSplit2 index content  i
 
 unPAtom (PAtom i) = i
 
+instance (Compact a ,Show a) => Compact (PatchFTBC a ) where
+  associate (POptC i) (POptC j) = POptC $ (associate <$> i <*> j ) <|>  j 
+  associate (PInterC (i,l)) (PInterC (j,m)) = PInterC $ (associate <$> i <*> j ,m)
+  associate (PAtomicC l) (PAtomicC m) = PAtomicC  (associate l m )
+  associate (PatchSetC i ) l = justError "cant be empty" $ patchSetC $ compact (F.toList $ i <>pure l)
+  associate i (PatchSetC l) = justError "cant be empty" $ patchSetC $ compact (F.toList $ pure i <> l)
+  associate (PatchSetC i) (PatchSetC l) = justError "cant be empty" $patchSetC $  compact (F.toList $ i <> l) 
+
+
 compactPatches :: (Show a, Compact a) => [PathFTB a] -> Maybe (PathFTB a)
 compactPatches [] = Nothing
 compactPatches i =
   patchSet .
-  catMaybes .
-  fmap recover . groupSplit2 index pathProj . concat . fmap expandPSet $
+  catMaybes . fmap (fmap (uncurry rebuild). traverse (patchSetC . compact)). groupSplit2 index content . concat . fmap expandPSet $
   i
   where
-    pathProj (PIdx _ i) = i
-    pathProj (POpt i) = i
     pathProj p@(PInter _ i) = Just p
     pathProj i@(PAtom _) = Just i
     -- pathProj i = error (show i)
@@ -755,6 +767,15 @@ patchSetE i
   where
     normalize (PatchSet i) = concat $ fmap normalize i
     normalize i = [i]
+
+patchSetC i
+  | L.length i == 0 = Nothing
+  | L.length i == 1 = safeHead i
+  | otherwise = Just $ PatchSetC (Non.fromList $ concat $ normalize <$> i)
+  where
+    normalize (PatchSetC i) = concat $ fmap normalize i
+    normalize i = [i]
+
 
 patchSet i
   | L.length i == 0 = Nothing
