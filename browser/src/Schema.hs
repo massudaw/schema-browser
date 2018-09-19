@@ -127,7 +127,7 @@ tableColumnsQuery conn schema= do
           \   field_modifiers\
           \ FROM metadata.columns2 \
           \ WHERE table_schema = ?"
-   uniqueMap <- fmap  convertColumns <$>  query conn tableColumns (Only schema)
+   uniqueMap <- M.fromList . fmap  convertColumns <$>  query conn tableColumns (Only schema)
    let convertColumnsType i@(t,c,j,k,l,m,d,z,b,typ) = (t, key defty ty )
           where 
             defty = do 
@@ -136,7 +136,7 @@ tableColumnsQuery conn schema= do
               if testSerial def 
                 then Nothing 
                 else fromShowable2 (mapKType ty) .  BS.pack . T.unpack $ def
-            key = justError "no key" $ M.lookup (t,c) (M.fromList uniqueMap)
+            key = justError "no key" $ M.lookup (t,c) uniqueMap
             ty = createType (j,k,l,maybe False testSerial m,d,z,b,typ)
    fmap convertColumnsType <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
 

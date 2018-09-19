@@ -299,6 +299,8 @@ projIdex (Idex v) = F.toList v
 instance Applicative ER.Extended where
   pure  = ER.Finite
   ER.Finite i <*>  ER.Finite j = ER.Finite $ i j
+  i <*> ER.PosInf = ER.PosInf
+  i <*> ER.NegInf = ER.NegInf
 
 instance Predicates (TBIndex  a )  => Semigroup (G.GiST (TBIndex  a)  b) where
   i <> j

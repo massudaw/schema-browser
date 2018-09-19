@@ -746,6 +746,7 @@ recComplement inf =  filterAttrs []
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
 
+    
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
       | L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
@@ -759,7 +760,7 @@ recComplement inf =  filterAttrs []
         merged = filterAttrs [] ms <$> tb <*> tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go r m _ _ v@(Attr k a) = if L.elem k (_kvpk m <> r) then Just v else Nothing
+    go r m _ _ v@(Attr k a) = {-traceShow (v, L.elem k (_kvpk m <> r)) $-} if L.elem k (_kvpk m <> r) then Just v else Nothing
     go r m _ _ v@(Fun _ _ _) = Nothing
 
 

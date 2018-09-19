@@ -308,7 +308,6 @@ tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.unions . fmap relOutputSet . fst) constr
     iUITableDiff inf restrictConstraint plugItems oldItems i
 tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
-  liftIO . putStrLn $ "Field Plugins: " <> show (i,fst <$> plugItems )
   let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic v)) Just ) preoldItems) ( keyStatic i)
       tdiv = fmap _tbattr <$> oldItems
       insertT = fmap (PAttr i)
@@ -450,7 +449,6 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems = fmap fs
            plug <- UI.div # set children [label,el]
 
            let out = (relComp [] ,(LayoutWidget (pure Keep) plug (pure (3,1)),pure Nothing))
-           liftIO $ putStrLn ("Plugin Output: "  <> show i)
            return (w <> [out],oplug ++ [(i,maybe Keep Diff <$> o)])
       let matchAttr m = do
               let
@@ -729,7 +727,7 @@ dynCrudUITable
 dynCrudUITable inf nav refs pmods table preoldItems = do
   switchUILayout (pure Keep) UI.div nav
       (do
-        reftb@(_,gist,_) <- ui $ refTables inf   table
+        reftb@(_,gist,_) <- ui $ refTables inf table
         i <- crudUITable inf table reftb refs pmods (allFields inf table) preoldItems
         element i # set UI.class_ "col-xs-12"
         return i
@@ -771,6 +769,7 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
       crudEdi i j =  do
+        -- liftIO $print (diff i j)
         transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -821,7 +820,7 @@ mergeCommand lbox inf table inscrudp inscrud  authorize gist = do
 debugConsole oldItemsi inscrudp = do
     let
       inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
-    debugBox <- checkedWidget (onDiff (const True) (const False )<$> inscrudp)
+    debugBox <- checkedWidget (pure False)
     debugT <- traverseUI (\i ->
             if i
             then do
@@ -1407,7 +1406,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           return [getElement itemList]
 
         edit =  do
-          tdi <- ui . calmT $ fmap join $ applyIfChange <$> (fmap (snd.unTBRef) <$>facts oldItems) <#> tseltarget
+          tdi <- ui . calmT $ fmap join $ applyIfChange <$> (fmap (snd.unTBRef) <$>oldItems) <*> tseltarget
           let
             replaceKey :: TB CoreKey a -> TB CoreKey a
             replaceKey = firstTB swapKey

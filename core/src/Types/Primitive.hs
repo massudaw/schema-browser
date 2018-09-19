@@ -349,7 +349,7 @@ instance Eq (FKey a) where
   k == l = keyFastUnique k == keyFastUnique l
 
 instance Ord (FKey a) where
-  compare i j = compare (keyFastUnique i) (keyFastUnique j)
+  compare = comparing keyFastUnique 
 
 instance Show a => Show (FKey a) where
   show k = T.unpack $ keyValue k

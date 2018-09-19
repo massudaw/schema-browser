@@ -724,7 +724,7 @@ difftable v o =
     then Nothing
     else Just attrs
   where
-    attrs = uncurry rebuild <$> (catMaybes $ sequenceA <$> mergeKVWith diff (Just . patch) v o)
+    attrs = uncurry rebuild <$> (catMaybes $ sequenceA <$> (mergeKVWith diff (Just . patch) v o))
 
 createTB1 :: PatchConstr d a => (TBIdx d (Index a)) -> Maybe (TBData d a)
 createTB1 k =
@@ -744,7 +744,7 @@ pattrKey (PInline s _) =  Inline s
 pattrKey (PFK s _ _) = relComp s
 
 applyRecordChange ::
-     PatchConstr d a
+  forall  d a . PatchConstr d a
   => KV d a
   -> TBIdx d (Index a)
   -> Either String (KV d a, TBIdx d (Index a))
@@ -756,7 +756,7 @@ applyRecordChange v k =
         let edits = filter ((key ==). index) k
         in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (content <$> edits)
     add (v, p) =
-      (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
+      (foldr (\p v -> maybe v (\i -> addAttr  i v) ({-traceShow (index p , createIfChange p :: Maybe (TB d a)) $-} createIfChange p) ) v $
         filter (isNothing . flip kvLookup v . index) k
       , p)
 
@@ -996,7 +996,7 @@ checkInterM (PInter b o) inter =
 
 createUndoFTBM ::
      (Patch a, Show a, Ord a) => PathFTB (Index a) -> Either String (FTB a)
-createUndoFTBM (POpt i) = fmap LeftTB1 $ traverse createUndoFTBM i
+createUndoFTBM (POpt i) = if isJust i then (fmap LeftTB1 $ traverse createUndoFTBM i ) else Right (LeftTB1 Nothing)
 createUndoFTBM (PIdx ix o) =
   maybe (Left "Cant delete") (fmap (ArrayTB1 . pure) . createUndoFTBM) o
 createUndoFTBM (PInter b o) =

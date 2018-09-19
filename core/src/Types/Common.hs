@@ -282,10 +282,11 @@ mapKV f (KV n) = KV (PM.mapWithKey (\k ->  valueattr . f . recoverAttr . (origin
 mergeKV (KV i ) (KV j) = KV $ PM.unionWith const i j
 
 mergeKVWith
-  :: Ord k =>
-     (AValue k a1 -> AValue k a2 -> v)
-     -> (AValue k a2 -> v) -> KV k a1 -> KV k a2 -> [(Rel k, v)]
-mergeKVWith diff create (KV v ) (KV o) = first originalRel <$> PM.toList (PM.intersectionWith  diff v o) <> (PM.toList $ fmap create $ PM.difference o v )
+  :: (Show k,Show v,Ord k) =>
+     (AValue k a -> AValue k a -> v)
+     -> (AValue k a -> v) -> KV k a -> KV k a -> [(Rel k, v)]
+mergeKVWith diff create (KV v ) (KV o) = first originalRel <$> (PM.toList (PM.intersectionWith  diff v o) <> created)
+  where created = fmap (fmap create) $  filter (not . flip Set.member (S.fromList $ PM.keys v). fst ) (PM.toList o) 
 
 traverseKVWith
   :: (Ord k ,Applicative f)
@@ -768,7 +769,7 @@ findAttr l v = kvLookup ( Inline  l) v <|> findFun l v
 
 
 addAttr :: Ord k => TB k v -> KV k v -> KV k v
-addAttr v i = KV $ PM.insert (relSort $ keyattr v) (valueattr v) (_kvvalues i)
+addAttr v (KV i) = KV $ PM.insert (relSort $ keyattr v) (valueattr v) i
 
 findFun :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
 findFun l v =

@@ -230,8 +230,6 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
         ini = compact (defs ++  patch j)
-      print ("insertMod","Def",defs)
-      print ("insertMod",ini)
       d <- insertPatch  inf (conn  inf) (create ini) table
       l <- liftIO getCurrentTime
       return    $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
