@@ -99,7 +99,7 @@ instance  TF.ToField (TB PGKey Showable)  where
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain (fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    L.sortOn (L.maximumBy (comparing keyPosition) . relOutputSet  . index) (unkvlist i))
+  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $ L.sortOn (L.maximumBy (comparing keyPosition) . relOutputSet  . index) (unkvlist i))
   toField (IT n (ArrayTB1 is )) = TF.toField . PGTypes.PGArray $ IT n <$> F.toList is
   toField e = error (show e)
 

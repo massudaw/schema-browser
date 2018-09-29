@@ -268,8 +268,8 @@ getRow table  delayed (Idex idx) = do
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
          case is of
            [i] ->return $ patch i
-           [] -> error "empty query"
-           _ -> error "multiple result query"
+           [] -> error $ "empty query" ++ show (tableName table) ++ show idx
+           v -> error $ "multiple result query" ++ show (tableName table) ++ "-" ++  show idx  ++ "\n"++ show v
 
 filterReadable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FRead (keyModifier k))

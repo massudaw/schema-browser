@@ -742,9 +742,10 @@ mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
 
-recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
-recComplement inf =  filterAttrs []
+recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key ->  TBData Key () -> WherePredicate -> TBData Key  a -> Maybe (TBData Key ())
+recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p 
   where
+    attrList  = _relOrigin . fst <$> F.toList i
     filterAttrs :: [Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
     filterAttrs r m e
       | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) = const Nothing
@@ -752,10 +753,8 @@ recComplement inf =  filterAttrs []
       where notPKOnly k =   if S.unions (relOutputSet  <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
-
-    
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
-      | L.isSubsequenceOf (_relOrigin <$> rel) (_kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | S.isSubsetOf (S.fromList $ _relOrigin <$> rel) (S.fromList $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)

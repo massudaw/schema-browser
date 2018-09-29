@@ -139,13 +139,14 @@ getFrom table allFields b = do
   inf <- askInf
   let
     m = tableMeta table
-    comp = recComplement inf m b allFields
+    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m  
+    comp = recComplement inf m allFields pred b 
   join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
 
     ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable mempty (tableMeta table)
-    let n = (\c -> recComplement inf m c allFields) =<< new
+    let n = (recComplement inf m  allFields pred ) =<< new
         new = G.lookup (G.getIndex m b) reso
     (maybe (return $ diff b =<< new) (\comp -> do
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
@@ -158,7 +159,7 @@ getFrom table allFields b = do
       traverse (\i -> do
         liftIO . putStrLn $ "Old\n" <> show b 
         liftIO . putStrLn $ "Result\n" <> (maybe ("") show result)
-        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (\c -> recComplement inf m c allFields) =<<  (applyIfChange b =<< result )
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<<  (applyIfChange b =<< result )
       return result) n)) comp
 
 
@@ -353,7 +354,7 @@ tableLoader' table  page fixed tbf = do
     let preresult =  mapResult <$> res
         mapResult i = do 
             case G.lookup (G.getIndex (tableMeta table) i) reso of 
-                Just orig -> case recComplement inf (tableMeta table) orig tbf  of 
+                Just orig -> case recComplement inf (tableMeta table) tbf  predicate orig of 
                     Just _ ->  Left i
                     Nothing -> Right orig
                 Nothing -> Left i 
@@ -409,7 +410,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
              -- # removeAlready fetched results
              diffNew i
                 = case G.lookup (G.getIndex m i) reso of
-                   Just v -> case recComplement inf m v tbf of
+                   Just v -> case recComplement inf m tbf fixed v of
                       Just _ -> patchRowM' m v i
                       Nothing -> Nothing
                    Nothing -> Just $ createRow' m  i
@@ -426,7 +427,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
       Just (sq,idx) ->
         if (sq > G.size reso)
         then case  M.lookup pageidx idx of
-          Just v -> case recComplement inf (tableMeta table) (fst v) tbf of
+          Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v)of
             Just i -> do
               liftIO $ putStrLn $ "Load complement: " <> (ident . renderTable $ i)
               readNew sq i
@@ -450,7 +451,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 match (AndColl l) = product $ match <$> l
                 match (OrColl l) =  sum $ match <$> l
                 match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
-            complements = catMaybes $ (\i -> recComplement inf (tableMeta table) i tbf) <$> G.toList reso
+            complements = catMaybes $ (recComplement inf (tableMeta table) tbf fixed ) <$> G.toList reso
             size = G.size reso
         if fixed /= mempty && isComplete fixed == size && size /= 0
            then
