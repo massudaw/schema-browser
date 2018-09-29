@@ -14,6 +14,7 @@ import TP.View
 import qualified Data.Interval as Interval
 import qualified Data.HashMap.Strict as HM
 import NonEmpty (NonEmpty)
+import qualified NonEmpty as Non
 import Control.Concurrent
 import Utils
 import Data.Functor.Identity
@@ -117,7 +118,7 @@ agendaDef inf
                   ,("field", TB1 efield )] <> convField i
             proj r = ( projf r <$> (F.toList efields))
 
-          returnA -< (txt $ T.pack $ scolor ,table,fmap TB1 efields,proj )
+          returnA -< (txt $ T.pack $ scolor ,table,fmap TB1 (Non.fromList. F.toList $ efields),proj )
 
 
 calendarView

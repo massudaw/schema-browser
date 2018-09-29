@@ -23,6 +23,7 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Time
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Debug.Trace
 import Query
 import Reactive.Threepenny hiding (apply)
@@ -178,7 +179,7 @@ type RelOperations b
 operationTree :: (a -> a -> TBOperation a) -> FTB a -> FTB a -> FTB (TBOperation a)
 operationTree f (TB1 i) (TB1 j) = TB1 (f i j)
 operationTree f (LeftTB1 i) (LeftTB1 j ) = LeftTB1 $ (liftA2 (operationTree f) i j) <|> (fmap TBInsert <$> j)
-operationTree f (ArrayTB1 i) (ArrayTB1 j) = (\i a -> ArrayTB1 . Non.fromList $ F.toList i ++ a)  (Non.zipWith (operationTree f) i j)  (fmap TBInsert <$> Non.drop (Non.length i) j)
+operationTree f (ArrayTB1 i) (ArrayTB1 j) = (\i a -> ArrayTB1 . NonS.fromList $ F.toList i ++ F.toList a)  (NonS.zipWith (operationTree f) i j)  (fmap TBInsert <$> NonS.drop (NonS.length i) j)
 
 tbEditRef :: Show b => RelOperations b -> KVMetadata Key ->  FTB b -> FTB b -> TransactionM (FTB b)
 tbEditRef fun@(funi,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse (fmap funo  . (interp <=< recheck) . fmap funi) $operationTree comparison v1 v2)

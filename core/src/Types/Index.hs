@@ -78,9 +78,11 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Time
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Prelude hiding (filter, lookup)
 import Safe
 import Debug.Trace
+import qualified Data.Sequence as S
 -- import Step.Host
 import Types.Common
 import Types.Primitive
@@ -95,16 +97,16 @@ cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
-getUnique :: (Show k ,Ord k) => [k] -> TBData k a -> TBIndex  a
-getUnique ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn  (Set.fromList ks) $ v
+getUnique :: (NFData a , Show k ,Ord k) => [k] -> TBData k a -> TBIndex  a
+getUnique ks = Idex . fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn  (Set.fromList ks) 
 
-getUniqueM :: (Show k, Ord k) => [k] -> TBData k a -> Maybe (TBIndex a)
+getUniqueM :: (NFData a , Show k, Ord k) => [k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
 
-getIndex :: (Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
-getIndex m  = getUnique  (_kvpk m)
+getIndex :: (NFData a , Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
+getIndex m  = getUnique  (_kvpk m) 
 
-getBounds :: (Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
+getBounds :: (NFData a , Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
 getBounds m [] = (ER.NegInf,False) `interval` (ER.PosInf,False)
 getBounds m ls = (ER.Finite i,True) `interval` (ER.Finite j,False)
   where i = getIndex m (head ls)
@@ -117,10 +119,10 @@ notOptionalM (Idex m) =
 notOptional :: Show a => TBIndex a -> TBIndex a
 notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
-tbpredM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
+tbpredM :: (NFData a , Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
 tbpredM m = notOptionalM . getUnique  (_kvpk m)
 
-tbpred :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
+tbpred :: (NFData a , Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
 tbpred m = notOptional . getIndex m
 
 instance Affine a => Affine [a] where
@@ -184,7 +186,6 @@ instance Semigroup DiffShowable where
       appendDShowable (DSDiffTime l) (DSDiffTime j) = DSDiffTime $ l + j
       appendDShowable (DSPosition x) (DSPosition y) = DSPosition $ x <> y
       appendDShowable a b = error ("append " <> show (a, b))
-      {-# INLINE appendDShowable #-}
 
 class Affine f where
   type Tangent f
@@ -205,12 +206,11 @@ instance Affine DiffString where
       diffStr bs [] = ord <$> bs
       diffStr [] bs = ord <$> bs
       diffStr [] [] = []
-  {-# INLINE subtraction #-}
 
 instance Affine Position where
   type Tangent Position = DiffPosition
-  subtraction (Position (x,y,z)) (Position (a,b,c)) = DiffPosition3D (a-x,b-y,c-z)
-  subtraction (Position2D (x,y)) (Position2D (a,b)) = DiffPosition2D (a-x,b-y)
+  subtraction (Position  x y z ) (Position  a b c ) = DiffPosition3D (a-x,b-y,c-z)
+  subtraction (Position2D  x y ) (Position2D  a b ) = DiffPosition2D (a-x,b-y)
 
 instance Affine Int where
   type Tangent Int = Int
@@ -229,8 +229,6 @@ instance Affine Showable where
       diffS (STime (SDate i )) (STime (SDate j)) = DSDays (diffDays j i)
       diffS (SGeo(SPosition s )) (SGeo(SPosition b)) = DSPosition $ subtraction s b
       diffS a b  = error (show ("Diffs",a,b))
-      {-# INLINE diffS #-}
-  {-# INLINE subtraction #-}
 
 instance Positive DiffShowable where
   notneg = notNeg
@@ -242,11 +240,10 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
   data Node (TBIndex v) = TBIndexNode {unTBIndexNode :: Interval [v] } deriving (Eq,Ord,Show)
   consistent i j =
       case (i,j) of
-        (Right (Idex i) ,Right (Idex j)) -> F.foldl' (&&) True (zipWith consistent  (Right <$> i) (Right <$> j))
+        (Right (Idex i) ,Right (Idex j)) -> F.foldl' (&&) True (zipWith (\i j -> consistent (Right i) (Right j)) i j)
         (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> not $ Interval.null $ i `Interval.intersection` j
         (Right i@(Idex _ ) ,Left (TBIndexNode j)) ->not $ Interval.null $ unTBIndexNode (bound i) `Interval.intersection` j
         (Left (TBIndexNode i) ,Right j@(Idex _)) -> not $ Interval.null $ unTBIndexNode (bound j) `Interval.intersection` i
-  {-# INLINE consistent #-}
 
   -- This limit to 100 the number of index fields to avoid infinite lists
   origin = TBIndexNode Interval.empty
@@ -290,7 +287,6 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
   penalty (TBIndexNode i ) (TBIndexNode j)
     = (fmap (fmap notneg) $ subtraction (fst (lowerBound' j  )) (fst $ lowerBound' i))
     <> (fmap (fmap notneg) $ subtraction (fst $ upperBound' i  ) (fst $ upperBound' j))
-  {-# INLINE penalty #-}
 
 mergeInterval f i j =  (f (lowerBound i)  (lowerBound j),True) `interval` (f (upperBound i) (upperBound j),True)
 
@@ -301,6 +297,9 @@ instance Applicative ER.Extended where
   ER.Finite i <*>  ER.Finite j = ER.Finite $ i j
   i <*> ER.PosInf = ER.PosInf
   i <*> ER.NegInf = ER.NegInf
+  ER.PosInf <*> i = ER.PosInf
+  ER.NegInf<*> i = ER.NegInf
+
 
 instance Predicates (TBIndex  a )  => Semigroup (G.GiST (TBIndex  a)  b) where
   i <> j
@@ -374,7 +373,7 @@ indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
   where
     recPred (TB1 i ) = TipPath <$> i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = error (show ("IndexPredIx",i))
 indexPredIx (n@(RelAccess nk nt ) ,eq) r
   = case  relLookup nk r of
@@ -384,7 +383,7 @@ indexPredIx (n@(RelAccess nk nt ) ,eq) r
     allRefs (TBRef (i,v))= Many . pure <$> (indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v)
     recPred (TB1 i ) = TipPath <$> allRefs i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = error (show ("IndexPredIx",i))
 -- indexPredIx  (a,i) r | traceShow (a,i,indexField a r) False = undefined
 indexPredIx (a@(Inline key),eqs) r =
@@ -395,7 +394,7 @@ indexPredIx (a@(Inline key),eqs) r =
   where
     Just (k,eq) = L.find ((==key).fst) eqs
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i  =  if match eq (Right i) then  Just (TipPath (eq,i)) else Nothing
 indexPredIx i v= error (show ("IndexPredIx",i,v))
 
@@ -452,59 +451,46 @@ class Range v where
 
 instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (TB1 i)  =  fmap TB1 $ pureR i
-  pureR (ArrayTB1 (is Non.:| xs)) = F.foldl' appendRI  (pureR is) (fmap pureR xs)
+  pureR (ArrayTB1 xs) =  F.foldl1 appendRI  inters
+      where inters = pureR <$> F.toList xs
   pureR (IntervalTB1 is) =  is
   pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
-  {-# INLINE pureR #-}
   appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
-  {-# INLINE appendR#-}
 
 
 instance Range Showable where
   pureR i = i `cinterval` i
-  {-# INLINE pureR #-}
   appendR (SGeo (SPosition i)) (SGeo (SPosition j)) =
     fmap (SGeo . SPosition) $ mergeP i j
     where
-      mergeP (Position2D (i, j)) (Position2D (l, m)) =
-        Position2D (min i l, min j m) `cinterval` Position2D (max i l, max j m)
-      mergeP (Position (i, j, k)) (Position (l, m, n)) =
-        Position (min i l, min j m, min k n) `cinterval`
-        Position (max i l, max j m, max k n)
-      {-# INLINE mergeP #-}
+      mergeP (Position2D  i  j ) (Position2D  l  m ) =
+        Position2D (min i l)  (min j m) `cinterval` Position2D (max i l)(max j m)
+      mergeP (Position  i  j  k) (Position  l  m  n) =
+        Position (min i l)(min j m)(min k n) `cinterval`
+        Position (max i l)(max j m)(max k n)
   appendR i j = min i j `cinterval` max i j
-  {-# INLINE appendR #-}
 
-appendRA ::
-     (Ord v, Show v, Range v) => Interval [v] -> Interval [v] -> Interval [v]
-appendRA i j =
-  (maybe
-     (min (lowerBound' j) (lowerBound' i))
-     ((, False) . ER.Finite . fmap (justError "" . unFin . fst . lowerBound'))
-     (liftA2
-        (zipWith appendR)
-        (unFin $ fst $ lowerBound' i)
-        (unFin $ fst $ lowerBound' j))) `interval`
-  (maybe
-     (max (upperBound' i) (upperBound' j))
-     ((, False) . ER.Finite . fmap (justError "" . unFin . fst . upperBound'))
-     (liftA2
-        (zipWith appendR)
-        (unFin $ fst $ upperBound' i)
-        (unFin $ fst $ upperBound' j)))
+ 
+upperRI , lowerRI:: (Ord v, Range v) => [ (Interval v)] -> (ER.Extended   v)
+upperRI i  =
+  maybe (ER.NegInf ) ER.Finite $ L.foldl1'  (\ i j -> join $ unFin . fst . lowerBound' <$> liftA2 appendR i j ) 
+   (unFin . fst . lowerBound' <$> i)
+lowerRI i  =
+  maybe (ER.NegInf ) ER.Finite $ L.foldl1'  (\ i j -> join $ unFin . fst . upperBound' <$> liftA2 appendR i j ) 
+   (unFin . fst . upperBound' <$> i)
+    
+   
 
-{-# INLINE appendRA #-}
+
 appendRI :: (Ord v, Range v) => Interval v -> Interval v -> Interval v
 appendRI i j =
-  maybe
-    (min (lowerBound' j) (lowerBound' i))
+  maybe  (ER.NegInf,True)
     lowerBound'
     (liftA2 appendR (unFin $ fst $ lowerBound' i) (unFin $ fst $ lowerBound' j)) `interval`
-  (maybe
-     (max (upperBound' i) (upperBound' j))
+  maybe
+     (ER.PosInf,True)
      upperBound'
-     (liftA2 appendR (unFin $ fst $ upperBound' i) (unFin $ fst $ upperBound' j)))
-{-# INLINE appendRI #-}
+     (liftA2 appendR (unFin $ fst $ upperBound' i) (unFin $ fst $ upperBound' j))
 
 instance ( Range v
          , Positive (Tangent v)
@@ -515,7 +501,7 @@ instance ( Range v
          , Affine v
          ) =>
          Predicates (FTB v) where
-  data Node (FTB v) = FTBNode (Interval.Interval v)
+  data Node (FTB v) = FTBNode { unFTBNode :: Interval.Interval v}
                   deriving (Eq, Ord, Show)
   type Penalty (FTB v) = ER.Extended (Tangent v)
   type Query (FTB v) = AccessOp v
@@ -531,20 +517,18 @@ instance ( Range v
   consistent (Left i) (Right j) = consistent (Right j) (Left i)
   consistent (Right i) (Right j) = cons i j
     where
-      cons (TB1 i) (TB1 j) = i == j
-      cons (IntervalTB1 i) (IntervalTB1 j) =
+      cons (TB1 i) (TB1 j) = {-# SCC "tt" #-}i == j
+      cons j@(TB1 _) (IntervalTB1 i) = {-# SCC "ti" #-}j `Interval.member` i
+      cons (IntervalTB1 i) j@(TB1 _) = {-# SCC "it" #-}j `Interval.member` i
+      cons (IntervalTB1 i) (IntervalTB1 j) = {-# SCC "ii" #-}
         not $ Interval.null $ j `Interval.intersection` i
-      cons j@(TB1 _) (IntervalTB1 i) = j `Interval.member` i
-      cons (IntervalTB1 i) j@(TB1 _) = j `Interval.member` i
-      cons (ArrayTB1 i) (ArrayTB1 j) =
-        not $
-        Set.null $
-        Set.intersection (Set.fromList (F.toList i)) (Set.fromList (F.toList j))
-      cons (ArrayTB1 i) j = F.any (flip cons j) i
-      cons i (ArrayTB1 j) = F.any (cons i) j
-      cons (LeftTB1 i) (LeftTB1 j) = fromMaybe True $ liftA2 cons j i
-      cons (LeftTB1 i) j = fromMaybe True $ (flip cons j) <$> i
-      cons i (LeftTB1 j) = fromMaybe True $(cons i) <$> j
+      cons (LeftTB1 i) (LeftTB1 j) = {-# SCC "ll" #-} fromMaybe True $ liftA2 cons j i
+      cons (LeftTB1 i) j ={-# SCC "l_" #-}  maybe True (`cons` j) i
+      cons i (LeftTB1 j) ={-# SCC "_l" #-} maybe True (cons i) j
+      -- cons (ArrayTB1 i) (ArrayTB1 j) = {-# SCC "aa" #-}  not . Set.null $ Set.intersection (Set.fromList (F.toList i)) (Set.fromList (F.toList j))
+      cons (ArrayTB1 i)  j@(TB1 _ ) = {-# SCC "a_" #-}  F.any (`cons` j) i
+      cons i@(TB1 _ ) (ArrayTB1 j) = {-# SCC "_a" #-} F.any (cons i) j
+      cons i j = i == j 
       cons i j = error (show ("rr", i, j))
   match i (Left (FTBNode j)) = mal i j
     where
@@ -634,18 +618,15 @@ instance ( Range v
   match x z = error ("no match = " <> show (x, z))
   origin = FTBNode Interval.empty
   bound i = FTBNode $ fmap unTB1 $ pureR i
-  {-# INLINE bound #-}
-  merge (FTBNode i) (FTBNode j) = FTBNode $ appendRI i j
-  {-# INLINE merge #-}
+  merge (FTBNode i) (FTBNode j) = FTBNode $ Interval.hull i j
   penalty ((FTBNode i)) ((FTBNode j)) =
     (fmap notneg $ subtraction (fst (lowerBound' j)) (fst $ lowerBound' i)) <>
     (fmap notneg $ subtraction (fst $ upperBound' i) (fst $ upperBound' j))
-  {-# INLINE penalty #-}
 
 alterWith f k v
   = case lookup k v of
-      Just i -> G.insert ( f (Just i) ,k) indexParam v
-      Nothing -> G.insert ( f Nothing ,k) indexParam v
+      Just i -> G.insert (f (Just i) ,k) indexParam v
+      Nothing -> G.insert (f Nothing ,k) indexParam v
 
 -- Higher Level operations
 fromList pred = foldl' acc G.empty

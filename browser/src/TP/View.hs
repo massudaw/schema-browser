@@ -61,19 +61,18 @@ instance A.ToJSON LineString where
     toJSON (LineString l ) = A.toJSON l
 
 instance A.ToJSON Position where
-    toJSON (Position (y,x,z)) =
+    toJSON (Position  y x z ) =
         A.Array $
         V.fromList
-            [ A.String $ T.pack (show x)
-            , A.String $ T.pack (show y)
-            , A.String $ T.pack (show z)]
-    toJSON (Position2D (y,x)) =
+            [ A.Number (realToFrac x)
+            , A.Number (realToFrac y)
+            , A.Number (realToFrac z)]
+    toJSON (Position2D  y x ) =
         A.Array $
         V.fromList
-            [ A.String $ T.pack (show x)
-            , A.String $ T.pack (show y)
-            , A.String $ T.pack (show 0)
-            ]
+            [ A.Number (realToFrac x)
+            , A.Number (realToFrac y)
+            , A.Number 0]
 
 instance A.ToJSON SGeo where
     toJSON (SMultiGeom l) = A.toJSON l
@@ -188,9 +187,9 @@ makeInterval nty (sw,ne) = IntervalTB1 $ Interval.interval (makePos nty sw) (mak
 
 makePos :: Prim KPrim (T.Text,T.Text) -> [Double] -> (Extended (FTB Showable),Bool)
 makePos (AtomicPrim (PGeom 3 _ )) [b,a,z] =
-    (Interval.Finite $ pos (Position (a, b,z)), True)
+    (Interval.Finite $ pos (Position  a  b z ), True)
 makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
-    (Interval.Finite $ pos (Position2D (a, b)), True)
+    (Interval.Finite $ pos (Position2D  a  b ), True)
 makePos a i = error (show (a,i))
 
 writePK' :: T.Text -> [(T.Text ,FTB Showable )]-> FTB Showable -> T.Text
@@ -259,8 +258,8 @@ currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i) (fmap convertPoint $ G.unFin $ fst $lowerBound' i)
   where
-     convertPoint (SGeo (SPosition (Position (y,x,z)) )) = [x,y,z]
-     convertPoint (SGeo (SPosition (Position2D (y,x)) )) = [x,y,0]
+     convertPoint (SGeo (SPosition (Position  y x z ) )) = [x,y,z]
+     convertPoint (SGeo (SPosition (Position2D  y x ) )) = [x,y,0]
 
 execTable project =  runIdentity .evalEnv project . (,[]) . Atom .  mapKey' keyValue
 

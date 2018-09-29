@@ -28,6 +28,7 @@ import TP.Chart
 import Control.Lens (_1,_2,(^.))
 import TP.Map
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Step.Common
 import Data.Time
 import qualified Types.Index as G
@@ -171,16 +172,16 @@ setup smvar bstate plugList w = void $ do
                     refId <- primEditor (pure Nothing )
                     button <- primEditor (pure (Just ()))
                     traverseUI (traverse (ui . transaction inf . revertModification)) (facts (triding refId) <# triding button)
-                    let pred = [(keyRef "user_name",Left (txt (username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                    let pred = [(keyRef "user_name",Left (txt (username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals))] <> [(keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  NonS.fromList tables,Flip (AnyOp Equals)))]
                     dash <-  metaTable inf "modification_table"  pred
                     return  [label,getElement refId,getElement button ,dash]
               "Clients" -> do
-                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
-                let pred = [(RelAccess (keyRef "selection") $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess (keyRef "selection" ) $ RelAccess (keyRef "selection") ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (F.toList tables),IntersectOp)) ]
+                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  NonS.fromList tables,Flip (AnyOp Equals)))]
+                let pred = [(RelAccess (keyRef "selection") $ keyRef "schema",Left (int (schemaId inf),Equals) )] <> [ (RelAccess (keyRef "selection" ) $ RelAccess (keyRef "selection") ( keyRef "table"),Left (ArrayTB1 $ txt . rawName <$>  NonS.fromList (F.toList tables),IntersectOp)) ]
                 clients <- metaTable inf "clients" pred
                 return [clients]
               "Exception" -> do
-                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList tables,Flip (AnyOp Equals)))]
+                let pred = [(keyRef "schema",Left (schId,Equals) ) ] <>  [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  NonS.fromList tables,Flip (AnyOp Equals)))]
                 dash <- metaTable inf "plugin_exception" pred
                 return [dash]
               i -> error (show i)
@@ -377,15 +378,11 @@ withTable s m w =
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         table = lookTable inf m
     lift $ mapM print (rawFKS table)
-    -- # db <- transactionNoLog  inf $ selectFrom m Nothing pred
-    -- i2 <- currentValue (facts $ collectionTid db)
-    -- addClientLogin inf
+    db <- transactionNoLog  inf $ selectFrom m Nothing pred
+    i2 <- currentValue (facts $ collectionTid db)
     let
-      debug i = show <$> G.toList (primary i)
-      -- debug2 i = show <$> G.projectIndex w i
-    -- liftIO $ putStrLn (unlines $ debug i2)
-    -- liftIO $ putStrLn (unlines $ debug2 i2)
-    --
+      debug i =  (show (rawPK table,G.keys (primary i )) : (show  <$> M.toList (secondary i)))
+    liftIO $ putStrLn (unlines  $ debug i2)
     return ()
                )
 
@@ -415,6 +412,8 @@ withInf plugs s v  = do
   smvar <- createVar
   let
     amap = authMap
+  (inf,fin) <- runDynamic $ keyTables smvar  ("metadata",postgresUser) amap
+  (inf,fin) <- runDynamic $ keyTables smvar  ("code",postgresUser) amap
   (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap
   v inf
 

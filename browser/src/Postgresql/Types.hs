@@ -10,6 +10,7 @@ import qualified Data.Vector as V
 import Data.Int
 import Data.Word
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Data.Time
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
@@ -91,19 +92,19 @@ postgresLiftPrimConv' =
                    , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
              ,((Primitive [] (AtomicPrim (PGeom 2 $ PLineString )), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPosition ))) )
-                 , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
+                 , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (NonS.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
              ,((Primitive [] (AtomicPrim (PGeom 2 $ PPolygon )), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PLineString ))) )
-                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
+                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (NonS.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
                    , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i)))
 
              ,((Primitive [] (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPolygon ))))
-                 , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
+                 , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (NonS.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
 
              ,((Primitive [] (AtomicPrim (PGeom 3 $ PLineString )), (Primitive [KArray] (AtomicPrim (PGeom 3 $ PPosition ))) )
-                 , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
+                 , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (NonS.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))]
 
 postgresLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (Text,Text)))

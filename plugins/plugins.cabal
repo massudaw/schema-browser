@@ -20,7 +20,7 @@ executable schema-browser
   ld-options:  -fuse-ld=gold
   main-is:  Main.hs
 
-  ghc-options: -O   -threaded -rtsopts
+  ghc-options: -O   -threaded -rtsopts -eventlog
 
   hs-source-dirs: src
   other-modules:

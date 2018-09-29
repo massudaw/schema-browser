@@ -80,10 +80,10 @@ chartDef inf
         proj r = do
           pks <- pksM
           values <- mapM (\(SText i)->  unSOptional =<< recLookupInf inf tname (indexerRel i) r) mfields
-          let fields = fmap fromJust $ Non.filter isJust $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
+          let fields = fmap fromJust $ filter isJust $ F.toList $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
           return $ A.toJSON <$> HM.fromList
                     [("value" :: Text,ArrayTB1 values)
-                    ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                    ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> fields))
                     ,("color" , TB1 color)
                     ]
       returnA -< ("#" <> renderPrim color ,lookTable inf tname,F.toList $ fmap TB1 mfields,(fmap TB1 . F.toList <$> evfields,fmap TB1 . F.toList <$> gfields,TB1 chart),proj )

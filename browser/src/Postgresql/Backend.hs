@@ -294,7 +294,7 @@ selectAll meta m offset i  j k st = do
 
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )
 
-tSize = 400
+tSize = 100
 
 
 postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll getRow mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules

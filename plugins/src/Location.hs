@@ -66,7 +66,7 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
                 loc = dec !> "results" !!> 0 !> "geometry" !> "location"
                 bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
                 viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
-                getPos l = Position <$> liftA2 (\(Number i) (Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
+                getPos l = liftA2 (\(Number i) (Number j)-> Position (realToFrac i )(realToFrac j )0 ) (l !> "lng" )( l  !> "lat" )
             p <- MaybeT $ return $ getPos loc
             b <- MaybeT $ return $ case (fmap (IntervalTB1 . fmap pos) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast")), fmap (IntervalTB1 . fmap pos) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast"))) of
                                         (i@(Just _), _ ) -> i

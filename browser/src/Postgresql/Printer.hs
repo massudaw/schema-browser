@@ -40,7 +40,7 @@ import qualified Data.Set as S
 import Data.String
 import qualified Data.Text as T
 import Data.Text (Text)
-import NonEmpty (NonEmpty(..))
+import Data.Sequence.NonEmpty (NonEmptySeq(..))
 import Postgresql.Sql.Printer
 import Postgresql.Sql.Types
 import Postgresql.Types

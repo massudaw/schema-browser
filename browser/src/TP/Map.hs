@@ -69,23 +69,8 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     let
       chooser  = do
         mapOpen <- liftIO getCurrentTime
-        filterInp <- UI.input
-        filterInpT <- element filterInp # sourceT "change" UI.valueFFI ""
         let
-          parseMany t l =  parseInp t <$> unIntercalate ('&'==) l
-          parseInp t i
-            | not (L.null j ) && T.pack tnew == tableName t  =    (,tail r ) <$> liftRelM inf (tableName t) ( nest (unIntercalate ('.'==) (tail j)))
-            | not $ L.null r =  (,tail r ) <$> liftRelM inf (tableName t) ( nest (unIntercalate ('.'==) l))
-            | otherwise = Nothing
-            where
-              (l,r) = break(=='=') i
-              (tnew,j) = break (=='|') l
-              nest [i] = keyRef (T.pack i)
-              nest (i:xs) = RelAccess (keyRef (T.pack i)) ( nest xs)
-          filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable ) (recLookup k row)
-          filtering tb res = (\t -> filter (\row -> all (`filteringPred` row) (catMaybes t))) <$> fmap (parseMany tb ) (triding filterInpT ) <*> fmap G.toList res
         map <-UI.div
-
         (eselg,hselg) <- ui newEvent
         start <- ui$stepper Nothing (filterE (maybe False (not .snd.fst)) eselg)
         let render = maybe "" (\((t,_),i) -> show $ G.getIndex (tableMeta t) i)
@@ -106,7 +91,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             evc <- eventClick innermap
             pb <- currentValue (facts positionT)
             editor <- UI.div
-            element map # set children [filterInp,innermap,editor]
+            element map # set children [innermap,editor]
             mapCreate  innermap pb
             move <- moveend innermap
             onEvent  move (liftIO . h. Just)
@@ -115,7 +100,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             fin <- mapM (\(_,tb,fields,efields,proj) -> do
               let pcal =  liftA2 (,) positionT  mapT
                   tname = tableName tb
-              traverseUI (\(positionB,calT)-> do
+              traverseUIInt (\(positionB,calT)-> do
                 let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                     fieldKey (TB1 (SText v))=  v
                 reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
@@ -127,8 +112,8 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                 let tdi = tidings tdib (fmap snd <$> evsel)
                     table = lookTable inf tname
                 el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
-                traverseUI (\i ->
-                  createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) (filtering tb v)
+                traverseUIInt (\i ->
+                  createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
                 stat <- UI.div  # sinkDiff text (show . M.lookup pred . unIndexMetadata <$>   (reftb ^. _1))
                 edit <- UI.div # set children [getElement el] # sink UI.style  (noneShow . isJust <$> tdib)
                 UI.div # set children [stat,edit]
@@ -138,7 +123,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             element editor  # sink children (facts els)
             return ()
         let calInp = (\i -> filter (flip L.elem (F.toList i) .  (^. _2)) dashes) <$> sel
-        onFFI "$(document).ready((%1))" (evalUI map $ traverseUI calFun calInp)
+        onFFI "$(document).ready((%1))" (evalUI map $ traverseUIInt calFun calInp)
         return [map]
 
 

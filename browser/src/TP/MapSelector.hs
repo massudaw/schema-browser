@@ -9,6 +9,7 @@ module TP.MapSelector (mapWidgetMeta,mapSelector,mapCreate,moveend,eventClick,cr
 
 import Step.Host
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Environment
 import Data.String
 import Control.Arrow
@@ -61,6 +62,7 @@ import qualified Data.HashMap.Strict as HM
 
 removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
 createBounds el tname evs= runFunction $ ffi "createBounds(%1,%3,%2)" el evs tname
+
 createLayers el tname evs= runFunction $ ffi "createLayer(%1,%3,%2)" el evs tname
 mapCreate el Nothing = runFunction $ ffi "createMap(%1,null,null,null)" el
 mapCreate el (Just (ne,sw)) = runFunction $ ffi "createMap(%1,%2,%3,null)" el  (show ne) (show sw)
@@ -109,7 +111,7 @@ mapDef inf
                                ]))
                           ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
         proj r = flip projf  r <$> zip (F.toList efields) (F.toList features)
-      returnA -< ("#" <> renderPrim color ,table,fmap TB1 efields,fmap TB1 <$> evfields,proj )
+      returnA -< ("#" <> renderPrim color ,table,fmap TB1 ( Non.fromList . F.toList $ efields),fmap TB1 . Non.fromList . F.toList <$> evfields,proj )
 
 
 mapWidgetMeta  inf =  do
@@ -185,14 +187,14 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
         fin <- (\(_,tb,fields,efields,proj) -> do
           let
             tname = tableName tb
-          traverseUI (\(predi,(positionB,calT))-> do
+          traverseUIInt (\(predi,(positionB,calT))-> do
             let pred = WherePredicate $ AndColl $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT) : maybeToList (unPred <$> predi)
                 unPred (WherePredicate e)  =e
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
             let v =  primary <$> reftb ^. _2
             traverseUI (\i -> do
-              createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) v
+              createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
             ) $ liftA2 (,) pred pcal

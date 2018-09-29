@@ -10,6 +10,7 @@ import Types.Index as G
 import Control.Monad.RWS
 import Types.Patch
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Utils
 
 import qualified Data.List as L
@@ -72,7 +73,7 @@ data Universe u n t pk k
 runEnv  r  e  =  (\(_,_,i) -> i) <$> runRWST   ( (runKleisli $ dynP r ) ()) e ()
 evalEnv  r  e  =  (\(i,_,_) -> i) <$> runRWST   ( (runKleisli $ dynP r ) ()) e ()
 
-indexTID (PIdIdx  ix )  (ArrayTB1 l) = l Non.!! ix
+indexTID (PIdIdx  ix )  (ArrayTB1 l) = l NonS.!! ix
 indexTID PIdOpt  (LeftTB1 l) = justError "no opt value" l
 
 -- indexTIDM (PIdIdx  ix )  (ArrayTB1 l) = l `Non.atMay` ix
@@ -113,12 +114,12 @@ withReaderMap
   :: (Show w,Show t1,Show t,Monad m, Monoid w) =>
     (Int -> t3 -> w)
      -> (Int -> t2 -> t1)
-     -> (t -> Non.NonEmpty t)
+     -> (t -> NonS.NonEmptySeq t)
      -> RWST (t, t1) t3 s m a
-     -> RWST (t, t2) w s m (Non.NonEmpty a)
+     -> RWST (t, t2) w s m (NonS.NonEmptySeq a)
 withReaderMap f h g  a= do
   (env ,_) <- ask
-  mapM (\ix  -> withRWST (\(i,p) j -> ((g i Non.!! ix,h ix p) ,j)) .  mapRWST (fmap (\(r,s,w) -> (r,s, f ix w )))  $ a)  (Non.fromList [0..Non.length (g env) - 1])
+  mapM (\ix  -> withRWST (\(i,p) j -> ((g i NonS.!! ix,h ix p) ,j)) .  mapRWST (fmap (\(r,s,w) -> (r,s, f ix w )))  $ a)  (NonS.fromList [0..NonS.length (g env) - 1])
 
 
 withReaderT3
@@ -164,8 +165,8 @@ iftb s   (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath s <$> tidxi,NestedPat
 
 imap :: (Show (Index b),Show b,Monad m) =>
        PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i a
-       -> PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i (Non.NonEmpty a)
-imap (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath PIdTraverse <$> tidxi, NestedPath PIdTraverse <$> tidxo) (Kleisli (\i -> withReaderMap (\ix -> fmap (PIdx ix . Just))  (\ix -> catMaybes . fmap (unliftTID (PIdIdx ix))) (traverse  unArray) (op i) ))
+       -> PluginM (PathIndex PathTID v)  (Atom (FTB b))  m i (NonS.NonEmptySeq a)
+imap (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath PIdTraverse <$> tidxi, NestedPath PIdTraverse <$> tidxo) (Kleisli (\i -> withReaderMap (\ix -> fmap (PIdx ix . Just))  (\ix -> catMaybes . fmap (unliftTID (PIdIdx ix))) (traverse  (NonS.fromList . F.toList . unArray)) (op i) ))
 
 
 iopt :: (Show b,Monad m )=>

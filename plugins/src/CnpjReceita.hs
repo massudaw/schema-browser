@@ -3,7 +3,7 @@ module CnpjReceita (getCaptchaCpf,getCaptchaCnpj,getCnpjForm,convertCPF,initSess
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
 
-import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 
 import OpenSSL.Session (context)
 import Control.Category
@@ -101,7 +101,7 @@ convertHtml out =
             cna  =  attr
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
             fk rel i  = FKT (kvlist i )rel
-            afk rel i l = fk rel i  . LeftTB1 $  ArrayTB1 . Non.fromList <$> l
+            afk rel i l = fk rel i  . LeftTB1 $  ArrayTB1 . NonS.fromList <$> l
             tb attr = TB1 $ kvlist attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
@@ -120,7 +120,7 @@ convertHtml out =
                               ,attr "uf" (idx "UF")])
                        ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just pcnae)]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [Rel "atividades_secundarias" (AnyOp Equals) "id"] [own "atividades_secundarias" (LeftTB1 $ ArrayTB1 . Non.fromList . fmap fst <$> nonEmpty scnae)]
+                       ,afk [Rel "atividades_secundarias" (AnyOp Equals) "id"] [own "atividades_secundarias" (LeftTB1 $ ArrayTB1 . NonS.fromList . fmap fst <$> nonEmpty scnae)]
                                   (nonEmpty $ (\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> filter ((/=txt "Não informada").snd) scnae)]
         in Just  attrs
 

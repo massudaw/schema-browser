@@ -83,6 +83,7 @@ import Data.Traversable (sequenceA, traverse)
 import Data.Tuple
 import GHC.Generics
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import NonEmpty (NonEmpty)
 import Types.Common
 import Types.Primitive
@@ -664,7 +665,7 @@ firstPatchAttr f (PFK rel k b) =
   PFK (fmap (fmap f) rel) (fmap (firstPatchAttr f) k) (fmap (firstPatch f) $ b)
 
 instance (Ord k ,Compact v,Show k ,Show v) => Compact (PValue k v) where
-  compact  l = [foldl1 merge  l]
+  compact  l = [F.foldl' merge  (head l) (tail l)]
     where 
       merge (PPrim i) (PPrim j) = head $ PPrim <$> compact [i ,j]
       merge (PRef i) (PRef j) = head $ PRef <$> compact [i ,j]
@@ -692,17 +693,6 @@ compactPatches i =
   catMaybes . fmap (fmap (uncurry rebuild). traverse (patchSetC . compact)). groupSplit2 index content . concat . fmap expandPSet $
   i
   where
-    pathProj p@(PInter _ i) = Just p
-    pathProj i@(PAtom _) = Just i
-    -- pathProj i = error (show i)
-    -- projectors i = error (show i)
-    recover (PIdIdx i, j) = Just $ PIdx i (compactP j)
-    recover (PIdOpt, j) = Just $ POpt (compactP j)
-    recover (PIdInter i, j) = patchSet (catMaybes j)
-    recover (PIdAtom, j) =
-      patchSet (fmap PAtom $ compact $ fmap unPAtom $catMaybes j)
-    -- recover i = error (show i)
-    compactP j = compactPatches =<< nonEmpty (catMaybes j)
     expandPSet (PatchSet l) = F.toList l
     expandPSet p = [p]
 
@@ -876,9 +866,9 @@ diffFTB p d (ArrayTB1 i) (ArrayTB1 j) =
   zipWith
     (\i -> fmap (PIdx i))
     [0 ..]
-    (F.toList (Non.zipWith (\i j -> fmap Just $ diffFTB p d i j) i j) <>
-     (const (Just Nothing) <$> Non.drop (Non.length j) i) <>
-     (Just . Just . patchFTB p <$> Non.drop (Non.length i) j))
+    (F.toList $ (NonS.toSequence $ NonS.zipWith (\i j -> fmap Just $ diffFTB p d i j) i j) <>
+     (const (Just Nothing) <$> NonS.drop (NonS.length j) i) <>
+     (Just . Just . patchFTB p <$> NonS.drop (NonS.length i) j))
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
   | otherwise =
@@ -931,19 +921,18 @@ applyUndoFTBM (ArrayTB1 i) (PIdx ix o) =
     Nothing ->
       maybe
         (Left "empty array")
-        (Right . ((, PIdx ix $ patch <$> Non.atMay i ix) . ArrayTB1)) .
-      Non.nonEmpty $
-      (Non.take ix i) ++ (Non.drop (ix + 1) i)
+        (Right . ((, PIdx ix $ patch <$> NonS.atMay i ix) . ArrayTB1)) .
+      NonS.nonEmptySeq $  (NonS.take ix i) <> (NonS.drop (ix + 1) i)
     Just p ->
-      if ix <= Non.length i - 1
+      if ix <= NonS.length i - 1
         then do
-          let c = i Non.!! ix
+          let c = i NonS.!! ix
           (v, p) <- applyUndoFTBM c p
           el <-
-            maybe (Left $ "empty arraytb1 list ") Right $
-            Non.nonEmpty $ Non.take ix i <> pure v <> Non.drop (ix + 1) i
+            maybe (Left "empty arraytb1 list ") Right $
+            NonS.nonEmptySeq $ NonS.take ix i <> pure v <> NonS.drop (ix + 1) i
           return (ArrayTB1 el, PIdx ix (Just p))
-        else if ix == Non.length i
+        else if ix == NonS.length i
                then (\p -> (ArrayTB1 $ i <> pure p, PIdx ix Nothing)) <$>
                     createUndoFTBM p
                else Left

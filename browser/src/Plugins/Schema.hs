@@ -2,7 +2,7 @@
 module Plugins.Schema where
 
 import Types
-import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Types.Patch
 import qualified Data.List as L
 import Utils
@@ -92,11 +92,11 @@ textToPrim i = error ("textToPrim : " ++ show i)
 
 code smvar  = indexSchema smvar "code"
 
-list' :: Union a -> Maybe (NonEmpty a)
-list' (Many inp) = Non.fromList  <$> nonEmpty inp
-list' (ISum inp) = Non.fromList  <$> nonEmpty inp
+list' :: Union a -> Maybe (NonS.NonEmptySeq a)
+list' (Many inp) = NonS.fromList  <$> nonEmpty inp
+list' (ISum inp) = NonS.fromList  <$> nonEmpty inp
 
-list :: Union a -> NonEmpty a
+list :: Union a -> NonS.NonEmptySeq a
 list = justError "empty union list " . list'
 
 addPlugins iniPlugList smvar = do

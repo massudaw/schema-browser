@@ -28,6 +28,7 @@ import MasterPlan.Data as MP
 import MasterPlan.Parser as MP
 import NonEmpty (NonEmpty)
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Prelude hiding (head)
 import PrimEditor
 import RuntimeTypes
@@ -85,7 +86,7 @@ taskDef inf
           lkRel i r=  unSOptional =<< recLookupInf inf tname (indexerRel i) r
           unText (SText i) = i
           lkProjectProperties r = do
-            TB1 (STime (STimestamp date)) <- lkRel (unText $  Non.head efields) r
+            TB1 (STime (STimestamp date)) <- lkRel (unText $  NonS.head efields) r
             pks <- pksM
             pkfields <- mapM (\(SText i) -> lkRel  i r) pks
             fields <- mapM (\(SText i) -> lkRel i r) (fromMaybe pks desc)
@@ -101,17 +102,17 @@ taskDef inf
             (do
               i <- lkRel (deps <> ":product:id") r
               proj <- lkProjectProperties r
-              return (MP.Product   proj (Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
+              return (MP.Product   proj (NonS.toNonEmpty $ Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
             ) <|>
             (do
               i <- lkRel  (deps<> ":sum:id") r
               proj <- lkProjectProperties r
-              return (MP.Sum proj  (Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
+              return (MP.Sum proj  (NonS.toNonEmpty $ Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
             ) <|>
             (do
               i <- lkRel  (deps<> ":sequence:id") r
               proj <- lkProjectProperties r
-              return (MP.Sequence proj (Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
+              return (MP.Sequence proj (NonS.toNonEmpty $ Annotated . renderShowable <$> unArray i) ,F.toList $ renderShowable <$> unArray i)
             ) <|>
             (do
               i <- lkRel field r
@@ -128,8 +129,8 @@ taskDef inf
                   (Progress $ float progressV)
                   (Duration $ float durationV):: Project String,[]))
           float (TB1 (SDouble i)) =  realToFrac i
-          proj r = projf r desc (Non.head efields) child
-        returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> efields,proj )
+          proj r = projf r desc (NonS.head efields) child
+        returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> (Non.fromList  $ F.toList efields),proj )
 
 
 taskWidget (incrementT,resolutionT) sel inf = do

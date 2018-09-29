@@ -50,6 +50,7 @@ import Data.Vector (Vector)
 import GHC.Exts
 import GHC.Generics
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import NonEmpty (NonEmpty(..))
 import Safe
 import System.IO.Unsafe
@@ -236,6 +237,7 @@ data FKey a = Key
   } deriving (Functor, Generic)
 
 keyFastUnique k = (keyTable k, keyPosition k)
+{-# INLINE keyFastUnique #-}
 
 type KeyUnique = (Int, Int)
 
@@ -346,10 +348,11 @@ showTy f (Primitive l i) = f i ++ join (showT <$> l)
     showT KSerial = "*"
 
 instance Eq (FKey a) where
-  k == l = keyFastUnique k == keyFastUnique l
+  k == l = keyPosition k == keyPosition l && keyTable k == keyTable l 
 
 instance Ord (FKey a) where
-  compare = comparing keyFastUnique 
+  i >= j = (keyPosition i >= keyPosition j) && (keyTable i >= keyTable j) 
+  i <= j = (keyPosition i <= keyPosition j) && (keyTable i <= keyTable j)
 
 instance Show a => Show (FKey a) where
   show k = T.unpack $ keyValue k
@@ -365,15 +368,16 @@ showKey k =
      show (keyPosition k))
 
 data Position
-  = Position (Double, Double, Double)
-  | Position2D (Double, Double)
+  = Position  {-# UNPACK #-} !  Double {-# UNPACK #-} ! Double {-# UNPACK #-} ! Double
+  | Position2D {-# UNPACK #-} !  Double {-# UNPACK #-} ! Double
   deriving (Eq, Typeable, Show, Read, Generic)
 
 instance Ord Position where
-  (Position (x, y, z)) <= (Position (a, b, c)) = x <= a && y <= b && z <= c
-  (Position2D (x, y)) <= (Position2D (a, b)) = x <= a && y <= b
-  (Position (x, y, z)) >= (Position (a, b, c)) = x >= a && y >= b && z >= c
-  (Position2D (x, y)) >= (Position2D (a, b)) = x >= a && y >= b
+  (Position  x y  z ) <= (Position a b c) = x <= a && y <= b && z <= c
+  (Position2D x y) <= (Position2D a b) = x <= a && y <= b
+  (Position x y z) >= (Position a b c) = x >= a && y >= b && z >= c
+  (Position2D x y) >= (Position2D a b) = x >= a && y >= b
+
 
 newtype Bounding =
   Bounding (Interval.Interval Position)
@@ -748,12 +752,12 @@ merge f g h (LeftTB1 i) (LeftTB1 j) =
   LeftTB1 $ (merge f g h <$> i <*> j) <|> (fmap h <$> i) <|> (fmap g <$> j)
 merge f g h (ArrayTB1 i) (ArrayTB1 j) =
   ArrayTB1 $
-  Non.fromList $
-  F.toList ziped  <>
-  (fmap g <$> (Non.drop (Non.length ziped) j)) <>
-  (fmap h <$> (Non.drop (Non.length ziped) i))
+   ziped `NonS.appendSeq` 
+  (
+  (fmap g <$> (NonS.drop (NonS.length ziped) j)) <>
+  (fmap h <$> (NonS.drop (NonS.length ziped) i)))
   where
-    ziped = Non.zipWith (merge f g h) i j
+    ziped = NonS.zipWith (merge f g h) i j
 merge f g h (TB1 i) (TB1 j) = TB1 $ f i j
 merge f g h (LeftTB1 i) j = LeftTB1 $ ((\i -> merge f g h i j) <$> i) <|> (Just (g <$> j))
 merge f g h i (LeftTB1 j) = LeftTB1 $ ((\j -> merge f g h i j) <$> j) <|> (Just (h <$> i))
@@ -765,7 +769,7 @@ merge f g h i (ArrayTB1 j) = ArrayTB1 $ (\j -> merge f g h i j) <$> j
 filterTBRef :: (Ord k ) => FTB (TBRef k a) -> Maybe (FTB (TBRef k a))
 filterTBRef  = filterTB1 (\(TBRef i) -> not $ kvNull (fst i) &&  kvNull (snd i))
 
-filterTB1 f (ArrayTB1 l ) = ArrayTB1 . Non.fromList <$> nonEmpty (Non.filter (isJust . filterTB1 f ) l)
+filterTB1 f (ArrayTB1 l ) = ArrayTB1 . NonS.fromList <$> nonEmpty (filter (isJust . filterTB1 f) (F.toList  l))
 filterTB1 f (LeftTB1 l) = Just . LeftTB1 . join $ filterTB1 f <$> l
 filterTB1 f (TB1 i) = if f i  then Just (TB1 i) else Nothing
 
@@ -781,7 +785,7 @@ liftRelFK l rel f =
   where
     defaultTy :: [KTypePrim] -> FTB [w]
     defaultTy l  = foldr (.)  TB1 (match  <$> l) $ []
-    match KArray  = ArrayTB1 . Non.fromList . L.replicate 50
+    match KArray  = ArrayTB1 . NonS.fromList . L.replicate 50
     match KOptional = LeftTB1 . Just
     isOptional (LeftTB1 i) = True
     isOptional _ = False
@@ -834,6 +838,7 @@ relType (RelAccess xs n) =
   Primitive (_keyFunc (mergeFKRef $ relType <$> relUnComp xs) ++ ty) at
   where
     Primitive ty at = relType n
+relType (Rel i _ _ ) = relType i
 relType i = error (show i)
 
 relType' :: Show a => Rel (FKey (KType a)) -> KType [a]
@@ -940,11 +945,7 @@ splitIndexPK ::
   -> [k]
   -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
 splitIndexPK (OrColl l) pk =
-  if F.all (isNothing . snd) al
-    then Nothing
-    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
-  where
-    al = (\l -> (l, splitIndexPK l pk)) <$> l
+  fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (PrimColl (p@(Inline i), op)) pk =
@@ -960,11 +961,7 @@ splitIndexPKB ::
   -> [k]
   -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
 splitIndexPKB (OrColl l) pk =
-  if F.all (isNothing . snd) al
-    then Nothing
-    else Just $ OrColl $ fmap (\(i, j) -> fromMaybe i j) al
-  where
-    al = (\l -> (l, splitIndexPKB l pk)) <$> l
+  fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (PrimColl (p@(Inline i), op)) pk =

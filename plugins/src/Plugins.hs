@@ -8,6 +8,7 @@
 module Plugins (plugList) where
 
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Data.Time.Format
 import System.Process
 import Debug.Trace
@@ -98,7 +99,7 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = IT
                             "andamentos"
-                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $  fmap (TB1. convertAndamento ) bv)
+                            (LeftTB1 $ Just $ ArrayTB1 $ NonS.fromList $ reverse $  fmap (TB1. convertAndamento ) bv)
       returnA -< join  (ao <$> uncurry (liftA2 (,)) b)
 
 
@@ -390,7 +391,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  kvlist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
             iat bv = IT "andamentos"
-                           (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv)
+                           (LeftTB1 $ Just $ ArrayTB1 $ NonS.fromList $ reverse $ fmap convertAndamento bv)
         returnA -< (\i -> [PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] []   (POpt $ Just $ PAtom $ patch i)]) .ao <$> b) -< cpf
 
 bool = TB1 . SBoolean
@@ -408,10 +409,10 @@ gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
     tname = "pricing"
     url :: ArrowReaderDiffM IO
     url =  proc t -> do
-              parcelas :: (Non.NonEmpty (FTB Showable) )<- idxRA "parcelas"-< ()
+              parcelas :: (NonS.NonEmptySeq (FTB Showable) )<- idxRA "parcelas"-< ()
               preco :: (FTB Showable )<- idxR "pricing_price"-< ()
               let
-                par :: Non.NonEmpty (FTB Showable)
+                par :: NonS.NonEmptySeq (FTB Showable)
                 par = (*preco)<$> parcelas
               row <- act (const ask )-< ()
               pg <- atR  "pagamentos" (proc parcelas -> do
@@ -420,7 +421,7 @@ gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
                   let
                     total :: Int
                     total = length parcelas
-                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 . Just . ArrayTB1 $  Non.zipWith (\valorParcela ix -> TB1 $ kvlist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (Non.fromList [0 .. total]))
+                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 . Just . ArrayTB1 $  NonS.zipWith (\valorParcela ix -> TB1 $ kvlist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (NonS.fromList [0 .. total]))
                   returnA -<  pagamento ) -< par
               returnA -<  Just [pg ]
 
@@ -433,7 +434,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = fromIntegral p :: Int
-                  let pagamento = FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ kvlist [attrT ("id",LeftTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 $ Just valorParcela), attrT ("scheduled_date",LeftTB1 $ Just pinicio) ]) [1 .. total]))
+                  let pagamento = FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ NonS.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ NonS.fromList ( fmap (\ix -> TB1 $ kvlist [attrT ("id",LeftTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 $ Just valorParcela), attrT ("scheduled_date",LeftTB1 $ Just pinicio) ]) [1 .. total]))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
               returnA -<  TB1 $ kvlist [pg ] )
 
@@ -507,7 +508,7 @@ encodeMessage = PurePlugin url
                       tb n  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 v)
                       tbv n v  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 v)
                       deltb n  =  TB1 . kvlist . pure . Attr n $ (LeftTB1 $ Just $ LeftTB1 v)
-                      tbmix l = TB1 . kvlist . pure . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  ifNull l
+                      tbmix l = TB1 . kvlist . pure . IT "mixed" . LeftTB1 $ ArrayTB1 . NonS.fromList <$>  ifNull l
           returnA -<  mimeTable enc part
     mixed =  nameO 1 (proc t ->  do
                 liftA3 (,,)
@@ -592,7 +593,7 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
       let ao :: Index (FTB (KV Text Showable))
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom .  fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
           ref :: [TB Text Showable]
-          ref = [uncurry Attr ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
+          ref = [uncurry Attr ("samples",ArrayTB1 $ NonS.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text Showable))
           tbst =  Just (  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
       returnA -< tbst
@@ -654,7 +655,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
       let ao :: Index (FTB (KV Text Showable))
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch (fromJust (findFK ["account" ] row )):) <$> b)
           ref :: [TB Text Showable]
-          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find ((Inline "fitid"==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
+          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . NonS.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find ((Inline "fitid"==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: Maybe (TBIdx Text Showable)
           tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 

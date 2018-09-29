@@ -77,7 +77,7 @@ function createBounds(ref,tname,features){
 }
 
 function createLayer(ref,tname,features){
-  var points = JSON.parse(features);
+  var points = features;
   if (ref.layer[tname] == null )
   {
     ref.layer[tname] = L.layerGroup();

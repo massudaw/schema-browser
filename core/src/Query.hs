@@ -39,6 +39,7 @@ import Control.Arrow (first)
 import qualified Control.Lens as Le
 import Debug.Trace
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
@@ -366,7 +367,7 @@ joinRel2 tb ref table
   | L.any (isArray.snd) ref
   = let
       arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
-   in join .fmap ( fmap (ArrayTB1 .  Non.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
+   in join .fmap ( fmap (ArrayTB1 .  NonS.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) [0..(NonS.length (unArray $ snd arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
       where

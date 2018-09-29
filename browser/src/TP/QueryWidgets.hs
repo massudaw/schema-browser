@@ -52,6 +52,7 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (apply)
 import Graphics.UI.Threepenny.Internal (ui)
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Query
 import RuntimeTypes
 import Schema
@@ -641,7 +642,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
   oldItems <- ui $ calmT preoldItems
   let
     meta = tableMeta table
-    pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ _pluginRefs table)
+    pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ pluginFKS table)
   let
     srefs :: [Rel Key]
     srefs =  sortRels (M.keys pluginMap <> kvkeys ftb )
@@ -959,7 +960,7 @@ buildUIDiff f check (Primitive l prim) = go l
             TrivialWidget offsetT offset <- offsetField (pure 0)  never (facts size)
             let arraySize = 8
                 tdi2  = fmap unArray <$> tdi
-                index o ix v = flip Non.atMay (o + ix) <$> v
+                index o ix v = flip NonS.atMay (o + ix) <$> v
                 unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
                 unplugix ix = fmap ((\o -> ((maybe Keep Diff . indexPatchSet (o + ix) )=<<)) <$> offsetT <*>) <$> plug
                 first = (\ i j o ->  if o > 0 then  maybe False (isJust  . filterTB1 check) $ (join $ applyIfChange i j <|> createIfChange j  <|> Just i) else True) <$> unIndexEl (-1) <*> compactPlugins' (unplugix (-1)) <*> offsetT
@@ -981,7 +982,7 @@ buildUIDiff f check (Primitive l prim) = go l
             bres <- ui . calmT $ (\i k j-> reduceDiffList  arraySize  i j k) <$>facts offsetT <#>   (foldr (liftA2 (:)) (pure [])  ( snd <$>plug)) <*> widgets2
             pini <- currentValue (facts bres)
             element offsetDiv # set children (fmap getElement widgets)
-            size <- ui .calmT $  maybe 0 ((+ negate 1).Non.length .unArray)  . join. fmap (filterTB1 check). join  <$> (applyIfChange <$> tdi <*> bres)
+            size <- ui .calmT $  maybe 0 ((+ negate 1).NonS.length .unArray)  . join. fmap (filterTB1 check). join  <$> (applyIfChange <$> tdi <*> bres)
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ LayoutWidget bres composed (F.foldl1 verticalL  <$> (sequenceA $ getLayout <$> widgets))
          KOptional -> do
@@ -1054,8 +1055,8 @@ buildPrim fm tdi i
          PPosition -> do
            let tdip = fmap (\(SPosition i) -> i) <$> tdig
            fmap (fmap SPosition)<$> case ix of
-             3-> fmap (fmap Position) <$> primEditor (fmap (\(Position l) -> l) <$> tdip)
-             2-> fmap (fmap Position2D) <$> primEditor (fmap (\(Position2D l) -> l) <$> tdip)
+             3-> fmap (fmap (\(i,j,k) -> Position i j k )) <$> primEditor (fmap (\(Position i j k ) -> (i,j,k) ) <$> tdip)
+             2-> fmap (fmap (\(i,j) -> Position2D i j ))  <$> primEditor (fmap (\(Position2D i j ) -> (i,j) ) <$> tdip)
      PDimensional s (a,b,c,d,e,f,g) -> do
        let mult = zip [a,b,c,d,e,f,g] un
            multP = filter ((>0).fst) mult
@@ -1371,13 +1372,15 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     element l # set UI.class_ selSize
                     return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
-                    let selection = fromJust hasMap
+                    let selection = conv $ fromJust hasMap
+                        conv (i ,t, j ,k,l) = (i,t,Non.fromList (F.toList j ),Non.fromList . F.toList <$> k ,l)
                     t <- liftIO getCurrentTime
                     TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, pure Nothing)
                     element el # set UI.class_ selSize
                     return (LayoutWidget i el (pure (12,1)))),
                   ("Agenda" ,do
-                    let selection = fromJust hasAgenda
+                    let selection = conv $ fromJust hasAgenda
+                        conv (i ,j ,k,l) = (i,j , Non.fromList . F.toList $ k ,l)
                     (sel ,(j,i)) <- calendarSelector
                     el <- traverseUI (\(delta ,time) -> do
                       (e,l) <- calendarView inf mempty cliZone [selection] (pure (S.singleton targetTable )) Basic delta time

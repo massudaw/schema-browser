@@ -4,6 +4,7 @@ module Rmtc (pollRmtc )where
 import Control.Monad
 import TP.QueryWidgets
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import qualified Types.Index as G
 import Schema
 import RuntimeTypes
@@ -100,8 +101,8 @@ trimr = reverse . triml . reverse
 readHtmlReceita file = do
   let
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file >>> tel
-      pos [x,y,z] = Position (x,y,z)
-      pos [x,y] = Position (x,y,0)
+      pos [x,y,z] = Position x y z
+      pos [x,y] = Position x y 0
       pos i = error (show i)
       tel  = proc t -> do
         coords <- getChildren >>> atTag "coordinates" >>> getChildren >>> getText >>^ (fmap (\i -> pos . justError ("no parse" ++ show i). allMaybes . fmap readMaybe . unIntercalate (==',') $ i). unIntercalate (==' ').trim )-< t
@@ -129,7 +130,7 @@ checkLinha conn l = do
   let Just a = decode f :: Maybe Value
       pontos = catMaybes $ F.toList $ fmap (^? readPonto) (a  ^. key "pontosparada" .  _Array )
   print (pontos,a  ^. key "pontosparada" .  _Array)
-  _ <- mapM (execute conn "INSERT INTO transito.pontos (id,linha,geocode,endereco,referencia) VALUES (?,?,?,?,?)" ) (fmap (\i -> ( pontoId i,l, Position (read $ unpack $ fst (pontoPosition i) ,read $ unpack $ snd (pontoPosition i) ,0),pontoEndereco i, pontoReferencia i )) pontos)
+  _ <- mapM (execute conn "INSERT INTO transito.pontos (id,linha,geocode,endereco,referencia) VALUES (?,?,?,?,?)" ) (fmap (\i -> ( pontoId i,l, Position (read . unpack $ fst (pontoPosition i)) (read . unpack $ snd (pontoPosition i))  0,pontoEndereco i, pontoReferencia i )) pontos)
   return ()
 
 readLineKML  = do
@@ -159,13 +160,13 @@ checkOnibus inf = do
   _ <- mapM (\(li,lv,i) -> execute conn "INSERT INTO transito.linha (id,linha_ida,linha_volta) VALUES (?,?,?)" (i,li,lv) `catchAll`(\e-> execute conn "update transito.linha set linha_ida = ?  ,linha_volta = ? where id = ? " (li,lv,i) )) (nub $ fmap (\i -> (linhaIda$ linha i  ,linhaVolta $ linha i,numeroLinha $ linha i)) dec)
 
   _ <- mapM (\i -> execute conn "INSERT INTO transito.destino_linha (linha,name) VALUES (?,?)" i `catchAll` (\e -> return 0)) (nub $ fmap (\i -> (numeroLinha $ linha i , nomeDestino $ destino i )) dec)
-  _ <- mapM (execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i, snd $ position i,0),situacao i, nomeDestino $ destino i )) dec)
+  _ <- mapM (execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i) (snd $ position i) 0,situacao i, nomeDestino $ destino i )) dec)
   ref <- prerefTable inf (lookTable inf "max_registro_onibus")
   print "start patch"
-  (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl $ fixrel (liftRel inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ((\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
+  (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl $ fixrel (liftRel inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ NonS.fromList ((\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
   sequence_ l
 
-  fetchData  ref . fmap (RowPatch . fmap PatchRow)  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (patch $ timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
+  fetchData  ref . fmap (RowPatch . fmap PatchRow)  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (patch $ timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i)(snd $ position i) 0))]))  dec
   print "end checkOnibus"
 
   return ()

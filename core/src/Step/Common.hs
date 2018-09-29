@@ -60,6 +60,7 @@ traPredicate f (WherePredicate i ) = WherePredicate <$> (traverse (fmap  swap . 
 data BoolCollection a
   = AndColl [BoolCollection a]
   | OrColl [BoolCollection a]
+  | Negate (BoolCollection a)
   | PrimColl a
   deriving (Show, Eq, Ord, Functor, Foldable, Generic, Traversable)
 

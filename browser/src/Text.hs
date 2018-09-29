@@ -3,6 +3,7 @@ module Text where
 import Types
 import Types.Patch
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Data.Time.Format
 import Data.Hashable
 import Data.Ord
@@ -157,7 +158,8 @@ readType (Primitive l (AtomicPrim p) ) = go l
       i -> prim
     opt c f "" =  Just $ c Nothing
     opt c f i = fmap (c .Just) $ f i
-    parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ Non.fromList $ unIntercalate (=='\n') i
+    
+    parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ NonS.fromList $ unIntercalate (=='\n') i
     inter f v = (\(i,j)-> fmap IntervalTB1 $  Interval.interval <$> fmap ((,lbnd).Interval.Finite) (f i) <*> fmap ((,ubnd).Interval.Finite) (f $ tail j) )  .  break (==',') . tail . init $ v
         where lbnd = case head v of
                         '(' -> False

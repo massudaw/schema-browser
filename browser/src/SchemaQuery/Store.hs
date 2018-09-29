@@ -72,7 +72,7 @@ readState fixed dbvar = do
   let
     filterPred = filter (checkPatch  fixed)
     fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result=either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
+    result= traceShow (fst fixed ,G.size fv) $ either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
   return (result,chan)
 
 cloneDBVar
@@ -93,8 +93,10 @@ transactionNoLog inf log = do
   (md,s,_)  <- runRWST log (inf ,[]) M.empty
   let aggr = s
   liftIO $ atomically $ traverse (\(k,(ref,v,ix)) -> do
-    mapM (putIdxSTM (idxChan ref)) ix
-    putPatchSTM (patchVar ref) v
+    when (not $ L.null ix) . void $
+      mapM (putIdxSTM (idxChan ref)) ix
+    when (not $ L.null v) . void $
+      putPatchSTM (patchVar ref) v
     ) (M.toList aggr)
   return md
 
@@ -275,7 +277,9 @@ updateReference ::
   -> TChan [TableModificationK (TableK k1) (RowPatch k1 v)]
   -> DBRef k1 v
   -> IO ()
-updateReference j var (DBRef {..}) = catchJust
+updateReference j var (DBRef {..}) = do
+  putStrLn ("Update Reference: " ++ T.unpack (tableName dbRefTable ))
+  catchJust
     notException
     (atomically
        (do let isPatch (RowPatch (_, PatchRow _)) = True
@@ -293,7 +297,8 @@ tableDiffs (BatchedAsyncTableModification _ i) = concat $ tableDiffs <$> i
 tableDiffs i = [tableDiff i]
 
 updateIndex :: (Ord k, Show k, Show v) => DBRef k v -> IO ()
-updateIndex (DBRef {..}) =
+updateIndex (DBRef {..}) = do
+  putStrLn ("Update index: " ++ T.unpack (tableName dbRefTable ) )
   catchJust
     notException
     (do atomically
@@ -310,7 +315,9 @@ printException e d = do
 updateTable
   :: InformationSchema -> DBRef Key Showable -> IO ()
 updateTable inf (DBRef {..})
-  = catchJust notException (do
+  = do
+  putStrLn ("Update Table : " ++ T.unpack (tableName dbRefTable ))
+  catchJust notException (do
     upa <- atomically $ do
         patches <- fmap concat $ takeMany patchVar
         e <- readTVar collectionState

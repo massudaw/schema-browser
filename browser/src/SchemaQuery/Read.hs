@@ -338,7 +338,7 @@ tableLoader'
    -> TBData Key ()
    -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
 tableLoader' table  page fixed tbf = do
-  pageTable (\table page token size presort predicate tbf -> do
+  pageTable (\table page token size presort predicate tbf reso -> do 
     inf <- askInf
     let
       unestPred (WherePredicate l) = WherePredicate $ go predicate l
@@ -348,9 +348,20 @@ tableLoader' table  page fixed tbf = do
           go pred (PrimColl l) = PrimColl $ pred l
           predicate (RelAccess i j ,_ ) = (i, maybe [] ((\a -> (a,Right (Not IsNull)))<$>) $ _relInputs i)
           predicate i  = i
-    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) ( restrictTable nonFK  tbf) page token size presort (unestPred predicate)
-    resFKS  <- getFKS inf predicate table res tbf
-    let result = fmap resFKS   res
+    (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
+
+    let preresult =  mapResult <$> res
+        mapResult i = do 
+            case G.lookup (G.getIndex (tableMeta table) i) reso of 
+                Just orig -> case recComplement inf (tableMeta table) orig tbf  of 
+                    Just _ ->  Left i
+                    Nothing -> Right orig
+                Nothing -> Left i 
+    result <- if L.any isLeft preresult
+      then do
+        resFKS <- getFKS inf predicate table res tbf 
+        return $ either resFKS Right <$> preresult
+      else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
       print ("lefts",tableName table ,lefts result)
     return (rights  result,x,o )) table page fixed tbf
@@ -391,25 +402,27 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
       readNew sq l =  do
          let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
              (_,mp) = fromMaybe (maxBound,M.empty ) hasIndex
-         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf
+         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf reso
          let
              -- # postFilter fetched results
              resK = if predNull fixed then resOut else G.filterRows fixed resOut
              -- # removeAlready fetched results
              diffNew i
-                = case G.lookup (G.getIndex (tableMeta table) i) reso of
-                   Just v -> patchRowM' (tableMeta table) v i
-                   Nothing -> Just $ createRow' (tableMeta table) i
-             newRes = catMaybes  $ fmap diffNew resK
+                = case G.lookup (G.getIndex m i) reso of
+                   Just v -> case recComplement inf m v tbf of
+                      Just _ -> patchRowM' m v i
+                      Nothing -> Nothing
+                   Nothing -> Just $ createRow' m  i
+             newRes = catMaybes $ fmap diffNew resK
          -- Only trigger the channel with new entries
          modifyTable (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)] . fmap (FetchData table) $ newRes
          let nidx = maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex
          if L.null newRes
             then do
               liftIO $ putStrLn $ "No new fields";
-              return (nidx,reso)
-            else return (nidx,snd $ F.foldl' (\i j -> either error fst $ applyGiSTChange i j) (m,reso) newRes)
-    (nidx,ndata) <- case hasIndex of
+              return (nidx,(sidx,reso))
+            else return (nidx,either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) )(newRes))
+    (nidx,(sidx2,ndata)) <- case hasIndex of
       Just (sq,idx) ->
         if (sq > G.size reso)
         then case  M.lookup pageidx idx of
@@ -419,16 +432,16 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
               readNew sq i
             Nothing -> do
               liftIO $ putStrLn $ "Empty complement: " <> show (fst v)
-              return ((sq,idx), reso)
+              return ((sq,idx), (sidx,reso))
           Nothing -> do
             liftIO $ putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
           when (sq < G.size reso) $ do
             modifyTable (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
-            liftIO $print (tableName table,fixed,G.keys reso)
+            liftIO $ print (tableName table,fixed,G.keys reso)
           liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
-          return ((max (G.size reso) sq,idx), reso)
+          return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)
         let m = rawPK table
@@ -444,7 +457,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             case L.null complements of
               True -> do
                 liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (G.size reso)
-                return ((G.size reso ,M.empty), reso)
+                return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
                 if L.length  complements  == 1
                    then do
@@ -457,7 +470,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            else do
              liftIO $ putStrLn $ "Loading empty predicate" <> show (G.size reso)
              readNew maxBound tbf
-    return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx, ndata)))
+    return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
 
 
 
@@ -504,7 +517,7 @@ convertChan
       (Tidings (IndexMetadata Key Showable ),Tidings (TableRep Key Showable))
 convertChan inf table fixed dbvar = do
   ((ini,result),cloneddbvar) <- liftIO $ atomically $
-    cloneDBVar ( fixed) dbvar
+    cloneDBVar  fixed dbvar
   (,) <$> convertChanStepper0 inf table ( ini) (idxChan cloneddbvar)
       <*> convertChanTidings0 inf table fixed ( result ) (patchVar cloneddbvar)
 

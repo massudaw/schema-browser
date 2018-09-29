@@ -34,6 +34,7 @@ import Control.Category
 import qualified Data.Map as M
 import Database.PostgreSQL.Simple
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import RuntimeTypes
 import Step.Host
 import Types
@@ -70,8 +71,8 @@ instance DecodeTB1 [] where
   isoFTB = SIso [KOptional,KArray] (tell .encFTB) decFTB
     where
       decFTB (LeftTB1 i ) = maybe [] decFTB i
-      decFTB (ArrayTB1 i ) = Non.toList (unTB1 <$> i)
-      encFTB l = LeftTB1 $ (\i -> ArrayTB1 (TB1 <$> i)) <$> Non.nonEmpty l
+      decFTB (ArrayTB1 i ) = F.toList (unTB1 <$> i)
+      encFTB l = LeftTB1 $ (\i -> ArrayTB1 (TB1 <$> i)) <$> NonS.nonEmpty l
 
 instance DecodeTB1 Interval.Interval where
   decFTB (IntervalTB1 i) = fmap unTB1 i
@@ -79,8 +80,8 @@ instance DecodeTB1 Interval.Interval where
   isoFTB = SIso [KInterval] (tell . encFTB) decFTB
 
 instance DecodeTB1 Non.NonEmpty  where
-  decFTB (ArrayTB1 i) = fmap unTB1 i
-  encFTB i = ArrayTB1 $ fmap TB1 i
+  decFTB (ArrayTB1 i) = Non.fromList . F.toList $ fmap unTB1 i
+  encFTB i = ArrayTB1 . NonS.fromList . F.toList $ fmap TB1 i
   isoFTB = SIso [KArray] (tell . encFTB) decFTB
 
 instance DecodeTB1 Maybe  where

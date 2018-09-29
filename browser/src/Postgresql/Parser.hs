@@ -21,7 +21,7 @@ import qualified Data.Aeson.Types as A
 import qualified Data.Foldable as F
 import Data.Either
 import Utils
-import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import qualified Data.Binary as B
 import Data.Scientific hiding(scientific)
 import Data.Bits
@@ -99,7 +99,7 @@ instance  TF.ToField (TB PGKey Showable)  where
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain (fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    snd <$> sortedFields  i)
+  toField (IT n (TB1 i)) = TF.toField (TBRecord2 ((\(Primitive _ (RecordPrim j)) -> j )$  keyType n) $    L.sortOn (L.maximumBy (comparing keyPosition) . relOutputSet  . index) (unkvlist i))
   toField (IT n (ArrayTB1 is )) = TF.toField . PGTypes.PGArray $ IT n <$> F.toList is
   toField e = error (show e)
 
@@ -108,7 +108,7 @@ instance TR.ToRow a => TF.ToField (TBRecord2 a) where
   toField (TBRecord2 (s,t) l) =  TF.Many (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromString . T.unpack $  ") :: " <> s <> "." <> t) ] )
 
 
-data TBRecord2 a = TBRecord2 (Text,Text) a
+data TBRecord2 a = TBRecord2 (Text,Text) a deriving (Show)
 
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDouble i )) =  TF.toField i
@@ -136,8 +136,8 @@ instance TF.ToField (UnQuoted Bounding ) where
           points :: [TF.Action]
           points = [point (Interval.lowerBound l), del, point (Interval.upperBound l)]
           -- point :: Position -> TF.Action
-          point (ER.Finite (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
-          point (ER.Finite (Position2D (lat,lon))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
+          point (ER.Finite (Position  lat lon alt)) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+          point (ER.Finite (Position2D  lat lon)) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
 
 
 instance TF.ToField (UnQuoted SGeo) where
@@ -164,15 +164,15 @@ instance TF.ToField (UnQuoted LineString) where
           points :: [TF.Action]
           points = L.intercalate [del] (fmap point (F.toList l))
           point :: Position -> [TF.Action]
-          point (Position (lat,lon,alt)) = [str "ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str ")"]
-          point (Position2D (lat,lon)) = [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
+          point (Position  lat lon alt ) = [str "ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str ")"]
+          point (Position2D  lat lon ) = [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
 
 
 instance TF.ToField (UnQuoted Position) where
-  toField (UnQuoted (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+  toField (UnQuoted (Position  lat lon alt )) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
-  toField (UnQuoted (Position2D (lat,lon))) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del,  str "),4326)"]
+  toField (UnQuoted (Position2D  lat lon )) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del,  str "),4326)"]
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
@@ -293,7 +293,7 @@ queryLogged conn sqr args = liftIO $ do
 -- parseGeom a | traceShow a False = undefined
 parseGeom ix a = case a of
           PPosition ->  case ix of
-                3 -> fmap SPosition $(getPosition3d get3DPosition)
+                3 -> fmap SPosition $ (getPosition3d get3DPosition)
                 2 -> fmap SPosition $ (getPosition3d get2DPosition )
 
           PPolygon ->  case ix of
@@ -329,7 +329,7 @@ parseShowableJSON  fun p@(Primitive l i) v = fix parseKTypePrim l v
         A.Null ->  return $ LeftTB1 Nothing
         vn -> (LeftTB1 . Just  <$>  f i vn) <|> return (LeftTB1 Nothing)
     parseKTypePrim  f (KArray :i )  (A.Array l )
-      =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (f i)) (nonEmpty $ F.toList l)
+      =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . NonS.fromList) . mapM (f i)) (nonEmpty $ F.toList l)
     parseKTypePrim f (KInterval :l ) (A.String v)
       = do
         env <- ask
@@ -367,8 +367,8 @@ instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
 get2DPosition = do
       x <- Sel.getFloat64le
       y <- Sel.getFloat64le
-      return  $ Position2D (x,y)
-put2DPosition (Position2D (x,y)) = do
+      return  $ Position2D  x y 
+put2DPosition (Position2D  x y ) = do
       Sel.putFloat64le x
       Sel.putFloat64le y
 
@@ -376,8 +376,8 @@ get3DPosition = do
       x <- Sel.getFloat64le
       y <- Sel.getFloat64le
       z <- Sel.getFloat64le
-      return  $ Position (x,y,z)
-put3DPosition (Position (x,y,z)) = do
+      return  $ Position  x y z 
+put3DPosition (Position  x y z ) = do
       Sel.putFloat64le x
       Sel.putFloat64le y
       Sel.putFloat64le z
@@ -424,8 +424,8 @@ getLineString get = do
 box3dParser = do
           string "BOX3D" <|> string "BOX2D"
           let
-            makePoint [x,y,z] = Position (x,y,z)
-            makePoint [x,y] = Position2D (x,y)
+            makePoint [x,y,z] = Position  x y z
+            makePoint [x,y] = Position2D  x y 
           res  <- char '(' *> sepBy1 (sepBy1 ( scientific) (char ' ') ) (char ',') <* char ')'
           return $ case fmap (fmap  realToFrac) res  of
             [m,s] ->  Bounding ((ER.Finite $ makePoint m ,True) `Interval.interval` (ER.Finite $ makePoint s,True))
