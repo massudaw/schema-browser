@@ -360,8 +360,8 @@ tableLoader' table  page fixed tbf = do
                 Nothing -> Left i 
     result <- if L.any isLeft preresult
       then do
-        resFKS <- getFKS inf predicate table res tbf 
-        return $ either resFKS Right <$> preresult
+        resFKS <- getFKS inf predicate table (lefts preresult) tbf 
+        return (either resFKS Right <$> preresult) 
       else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
       print ("lefts",tableName table ,lefts result)
@@ -400,19 +400,19 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
       fixedChan = idxChan dbvar
       pageidx =  (fromMaybe 0 page +1) * pagesize
       hasIndex = M.lookup fixed fixedmap
-      readNew sq l =  do
-         let pagetoken = join $ flip M.lookupLE  mp . (*pagesize) <$> page
-             (_,mp) = fromMaybe (maxBound,M.empty ) hasIndex
-         (resOut,token ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf reso
+      readNew sq tbf  =  do
+         let pagetoken = flip M.lookupLE  mp . (*pagesize)  =<< page
+             (indexSize ,mp) = fromMaybe (maxBound,M.empty) hasIndex
+             pageStart = liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)
+             token = fmap (snd.snd) pagetoken
+         (resOut,token ,s ) <- method table  pageStart (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf reso
          let
              -- # postFilter fetched results
              resK = if predNull fixed then resOut else G.filterRows fixed resOut
              -- # removeAlready fetched results
              diffNew i
                 = case G.lookup (G.getIndex m i) reso of
-                   Just v -> case recComplement inf m tbf fixed v of
-                      Just _ -> patchRowM' m v i
-                      Nothing -> Nothing
+                   Just v ->  patchRowM' m v i
                    Nothing -> Just $ createRow' m  i
              newRes = catMaybes $ fmap diffNew resK
          -- Only trigger the channel with new entries
@@ -438,11 +438,21 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             liftIO $ putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
+          let 
+            pagetoken = M.lookupLE (maybe pagesize (*pagesize) page) idx 
+            existingProjection = fmap (fst .snd) pagetoken
+            projection = recComplement inf m tbf fixed =<< existingProjection
           when (sq < G.size reso) $ do
             modifyTable (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
             liftIO $ print (tableName table,fixed,G.keys reso)
-          liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
-          return ((max (G.size reso) sq,idx), (sidx,reso))
+          case projection of
+            Just remain -> do
+              liftIO . putStrLn $ "Current table is partially complete: " <> show (fixed,sq,G.size reso)
+              liftIO $ putStrLn (ident $ renderTable remain)
+              readNew  sq tbf
+            Nothing -> do
+              liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
+              return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)
         let m = rawPK table

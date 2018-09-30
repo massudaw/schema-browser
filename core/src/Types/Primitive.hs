@@ -349,10 +349,13 @@ showTy f (Primitive l i) = f i ++ join (showT <$> l)
 
 instance Eq (FKey a) where
   k == l = keyPosition k == keyPosition l && keyTable k == keyTable l 
+  {-# INLINE (==)#-}
 
 instance Ord (FKey a) where
   i >= j = (keyPosition i >= keyPosition j) && (keyTable i >= keyTable j) 
   i <= j = (keyPosition i <= keyPosition j) && (keyTable i <= keyTable j)
+  {-# INLINE (>=)#-}
+  {-# INLINE (<=)#-}
 
 instance Show a => Show (FKey a) where
   show k = T.unpack $ keyValue k

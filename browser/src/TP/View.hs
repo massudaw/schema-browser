@@ -20,7 +20,7 @@ import Control.Arrow (first)
 import Control.Applicative
 import qualified Data.Map as M
 import GHC.Stack
-import NonEmpty
+import NonEmpty (NonEmpty)
 import qualified Data.Foldable as F
 import Types
 import Types.Patch

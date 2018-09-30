@@ -189,7 +189,7 @@ taskWidget (incrementT,resolutionT) sel inf = do
                         row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) (values v) )
                         body = row <$> (either (const []) (tail . subprojectsDeep) figure)
                         dat =  catMaybes $ fmap proj  $ G.toList (primary i)
-                        figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\(_,Progress p,_,_) -> (if done then p < 1 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
+                        figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\ ~(_,_,_,Duration d) -> (if done then d > 0 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
 
                     t <- UI.table # set items (sequence $ caption:header:body)
                     svg <- UI.div # sink UI.html (facts $ fmap (fromMaybe "" )$ liftA2 (\w h -> either id  (MP.renderWithSVG (RenderOptions  False w  h allattrs))  figure ) <$> triding width <*> triding height )
@@ -214,7 +214,7 @@ allattrs = [PTitle , PCost , PTrust , PProgress,PDuration]
 projectId = fromJust . join . fmap project_id . properties
 
 filterProjectList :: ((Cost,Progress,Trust,Duration) -> Bool) -> NonEmpty (Project Void ) -> Maybe (NonEmpty (Project Void))
-filterProjectList f v = Non.fromList <$> nonEmpty (catMaybes $ F.toList $ filterProject f <$> v)
+filterProjectList f v = Non.catMaybes $ filterProject f <$> v
 
 filterProject :: ((Cost,Progress,Trust,Duration) -> Bool) ->  Project Void -> Maybe (Project Void)
 filterProject f v@(MP.Sequence d ps) = if (f (cost v,progress v , trust v , duration v) ) then (MP.Sequence d <$>filterProjectList f ps) else Nothing

@@ -7,6 +7,7 @@ import Data.List.NonEmpty hiding (fromList)
 
 import Safe as S
 import Prelude as P
+import Data.Maybe as M
 import Control.Lens as Le
 
 atMay :: NonEmpty a -> Int -> Maybe a
@@ -17,6 +18,8 @@ elem pred (i:| l) = pred == i || P.elem pred l
 
 imap f = Le.imap f
 
+catMaybes :: NonEmpty (Maybe a) -> Maybe (NonEmpty a)
+catMaybes (i :| j ) = Non.nonEmpty $ M.catMaybes (i:j)
 
 
 fromList :: [a] -> NonEmpty a

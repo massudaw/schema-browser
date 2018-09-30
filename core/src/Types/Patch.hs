@@ -395,7 +395,7 @@ indexFilterPatchU ::
 indexFilterPatchU (n, op) o = indexFilterPatch (n, op) o
 
 unSOptionalP (PatchSet l) =
-  PatchSet <$> Non.nonEmpty (catMaybes (unSOptionalP <$> F.toList l))
+  PatchSet <$> Non.catMaybes (unSOptionalP <$> l)
 unSOptionalP (POpt i) = i
 unSOptionalP i = Just i
 
@@ -407,7 +407,7 @@ unLeftItensP = unLeftTB
   where
     unLeftTB (PAttr k (PatchSet l)) =
       PAttr (unKOptional k) . PatchSet <$>
-      Non.nonEmpty (catMaybes (unSOptionalP <$> F.toList l))
+      Non.catMaybes (unSOptionalP <$> l)
     unLeftTB (PAttr k v) = PAttr (unKOptional k) <$> unSOptionalP v
     unLeftTB (PFun k rel v) = PFun (unKOptional k) rel <$> unSOptionalP v
     unLeftTB (PInline na l) = PInline (unKOptional na) <$> unSOptionalP l

@@ -42,32 +42,31 @@ insertPatch
   :: (MonadIO m ,Functor m )
      => InformationSchema
      -> Connection
+     -> KVMetadata Key
      -> TBData Key Showable
-     -> TableK Key
      -> m (TBIdx Key Showable)
-insertPatch  inf conn i  t = either error (\i ->  liftIO $ if not $ L.null serialAttr
+insertPatch  inf conn table row  = liftIO $ if not $ L.null serialAttr
       then do
         let
           iquery :: String
           (iquery ,namemap)= codegen $ do
-            j <- projectTree inf (tableMeta t) (kvlist serialAttr)
+            j <- projectTree inf table (kvlist serialAttr)
             return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
         print  =<< formatQuery conn (fromString iquery) directAttr
-        [out] <- queryWith (fromRecordJSON inf (tableMeta t) serialTB namemap ) conn (fromString  iquery) directAttr
+        [out] <- queryWith (fromRecordJSON inf table serialTB namemap ) conn (fromString  iquery) directAttr
         let gen =  patch out
         return (patch out)
       else do
         let
           iquery = T.unpack prequery
         executeLogged  conn (fromString  iquery ) directAttr
-        return []) checkAllFilled
+        return []
     where
-      checkAllFilled = tableCheck  (tableMeta t) i
-      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV i)
+      prequery =  "INSERT INTO " <> kvMetaFullName table <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
+      attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV row)
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
-      serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
+      serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( _kvpk table<> _kvattrs table)
       directAttr :: [TB Key Showable]
       directAttr = direct aattr attrs
       projKey :: [TB Key a ] -> [Key]
@@ -230,9 +229,9 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
         ini = compact (defs ++  patch j)
-      d <- insertPatch  inf (conn  inf) (create ini) table
+      d <- either error (insertPatch  inf (conn  inf) m . filterWriteable ) (tableCheck m (create ini))
       l <- liftIO getCurrentTime
-      return    $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
+      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
 
 
 deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))
@@ -267,12 +266,14 @@ getRow table  delayed (Idex idx) = do
          print  =<< formatQuery (conn  inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
          case is of
-           [i] ->return $ patch i
-           [] -> error $ "empty query" ++ show (tableName table) ++ show idx
-           v -> error $ "multiple result query" ++ show (tableName table) ++ "-" ++  show idx  ++ "\n"++ show v
+           [i] -> return $ patch i
+           [] -> error $ "empty query: " ++ show (tableName table) ++ show idx
+           v -> error $ "multiple result query: " ++ show (tableName table) ++ " - " ++  show idx  ++ "\n"++ show v
 
 filterReadable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FRead (keyModifier k))
+filterWriteable = kvFilter (\k -> attr (relOutputSet k))
+  where attr = F.all (\k -> L.elem FWrite (keyModifier k))
 
 selectAll
   ::

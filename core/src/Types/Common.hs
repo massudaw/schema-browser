@@ -163,9 +163,15 @@ relSort i = RelSort (inp i)  (out i) i
     out j = norm $ _relOutputs  j
     norm = maybe S.empty S.fromList 
 
+instance Eq k => Eq (RelSort k ) where
+  (RelSort _ _ i) ==  (RelSort _ _ j ) = i == j 
+
+instance Ord k => Ord (RelSort k ) where
+  compare  (RelSort _ _ i) (RelSort _ _ j ) = compare i j 
+
 data RelSort k =
   RelSort (Set k) (Set k) (Rel k)
-  deriving (Eq, Ord,Show,Generic)
+  deriving (Show,Generic)
 
 
 newtype MutRec a = MutRec
