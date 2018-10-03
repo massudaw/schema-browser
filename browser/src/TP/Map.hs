@@ -103,20 +103,23 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
               traverseUIInt (\(positionB,calT)-> do
                 let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                     fieldKey (TB1 (SText v))=  v
-                reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-                let v = primary <$> reftb ^. _2
-                let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
-                onEvent evsel (liftIO . hselg)
+                if mempty /= pred  
+                   then do  
 
-                tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
-                let tdi = tidings tdib (fmap snd <$> evsel)
-                    table = lookTable inf tname
-                el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
-                traverseUIInt (\i ->
-                  createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
-                stat <- UI.div  # sinkDiff text (show . M.lookup pred . unIndexMetadata <$>   (reftb ^. _1))
-                edit <- UI.div # set children [getElement el] # sink UI.style  (noneShow . isJust <$> tdib)
-                UI.div # set children [stat,edit]
+                  reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
+                  let v = primary <$> reftb ^. _2
+                  let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+                  onEvent evsel (liftIO . hselg)
+                  tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
+                  let tdi = tidings tdib (fmap snd <$> evsel)
+                      table = lookTable inf tname
+                  el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
+                  traverseUIInt (\i ->
+                    createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
+                  stat <- UI.div  # sink text (show . M.lookup pred . unIndexMetadata <$>   facts (reftb ^. _1))
+                  edit <- UI.div # set children [getElement el] # sink UI.style  (noneShow . isJust <$> tdib)
+                  UI.div # set children [stat,edit]
+                  else UI.div
                 ) pcal
               ) selected
             let els = foldr (liftA2 (:)) (pure []) fin

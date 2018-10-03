@@ -184,7 +184,7 @@ data DBVar2 v =
 type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KV k (),PageTokenF v)
 
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
-type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k (AccessOp v , FTB v)])
+type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k ()])
 
 instance (Show k ,Show v) => Patch (InformationSchemaKV  k v )  where
   type Index (InformationSchemaKV k v) = [TableModificationU k v]
@@ -268,7 +268,7 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
 applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow (elp))) =
   maybe (Right ((m,l),p)) Right $
     first (m,) <$> case G.lookup ix  l of
-      Just v -> Nothing
+      Just v -> Just (G.update  ix (maybe id (flip apply ) (diff v el)) l,RowPatch (idx,DropRow ))
       Nothing -> Just (G.insert (el, ix) G.indexParam l,RowPatch (idx,DropRow ))
     where
       el = fmap create elp
@@ -279,8 +279,8 @@ recAttr
   :: (NFData a , Show k, Ord k)
     => [k]
     -> TB k a
-    -> [(AttributePath k (Either (FTB a, BinaryOperator) b, FTB a),TBIndex a)]
-recAttr un (Attr i k) = [(PathAttr i $ TipPath (Left (k,Equals),k), Idex [k])]
+    -> [(AttributePath k (),TBIndex a)]
+recAttr un (Attr i k) = [(PathAttr i $ TipPath (), Idex [k])]
 recAttr un (IT i j )  = first (PathInline i) <$> recPred (\i ->
   let nest = concat $ recAttr un <$> unkvlist i
   in [(TipPath . Many $ fst <$> nest, G.getUnique  un i )]) j
@@ -345,7 +345,7 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
 
 
 searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
-searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  splitIndexPK b pk
+searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (traceShow ("predicate",p) $ WherePredicate p) g) <$>  splitIndexPK b pk
 
 
 type DBVar = DBVar2 Showable

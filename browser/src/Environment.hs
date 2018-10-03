@@ -121,7 +121,6 @@ withReaderMap f h g  a= do
   (env ,_) <- ask
   mapM (\ix  -> withRWST (\(i,p) j -> ((g i NonS.!! ix,h ix p) ,j)) .  mapRWST (fmap (\(r,s,w) -> (r,s, f ix w )))  $ a)  (NonS.fromList [0..NonS.length (g env) - 1])
 
-
 withReaderT3
   :: (Monad m, Monoid w) =>
      (t3 -> w)
@@ -137,14 +136,22 @@ type Operation k p = Either (Union (AttributePath k p)) MutationTy
 -- Primitive Value
 irecord :: (Show k,Monad m ,Show s,Show (Index s)) =>
    PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-  -> PluginM ((Union (AttributePath k p)))  (Atom ((TBData k s)))  m  i a
+  -> PluginM ((Union (AttributePath k p))) (Atom ((TBData k s)))  m  i a
 irecord = irecordU Many
 
 irecordU :: (Show k,Monad m ,Show s,Show (Index s)) =>
-  (forall a. [a ]-> Union a)
+  (forall a . [a] -> Union a)
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
   -> PluginM (Union (AttributePath k p))  (Atom ((TBData k s)))  m  i a
 irecordU f (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion f $ tidxi,mapUnion f $ tidxo) (Kleisli op )
+
+iany :: (Monad m ,Show s,Show (Index s)) =>
+  PluginM v  (Atom s) m i a
+  -> PluginM (PathIndex PathTID v)  (Atom s ) m i a
+iany (P (tidxi ,tidxo) (Kleisli op) )  = P (TipPath <$> tidxi,TipPath  <$> tidxo) (Kleisli (withReaderT4 id   id id . op ))
+
+
+
 
 
 ivalue :: (Monad m ,Show s,Show (Index s)) =>
@@ -180,7 +187,13 @@ ifield ::
        (Monad m ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID p)  (Atom (FTB Showable )) m i a
        -> PluginM (AttributePath k p)  (Atom (TBData k Showable ))  m i a
-ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT4 (\ v -> [PAttr s <$> v]) (concat . fmap (catMaybes .fmap pvalue) ) (fmap (value .justError ("no field " ++ show s ).indexField (IProd Nothing s))) . op ))
+ifield s (P (tidxi ,tidxo) (Kleisli op) )  
+    = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) 
+        (Kleisli 
+          (withReaderT4 
+            (\ v -> [PAttr s <$> v]) 
+            (concat . fmap (catMaybes .fmap pvalue) ) 
+            (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $ indexField (IProd Nothing s) v))) . op ))
   where pvalue (PAttr k v) | k == s = Just v
         pvalue i = Nothing
         value (Attr k v) = v

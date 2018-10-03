@@ -326,7 +326,7 @@ checkPredId
       Semigroup (Tangent a), Positive (Tangent a), Affine a,
        Range a, Fractional a) =>
      KV k a
-     -> TBPredicate k a -> Maybe [AttributePath k (AccessOp a, FTB a)]
+     -> TBPredicate k a -> Maybe [AttributePath k ()]
 checkPredId v (WherePredicate l) = checkPredIdx  v l
   where
     checkPredIdx v (AndColl i ) = fmap concat $ allMaybes $ checkPredIdx v <$> i
@@ -341,7 +341,7 @@ checkPred
 checkPred v (WherePredicate l) = checkPred' v l
   where
     checkPred' v (AndColl i ) = F.all (checkPred' v) i
-    checkPred' v (OrColl i ) = F.any (checkPred' v) i
+    checkPred' v (OrColl i ) = maybe False (F.any (checkPred' v)) (nonEmpty i)
     checkPred' v (PrimColl i) = indexPred i v
 
 type ShowableConstr  a = (Fractional a ,Range a,Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
@@ -364,7 +364,7 @@ data AttributePath  k b
   | PathForeign [Rel k ] (PathIndex PathTID (Union (AttributePath k b)))
   deriving(Eq,Ord,Show,Functor,Generic)
 
-indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k (AccessOp a ,FTB a))
+indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ())
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
 indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
   = case  refLookup (Inline key) r of
@@ -395,16 +395,16 @@ indexPredIx (a@(Inline key),eqs) r =
     Just (k,eq) = L.find ((==key).fst) eqs
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
-    recPred i  =  if match eq (Right i) then  Just (TipPath (eq,i)) else Nothing
+    recPred i  =  if match eq (Right i) then  Just (TipPath ()) else Nothing
 indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
 indexPred (n@(RelAccess k nt ) ,eq) r
-  = case  refLookup  k  r of
-    Nothing ->False
-    Just i  ->recPred $ indexPred (nt , eq) <$> i
+  = case refLookup k r of
+    Nothing -> False
+    Just i  -> recPred $ indexPred (nt , eq) <$> i
   where
     recPred (TB1 i ) = i
     recPred (LeftTB1 i) = maybe False recPred i
@@ -452,7 +452,7 @@ class Range v where
 instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (TB1 i)  =  fmap TB1 $ pureR i
   pureR (ArrayTB1 xs) =  F.foldl1 appendRI  inters
-      where inters = pureR <$> F.toList xs
+      where inters = pureR <$> xs
   pureR (IntervalTB1 is) =  is
   pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
   appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
@@ -525,7 +525,6 @@ instance ( Range v
       cons (LeftTB1 i) (LeftTB1 j) = {-# SCC "ll" #-} fromMaybe True $ liftA2 cons j i
       cons (LeftTB1 i) j ={-# SCC "l_" #-}  maybe True (`cons` j) i
       cons i (LeftTB1 j) ={-# SCC "_l" #-} maybe True (cons i) j
-      -- cons (ArrayTB1 i) (ArrayTB1 j) = {-# SCC "aa" #-}  not . Set.null $ Set.intersection (Set.fromList (F.toList i)) (Set.fromList (F.toList j))
       cons (ArrayTB1 i)  j@(TB1 _ ) = {-# SCC "a_" #-}  F.any (`cons` j) i
       cons i@(TB1 _ ) (ArrayTB1 j) = {-# SCC "_a" #-} F.any (cons i) j
       cons i j = i == j 

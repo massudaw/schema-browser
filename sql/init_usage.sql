@@ -30,8 +30,12 @@ update
   from pg_class 
     where attrelid = oid and array[attname :: text] <@ ARRAY['table_type'] and array[relname ::text] <@ ARRAY['tables','catalog_tables'] and attnotnull = 'f';
 
-
-    update  
+update  
  pg_attribute  set attnotnull = 't' 
   from pg_class 
     where attrelid = oid and array[attname :: text] <@ ARRAY['rel_fks'] and array[relname ::text] <@ ARRAY['fks','catalog_fks'] and attnotnull = 'f';
+
+update  
+ pg_attribute  set attnotnull = 't' 
+  from pg_class 
+    where attrelid = oid and array[attname :: text] <@ ARRAY['pks'] and array[relname ::text] <@ ARRAY['pks','catalog_pks'] and attnotnull = 'f';

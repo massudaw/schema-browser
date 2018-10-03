@@ -171,7 +171,10 @@ instance Ord k => Ord (RelSort k ) where
 
 data RelSort k =
   RelSort (Set k) (Set k) (Rel k)
-  deriving (Show,Generic)
+  deriving (Generic)
+
+instance Show k => Show (RelSort k) where
+  show (RelSort _ _ i )= renderRel  i
 
 
 newtype MutRec a = MutRec

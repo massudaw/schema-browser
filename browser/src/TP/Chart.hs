@@ -73,12 +73,11 @@ chartDef inf
       gfields <- iinline "geo" (iopt $ ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
       evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pksM <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (iopt $ imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+      pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       color <- iinline "metric" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
       chart <- iinline "metric" (ivalue $ irecord (ifield "chart_type" (ivalue $ readV PText))) -< ()
       let
         proj r = do
-          pks <- pksM
           values <- mapM (\(SText i)->  unSOptional =<< recLookupInf inf tname (indexerRel i) r) mfields
           let fields = fmap fromJust $ filter isJust $ F.toList $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
           return $ A.toJSON <$> HM.fromList

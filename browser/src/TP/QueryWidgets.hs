@@ -1314,7 +1314,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
            Nothing -> False
         selector False = do
           ui $ onEventDyn
-            ((,,) <$> facts tsource <*> facts oldItems <@> rumors inipl)
+            (rumors $ (,,) <$> facts tsource <#> oldItems <*> inipl)
             (\(oldsel,initial,tbdiff) -> do
               let newdiff = fmap sourcePRef tbdiff
                   newtbsel = join $ applyIfChange initial tbdiff

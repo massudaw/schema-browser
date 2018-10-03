@@ -237,7 +237,7 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
 getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins s t  c)) tbf =  do
-  liftIO $ putStrLn $ show (s,t)
+  liftIO . putStrLn $ show (s,t)
   let
     -- Only evaluate pure plugins
     evalPlugin (PurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
@@ -315,7 +315,7 @@ tableLoader
     -> TBData Key ()
     -> TransactionM DBVar
 tableLoader (Project table  (Union l)) page fixed  tbf = do
-    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
+    liftIO . putStrLn $ "start loadTable " <> show (tableName table)
     inf <- askInf
     let
       dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _rawIndexes table,G.empty )) (mapDBVar inf table <$>i )
@@ -323,7 +323,7 @@ tableLoader (Project table  (Union l)) page fixed  tbf = do
     i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
     return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
-  liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
+  liftIO . putStrLn $ "start loadTable " <> show (tableName table)
   ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page fixed tbf
 
   inf <- askInf
@@ -411,16 +411,21 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
              resK = if predNull fixed then resOut else G.filterRows fixed resOut
              -- # removeAlready fetched results
              diffNew i
+                -- FIXME: When we have a partially loaded filter this code 
+                -- can generate wrong createRow', we should diff against the
+                --  main index instead of a filtered view
                 = case G.lookup (G.getIndex m i) reso of
-                   Just v ->  patchRowM' m v i
+                   Just v -> case recComplement inf m tbf fixed v of
+                      Just _ -> patchRowM' m v i
+                      Nothing -> Nothing
                    Nothing -> Just $ createRow' m  i
-             newRes = catMaybes $ fmap diffNew resK
+             newRes = traceShowId $ catMaybes $ fmap diffNew resK
          -- Only trigger the channel with new entries
          modifyTable (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)] . fmap (FetchData table) $ newRes
          let nidx = maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex
          if L.null newRes
             then do
-              liftIO $ putStrLn $ "No new fields";
+              liftIO . putStrLn $ "No new fields";
               return (nidx,(sidx,reso))
             else return (nidx,either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) )(newRes))
     (nidx,(sidx2,ndata)) <- case hasIndex of
@@ -429,13 +434,13 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v)of
             Just i -> do
-              liftIO $ putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+              liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
               readNew sq i
             Nothing -> do
-              liftIO $ putStrLn $ "Empty complement: " <> show (fst v)
+              liftIO . putStrLn $ "Empty complement: " <> show (tableName table)
               return ((sq,idx), (sidx,reso))
           Nothing -> do
-            liftIO $ putStrLn $ "No page: " <> show (pageidx)
+            liftIO . putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
           let 
@@ -448,10 +453,12 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
           case projection of
             Just remain -> do
               liftIO . putStrLn $ "Current table is partially complete: " <> show (fixed,sq,G.size reso)
-              liftIO $ putStrLn (ident $ renderTable remain)
+              liftIO . putStrLn $ (ident $ renderTable remain)
               readNew  sq tbf
             Nothing -> do
               liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
+              -- liftIO . print $ fmap (\(i,_,j) -> (i,G.bound j) ). G.getEntries <$> sidx
+              -- liftIO . putStrLn $ show (G.keys reso) 
               return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)

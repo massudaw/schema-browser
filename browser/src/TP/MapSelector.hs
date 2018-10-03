@@ -11,6 +11,7 @@ import Step.Host
 import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
 import Environment
+import Types.Patch
 import Data.String
 import Control.Arrow
 import Data.Functor.Identity
@@ -92,27 +93,33 @@ mapDef inf
       evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       efields <- iinline "geo" (ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
       desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pksM <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (iopt $ imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-      --pksM <- iinline "pks" (ivalue $ irecord (ifield "pks" (iopt $ imap $ ivalue $  readV PText))) -< ()
+      pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       features <- iinline "geo" (ivalue $ irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) -< ()
       color <- iinline "geo" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
       let
         table = lookTable inf tname
-        projf ::  (Showable , (TBData Text Showable)) -> TBData Key Showable -> Maybe A.Object
-        projf (efield@(SText field),features)  r = do
-          i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
-          pks <- pksM
-          fields <- mapM (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
-          pkfields <- mapM (\(SText i) -> fmap (i,). unSOptional =<< recLookupInf inf tname (indexerRel i) r) pks
-          return $ HM.fromList [("label", A.toJSON (HM.fromList
-                               [("position" :: Text,i)
-                               ,("id" :: Text, txt $ writePK' tname (F.toList pkfields) (TB1 efield))
-                                ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
-                               ]))
-                          ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
-        proj r = flip projf  r <$> zip (F.toList efields) (F.toList features)
+        recFTB KOptional = fmap fromJust . iopt
+        recFTBs l = F.foldl' (flip (.)) ivalue (recFTB <$> l)
+        convert (RelAccess (Inline i) j) = iinline (keyValue i) (recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
+        convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (recFTBs tyi . irecord $ convert j ) 
+          where
+            tyi = _keyFunc $ mergeFKRef  (keyType . _relOrigin <$> relUnComp i)
+        convert (Inline i) = ifield (keyValue i) (iany (readV PText ))
+        projfT ::  (Showable , (TBData Text Showable)) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom ((TBData T.Text Showable)))  Identity () A.Object 
+        projfT (efield@(SText field),features) = irecord $ proc _ -> do
+          i <- convert (liftRel inf tname (indexerRel field))  -< ()
+          pkfields <- mapA (\(SText i) -> (i, ) <$> convert (liftRel inf tname $ indexerRel i)) pks -<  ()
+          fields <- mapA (\(SText i) ->  convert (liftRel inf tname $ indexerRel i)) (fromMaybe pks desc) -< ()
+          returnA -< HM.fromList [("label", A.toJSON (HM.fromList
+                                     [("position" :: Text,i)
+                                     ,("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
+                                     ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                                     ]))
+                                 ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
+        proj r = (\ v -> (Just . runIdentity $ evalEnv (projfT  v ) ( Atom (mapKey' keyValue  r),[] ))) <$> zip (F.toList efields) (F.toList features)
       returnA -< ("#" <> renderPrim color ,table,fmap TB1 ( Non.fromList . F.toList $ efields),fmap TB1 . Non.fromList . F.toList <$> evfields,proj )
 
+mapA f a = F.foldl' (flip (liftA2 (:)))  (pure []) (f   <$> a)
 
 mapWidgetMeta  inf =  do
     importUI

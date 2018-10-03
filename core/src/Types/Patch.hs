@@ -369,7 +369,7 @@ indexFilterPatch (Inline l, ops) lo =
             of
         PAttr k f -> matching f
         i -> True
-    Nothing -> True
+    Nothing -> False 
   where
     create' :: (Index a ~ a,Patch a ,Show a,Ord a) => PathFTB (Index a) -> FTB a
     create'  = create

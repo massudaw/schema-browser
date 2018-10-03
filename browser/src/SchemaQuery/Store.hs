@@ -72,7 +72,7 @@ readState fixed dbvar = do
   let
     filterPred = filter (checkPatch  fixed)
     fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result= traceShow (fst fixed ,G.size fv) $ either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
+    result= either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
   return (result,chan)
 
 cloneDBVar
@@ -169,7 +169,8 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
         recurseAttr (G.PathInline r i) p = PInline r $ taggedRef i  nested
           where
             nested  (Many i) =  flip recurseAttr p <$> i
-        recurseAttr (G.PathAttr _ i ) p = PFK rel [] $ taggedRef i (const p)
+        recurseAttr (G.PathAttr i _ ) p = PFK rel [] $ (F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( keyType i)) $ p)
+          where ty KOptional = POpt . Just 
     result = search sidx <$>  evs
    in  concat $ result))]
   where
