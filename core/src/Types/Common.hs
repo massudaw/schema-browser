@@ -49,6 +49,7 @@ module Types.Common
   , kvFilter
   , kvFilterWith
   , kvNull
+  , kvNonEmpty
   , kvSingleton
   , kvSize
   , getAtt
@@ -698,7 +699,7 @@ restrictTable f n =  (rebuildTable . unkvlist) n
     rebuildTable n = kvlist . concat . F.toList $ f <$> n
 
 tableNonRef :: Ord k => KV k a -> KV k a
-tableNonRef = restrictTable  nonRefTB
+tableNonRef = restrictTable nonRefTB
 
 isRelAccess (RelAccess i _ ) = isRelAccess i
 isRelAccess (RelComposite i ) = L.any isRelAccess i
@@ -917,6 +918,9 @@ kvSingleton i = KV $ Map.singleton (relSort $ keyattr i ) (valueattr i)
 
 kvSize :: Ord k => KV k a ->  Int
 kvSize (KV i) = Map.size i
+
+kvNonEmpty :: Ord k => KV k a ->  Maybe (KV k a)
+kvNonEmpty i = if kvNull i then Nothing else Just i
 
 kvNull :: Ord k => KV k a ->  Bool
 kvNull (KV i) = Map.null i

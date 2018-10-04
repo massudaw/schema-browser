@@ -265,7 +265,7 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
       return $ (G.insert (el, i ) G.indexParam l,RowPatch (ipa,DropRow ))
   where
     i = fmap create ipa
-applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow (elp))) =
+applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow elp)) =
   maybe (Right ((m,l),p)) Right $
     first (m,) <$> case G.lookup ix  l of
       Just v -> Just (G.update  ix (maybe id (flip apply ) (diff v el)) l,RowPatch (idx,DropRow ))
@@ -345,7 +345,7 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
 
 
 searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
-searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (traceShow ("predicate",p) $ WherePredicate p) g) <$>  splitIndexPK b pk
+searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  splitIndexPK b pk
 
 
 type DBVar = DBVar2 Showable
@@ -883,13 +883,6 @@ filterfixedS table fixed (s,v)
   = if predNull fixed
        then v
        else queryCheckSecond (fixed ,rawPK table) (TableRep (tableMeta table,s,v))
-
-wrapModification m a = do
-  inf <- askInf
-  now <- liftIO getCurrentTime
-  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return (force a)
-
-
 
 data TableModificationK k p
   = TableModification { tableId :: Maybe Int

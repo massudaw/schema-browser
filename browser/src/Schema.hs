@@ -361,7 +361,7 @@ idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable in
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map
-  where map = justError ("notype" <> T.unpack (showKey v)) $  backendsKey inf (keyFastUnique v)
+  where map = justError ("notype: " <> T.unpack (showKey v)) $  backendsKey inf (keyFastUnique v)
 
 loadPlugins' :: InformationSchema -> R.Dynamic [Plugins]
 loadPlugins' code =

@@ -18,15 +18,8 @@ module SchemaQuery.Read
   , selectFromTable
   , fromTable
   , refTables'
-  -- Pointer Only
-  , prerefTable
   -- Cache Only Operations
   , loadFKS
-  -- Transaction Operations
-  , transaction
-  , transactionNoLog
-  -- Core
-  , modifyTable
   -- Constraint Checking
   , tableCheck
   -- SQL Arrow API
@@ -37,7 +30,6 @@ import SchemaQuery.Store
 import Serializer
 import Text
 import Control.Concurrent.STM
-import Control.Exception (throw)
 import qualified Control.Lens as Le
 import Control.Monad.Catch
 import Debug.Trace
@@ -155,25 +147,12 @@ getFrom table allFields b = do
       let
         output = resFKS newRow
         result = either (const Nothing) (diff b)  output
-      traverse (modifyTable m [] . pure . (FetchData table . RowPatch . (G.getIndex m b,).PatchRow)) result
+      traverse (fetchPatches m [] . pure . (RowPatch . (G.getIndex m b,).PatchRow)) result
       traverse (\i -> do
         liftIO . putStrLn $ "Old\n" <> show b 
         liftIO . putStrLn $ "Result\n" <> (maybe ("") show result)
         liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<<  (applyIfChange b =<< result )
       return result) n)) comp
-
-
-modifyTable :: KVMetadata Key ->  [IndexMetadataPatch Key Showable] -> [TableModification (RowPatch Key Showable)] -> TransactionM ()
-modifyTable t ix p = do
-  inf <- askInf
-  m <- get
-  o <- case M.lookup t m of
-    Just (ref,po,ixp) -> return $ M.insert t (ref,p ++ po,ix ++ ixp ) m
-    Nothing -> do
-      mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
-      ref <- liftIO $ lookDBVar inf mmap t
-      return $ M.singleton t (ref,p,ix)
-  put o
 
 
 
@@ -368,23 +347,6 @@ tableLoader' table  page fixed tbf = do
     return (rights  result,x,o )) table page fixed tbf
 
 
-
-createTable fixed m = do
-  inf <- askInf
-  let mvar = mvarMap inf
-  mmap <- liftIO . atomically $ readTVar mvar
-  map <-get
-  predbvar <- liftIO (lookDBVar inf mmap m)
-  ((fixedmap,table),dbvar)
-      <- liftIO . atomically $
-        cloneDBVar  (fixed ,_kvpk m) predbvar
-  (log ,logix)<-case M.lookup m map of
-    Just (_,i,l) -> return $ (concat $ tableDiffs <$> i,l)
-    Nothing -> do
-      modify (M.insert m (dbvar,[],[]))
-      return ([],[])
-  return ((either error fst $ applyUndo fixedmap logix,either error fst $ foldUndo table log ),dbvar)
-
 -- TODO: Could we derive completeness information from bounds
 -- or have some negative information about explored empty bounds
 pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (tableName table)) $ do
@@ -419,9 +381,9 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                       Just _ -> patchRowM' m v i
                       Nothing -> Nothing
                    Nothing -> Just $ createRow' m  i
-             newRes = traceShowId $ catMaybes $ fmap diffNew resK
+             newRes = catMaybes $ fmap diffNew resK
          -- Only trigger the channel with new entries
-         modifyTable (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)] . fmap (FetchData table) $ newRes
+         fetchPatches (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)]  newRes
          let nidx = maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex
          if L.null newRes
             then do
@@ -448,8 +410,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             existingProjection = fmap (fst .snd) pagetoken
             projection = recComplement inf m tbf fixed =<< existingProjection
           when (sq < G.size reso) $ do
-            modifyTable (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
-            liftIO $ print (tableName table,fixed,G.keys reso)
+            fetchPatches (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
           case projection of
             Just remain -> do
               liftIO . putStrLn $ "Current table is partially complete: " <> show (fixed,sq,G.size reso)
@@ -457,8 +418,6 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
               readNew  sq tbf
             Nothing -> do
               liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
-              -- liftIO . print $ fmap (\(i,_,j) -> (i,G.bound j) ). G.getEntries <$> sidx
-              -- liftIO . putStrLn $ show (G.keys reso) 
               return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)
@@ -598,23 +557,9 @@ takeMany mvar = go . (:[]) =<< readTChan mvar
       maybe (return (reverse v )) (go . (:v)) i
 
 
-
 tableLoaderAll table  page fixed tbf = do
   inf <- askInf
   tableLoader'  table page fixed (fromMaybe (allFields inf table ) tbf)
-
-tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
-tellPatches m i =
-  modifyTable m [] =<< mapM (wrapModification m ) i
-
-withDynamic :: (forall b . IO b -> IO b) -> Dynamic a -> Dynamic a
-withDynamic  f i =  do
-  (v,e) <- liftIO . f $ (runDynamic i) `catch` (\e -> putStrLn ("Transaction Exception: "  ++ show (e  :: SomeException)) >> throw e )
-  mapM registerDynamic e
-  return v
-
-transaction :: Show a=>InformationSchema -> TransactionM a -> Dynamic a
-transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ transactionNoLog inf log
 
 loadFKS targetTable table = do
   inf <- askInf

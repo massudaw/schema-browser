@@ -29,52 +29,30 @@ import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
 import SchemaQuery.Read
+import SchemaQuery.Store
 import Types
 import qualified Types.Index as G
 import Types.Patch
 
 
-matchUpdate inf m a =
- let
-    overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
-    overloadedRules = (rules $ schemaOps inf)
-    isUpdate (i,UpdateRule _ ) =  i (mapKey' keyValue a)
-    isUpdate _ = False
- in L.find isUpdate  =<< overloaded
+isCreate a (i,CreateRule _) = i (mapKey' keyValue a)
+isCreate _ _ = False
 
+isDeleteRule a (i,DropRule _) =  i (mapKey' keyValue a)
+isDeleteRule _ _ = False
 
-updateFrom m a pk b = do
-  inf <- askInf
-  v <- case matchUpdate inf m a  of
-    Just (_,UpdateRule i) -> do
-      liftIO . putStrLn $ "Triggered update rule: " ++ show (_kvschema m,_kvname m)
-      v <- i a b
-      tellPatches m (pure v)
-      return v
-    Nothing -> do
-      let bf = filter (\k -> F.any (L.elem FWrite . keyModifier ._relOrigin) (relUnComp $ index k)) b
-      patchFrom m ((pk ,PatchRow bf))
-  return v
+isUpdate a (i,UpdateRule _) =  i (mapKey' keyValue a)
+isUpdate _ _ = False
 
-patchFrom m  r   = do
-  let l = RowPatch r
-  asyncPatches m (pure l)
-  return l
+matchInsert = matchRule isCreate 
+matchDelete = matchRule isDeleteRule
+matchUpdate = matchRule isUpdate
 
-fullInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
-fullInsert k1 v1 = createRow' k1 <$> recInsert k1 v1
-
-fullEdit ::  KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (RowPatch Key Showable)
-fullEdit k1 old v2 =
-  patchRow' k1 old <$> fullDiffEdit k1 old v2
-
-matchInsert inf m a =
+matchRule cond inf m a =
   let
     overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
     overloadedRules = (rules $ schemaOps inf)
-    isCreate (i,CreateRule _ ) = i (mapKey' keyValue a)
-    isCreate _ = False
-  in L.find isCreate  =<< overloaded
+  in L.find (cond  a) =<< overloaded
 
 insertFrom  m a   = do
   inf <- askInf
@@ -86,14 +64,22 @@ insertFrom  m a   = do
   tellPatches m (pure v)
   return  v
 
-matchDelete inf m a =
- let
-    overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
-    overloadedRules = (rules $ schemaOps inf)
-    isDelete (i,DropRule _ ) =  i (mapKey' keyValue a)
-    isDelete _ = False
- in L.find isDelete =<< overloaded
+updateFrom m a pk b = do
+  inf <- askInf
+  v <- case matchUpdate inf m a  of
+    Just (_,UpdateRule i) -> do
+      liftIO . putStrLn $ "Triggered update rule: " ++ show (_kvschema m,_kvname m)
+      v <- i a b
+      tellPatches m (pure v)
+      return v
+    Nothing -> do
+      patchFrom m (pk ,PatchRow b)
+  return v
 
+patchFrom m  r   = do
+  let l = RowPatch r
+  asyncPatches m (pure l)
+  return l
 
 deleteFrom  m a   = do
   inf <- askInf
@@ -109,11 +95,19 @@ deleteFrom  m a   = do
 createRow (RowPatch (_,CreateRow i)) = i
 createRow (RowPatch (_,PatchRow i)) = create i
 
+fullInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
+fullInsert k1 v1 = createRow' k1 <$> recInsert k1 v1
+
+fullEdit ::  KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (RowPatch Key Showable)
+fullEdit k1 old v2 =
+  patchRow' k1 old <$> fullDiffEdit k1 old v2
+
+
 
 recInsert :: KVMetadata Key -> TBData Key Showable -> TransactionM  (TBData Key Showable)
 recInsert k1  v1 = do
    inf <- askInf
-   ret <- traverseKV (tbInsertEdit k1) v1
+   ret <- noInsert k1 v1
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing mempty (Just (recPK inf k1 (allFields inf tb)))
@@ -130,15 +124,15 @@ recInsert k1  v1 = do
 
 itRefFun :: RelOperations (KV Key Showable)
 itRefFun = (id,id,noEdit,noInsert)
-  where
-    noInsert k1 v1   = do
-      traverseKV (tbInsertEdit k1)  v1
-    noEdit k1 v1 v2  = do
-      trazipWithKV (tbDiffEditInsert k1) v1 v2
+
+noInsert k1 v1   = do
+  traverseKV (tbInsertEdit k1)  v1
+noEdit k1 v1 v2  = do
+  trazipWithKV (tbDiffEditInsert k1) v1 v2
 
 fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
 fullDiffEdit k1 old v2 = do
-   edn <-  trazipWithKV (tbDiffEditInsert k1)  old v2
+   edn <-  noEdit k1 old v2
    when (isJust $ diff (tableNonRef old) (tableNonRef edn)) . void $do
      traverse (updateFrom k1 old (G.getIndex k1 edn))  (diff old edn)
    return edn
@@ -227,17 +221,3 @@ tbInsertRef (funi,funo,edit,insert) m2 = mapInf m2 . traverse (fmap funo . inser
 
 mapInf m2 = localInf (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf)))
 
-
-asyncModification m a = do
-  inf <- askInf
-  now <- liftIO getCurrentTime
-  AsyncTableModification  (lookTable inf (_kvname m) )<$>  return a
-
-
-asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
-asyncPatches m i =
-  modifyTable m [] =<< mapM (asyncModification m) i
-
-tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
-tellPatches m i =
-  modifyTable m [] =<< mapM (wrapModification m ) i

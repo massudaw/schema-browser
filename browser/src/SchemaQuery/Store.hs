@@ -5,21 +5,29 @@ module SchemaQuery.Store
   (
   -- Clear in memory cache
     resetCache
+  -- Read current state
+  , readIndex
+  , readState
   , cloneDBVar
-  -- , readIndex
-  -- , readState
-  -- Flush to disk in memory DB
-  -- Pointer Only
+  -- Get table pointer 
   , prerefTable
   , lookDBVar
   -- Transaction Operations
   , transactionNoLog
+  , transaction
+  -- Create table
+  , createTable
+  -- Log changes to current monad
+  , fetchPatches 
+  , tellPatches
+  , asyncPatches 
   ) where
 
 import Control.Concurrent
 import Debug.Trace
 import Control.Concurrent.STM
 import Control.DeepSeq
+import Data.Time
 import Control.Monad.Catch
 import Control.Monad.RWS
 import qualified Data.Foldable as F
@@ -99,6 +107,16 @@ transactionNoLog inf log = do
       putPatchSTM (patchVar ref) v
     ) (M.toList aggr)
   return md
+
+withDynamic :: (forall b . IO b -> IO b) -> Dynamic a -> Dynamic a
+withDynamic  f i =  do
+  (v,e) <- liftIO . f $ (runDynamic i) `catch` (\e -> putStrLn ("Transaction Exception: "  ++ show (e  :: SomeException)) >> throwM e )
+  mapM registerDynamic e
+  return v
+
+transaction :: Show a=>InformationSchema -> TransactionM a -> Dynamic a
+transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ transactionNoLog inf log
+
 
 prerefTable :: InformationSchema -> Table -> IO (DBRef Key Showable)
 prerefTable  inf table  = do
@@ -355,3 +373,64 @@ updateTable inf (DBRef {..})
           _ -> return () ))
       ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
     return ())  (\e -> atomically ( readTChan patchVar ) >>= printException e )
+
+
+createTable fixed m = do
+  inf <- askInf
+  let mvar = mvarMap inf
+  mmap <- liftIO . atomically $ readTVar mvar
+  map <-get
+  predbvar <- liftIO (lookDBVar inf mmap m)
+  ((fixedmap,table),dbvar)
+      <- liftIO . atomically $
+        cloneDBVar  (fixed ,_kvpk m) predbvar
+  (log ,logix)<-case M.lookup m map of
+    Just (_,i,l) -> return $ (concat $ tableDiffs <$> i,l)
+    Nothing -> do
+      modify (M.insert m (dbvar,[],[]))
+      return ([],[])
+  return ((either error fst $ applyUndo fixedmap logix,either error fst $ foldUndo table log ),dbvar)
+
+
+
+modifyTable :: KVMetadata Key ->  [IndexMetadataPatch Key Showable] -> [TableModification (RowPatch Key Showable)] -> TransactionM ()
+modifyTable t ix p = do
+  inf <- askInf
+  m <- get
+  o <- case M.lookup t m of
+    Just (ref,po,ixp) -> return $ M.insert t (ref,p ++ po,ix ++ ixp ) m
+    Nothing -> do
+      mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
+      ref <- liftIO $ lookDBVar inf mmap t
+      return $ M.singleton t (ref,p,ix)
+  put o
+
+
+fetchModification m a = do
+  inf <- askInf
+  now <- liftIO getCurrentTime
+  FetchData (lookTable inf (_kvname m) )<$>  return (force a)
+
+wrapModification m a = do
+  inf <- askInf
+  now <- liftIO getCurrentTime
+  TableModification Nothing now (username inf) (lookTable inf (_kvname m) )<$>  return (force a)
+
+asyncModification m a = do
+  inf <- askInf
+  now <- liftIO getCurrentTime
+  AsyncTableModification  (lookTable inf (_kvname m) )<$>  return a
+
+fetchPatches ::  KVMetadata Key ->  [IndexMetadataPatch Key Showable] -> [RowPatch Key Showable] -> TransactionM ()
+fetchPatches m ix i =
+  modifyTable m ix =<< mapM (fetchModification m) i
+
+asyncPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
+asyncPatches m i =
+  modifyTable m [] =<< mapM (asyncModification m) i
+
+tellPatches :: KVMetadata Key ->  [RowPatch Key Showable] -> TransactionM ()
+tellPatches m i =
+  modifyTable m [] =<< mapM (wrapModification m ) i
+
+

@@ -34,10 +34,6 @@ import qualified Types.Index as G
 import Types.Patch
 import Utils
 
-filterFun  = M.filter (\ v-> not $ isFun v )
-  where isFun (Fun _ _ _ ) = True
-        isFun i = False
-
 insertPatch
   :: (MonadIO m ,Functor m )
      => InformationSchema
@@ -45,37 +41,37 @@ insertPatch
      -> KVMetadata Key
      -> TBData Key Showable
      -> m (TBIdx Key Showable)
-insertPatch  inf conn table row  = liftIO $ if not $ L.null serialAttr
+insertPatch  inf conn table row  = liftIO $ if not (kvNull serialTB)
       then do
         let
           iquery :: String
-          (iquery ,namemap)= codegen $ do
-            j <- projectTree inf table (kvlist serialAttr)
+          (iquery, namemap)= codegen $ do
+            j <- projectTree inf table serialTB 
             return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
         print  =<< formatQuery conn (fromString iquery) directAttr
-        [out] <- queryWith (fromRecordJSON inf table serialTB namemap ) conn (fromString  iquery) directAttr
+        [out] <- queryWith (fromRecordJSON inf table serialTB namemap) conn (fromString iquery) directAttr
         let gen =  patch out
         return (patch out)
       else do
         let
           iquery = T.unpack prequery
-        executeLogged  conn (fromString  iquery ) directAttr
+        executeLogged  conn (fromString iquery) directAttr
         return []
     where
-      prequery =  "INSERT INTO " <> kvMetaFullName table <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV row)
-      testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
-      direct f = filter (not.all1 testSerial .f)
-      serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( _kvpk table<> _kvattrs table)
+      prequery = "INSERT INTO " <> kvMetaFullName table <> " (" <> T.intercalate "," (key <$> directAttrProj) <> ") VALUES (" <> T.intercalate "," (value <$> directAttrProj) <> ")"
+      attrs = unkvlist row
+      testSerial (Attr k v) = (isSerial (keyType k)) && (isNothing.unSSerial $ v)
+      testSerial _ = False
+      serialTB = kvlist (flip Attr (LeftTB1 Nothing) <$> filter (isSerial.keyType) (_kvattrs table))
       directAttr :: [TB Key Showable]
-      directAttr = direct aattr attrs
-      projKey :: [TB Key a ] -> [Key]
-      projKey = fmap _relOrigin . fmap keyattr
-      serialTB = kvlist serialAttr
-      all1 f [] = False
-      all1 f i = all f i
+      directAttr = filter (not.testSerial) attrs
+      directAttrProj = projKey directAttr 
+
+projKey :: [TB Key a ] -> [Key]
+projKey = concat . fmap (fromMaybe [] . _relOutputs .index)
 
 value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
+key = escapeReserved . keyValue 
 
 attrValueName ::  TB (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
@@ -104,6 +100,12 @@ applyPatch conn m patch  = do
   where
     (qstr,qargs,_) = updateQuery m patch
 
+updateQuery
+  :: IsString a1 =>
+     KVMetadata (FKey (KType (Prim PGType (Text, Text))))
+     -> ([TBIndex Showable], TBIdx PGKey Showable)
+     -> (a1, [(KType (Prim KPrim (Text, Text)), FTB Showable)],
+         Maybe a2)
 updateQuery m (pks,skv) = (qstr,qargs,Nothing)
   where
     qstr = fromString $ T.unpack up
@@ -140,6 +142,7 @@ type SetterGen c = (Text
                 -> PathFTB c
                 -> UpdateOperations)
 
+escapeInline :: Text -> Text
 escapeInline str = case T.splitOn "."  str of
            [] -> ""
            [i] -> i
@@ -204,8 +207,8 @@ batchEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch K
 batchEd m i =  do
   inf <- askInf
   let
-    codeGen (RowPatch (i,PatchRow dff)) = addRet $ updateQuery mpg ([i] ,dff)
-    codeGen (BatchPatch i (PatchRow dff)) = addRet $ updateQuery mpg (i ,dff)
+    codeGen (RowPatch (i,PatchRow dff)) = addRet $ updateQuery mpg ([i] ,filterWritablePatch dff)
+    codeGen (BatchPatch i (PatchRow dff)) = addRet $ updateQuery mpg (i ,filterWritablePatch dff)
     addRet (q,i,j) = (q <> " RETURNING null",i,j)
     mpg = (recoverFields inf <$> m)
     with = "WITH "
@@ -229,7 +232,7 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
         ini = compact (defs ++  patch j)
-      d <- either error (insertPatch  inf (conn  inf) m . filterWriteable ) (tableCheck m (create ini))
+      d <- either error (maybe (return []) (insertPatch  inf (conn  inf) m) . kvNonEmpty . tableNonRef. filterWriteable ) (tableCheck m (create ini))
       l <- liftIO getCurrentTime
       return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
 
@@ -245,11 +248,12 @@ deleteMod m t = do
       return $  RowPatch (idx,DropRow )
 
 
-patchMod :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable-> TransactionM (((RowPatch Key Showable)))
+patchMod :: KVMetadata Key -> [TBIndex Showable] -> TBIdx Key Showable-> TransactionM (RowPatch Key Showable)
 patchMod m pk patch = do
   inf <- askInf
   liftIO $ do
-    applyPatch (conn inf) (recoverFields inf <$> m) (pk,patchNoRef $ firstPatch (recoverFields inf) patch)
+    traverse (\i -> 
+      applyPatch (conn inf) (recoverFields inf <$> m) (pk, firstPatch (recoverFields inf) i)) (nonEmpty (patchNoRef $ filterWritablePatch patch))
     return $ rebuild  pk (PatchRow patch)
 
 getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
@@ -272,8 +276,11 @@ getRow table  delayed (Idex idx) = do
 
 filterReadable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FRead (keyModifier k))
+
 filterWriteable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FWrite (keyModifier k))
+
+filterWritablePatch = filter (\k -> F.all (L.elem FWrite . keyModifier) (relOutputSet $ index k)) 
 
 selectAll
   ::
