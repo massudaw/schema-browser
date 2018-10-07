@@ -160,27 +160,12 @@ function createLayer(ref,tname,features){
 }
 
 
-function createMap (ref,nej,swj){
+function createMap (ref){
   ref.mymap = L.map(ref);
-  ne = JSON.parse(nej);
-  sw  = JSON.parse(swj);
-  if (ne == null || sw == null ) {
-    /*    navigator.geolocation.getCurrentPosition(function(position) {
-      var mtorad = 0.00000898315
-      var mcdis = 4000*mtorad
-      var bounds = L.latLngBounds([position.coords.latitude + mcdis , position.coords.longitude + mcdis],[position.coords.latitude - mcdis , position.coords.longitude - mcdis]);
-      setPosition(ref,bounds.getSouthWest(),bounds.getNorthEast());
-    }, function() {
-      handleLocationError(true, map.getCenter());
-    });(*/
-  }else {
-    ref.mymap.fitBounds([ne,sw],{animate:false});
-  }
-  ref.layer={}
-
   var osmUrl='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   var osmAttrib='Map data © <a href="https://openstreetmap.org">OpenStreetMap</a> contributors';
   var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(ref.mymap);	
+  ref.layer={}
 }
 
 

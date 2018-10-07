@@ -87,16 +87,23 @@ eventWidgetMeta inf =  do
 
 agendaDef inf
   = projectV
-    (innerJoinR
-      (fromR "tables" `whereR` schemaPred2)
-      (fromR "event" `whereR` schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event") fields
+    (innerJoinR 
+      (leftJoinR
+        (innerJoinR
+          (fromR "tables" `whereR` schemaPred2)
+          (fromR "event" `whereR` schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event")
+        (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+      (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
    where
+      schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
+      schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
-      schemaPredName =  [(keyRef "table_schema",Left (txt (schemaName inf),Equals) )]
       fields =  irecord $ proc t -> do
           SText tname <-
               ifield "table_name" (ivalue (readV PText))  -< ()
           efields <- iinline "event" (ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+          pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
           color <- iinline "event" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
             table = lookTable inf tname
@@ -108,27 +115,30 @@ agendaDef inf
             convField v = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
             scolor =  "#" <> renderPrim color
-            projf  r efield@(SText field) = do
-                i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
-                return . M.fromList $
-                  [("id" :: Text, txt $ writePK (tableMeta table) r (TB1 efield  ) )
-                  ,("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r))
+            projfT ::  Showable  -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
+            projfT efield@(SText field) = irecord $ proc _ -> do
+              i <- convertRel inf tname field  -< ()
+              pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
+              fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
+              returnA -< HM.fromList $ fmap (fmap A.toJSON) $
+                  [("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
+                  ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
                   ,("table",txt tname)
                   ,("color" , txt $ T.pack  scolor )
                   ,("field", TB1 efield )] <> convField i
-            proj r = ( projf r <$> (F.toList efields))
+            proj =  fmap (fmap Just ) . mapA projfT  $ F.toList efields
 
           returnA -< (txt $ T.pack $ scolor ,table,fmap TB1 (Non.fromList. F.toList $ efields),proj )
 
 
 calendarView
-  :: (A.ToJSON a, Foldable t2
-      ) =>
+  :: 
      InformationSchema
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
-     -> t2 (t, TableK Key, NonEmpty (FTB Showable),
-          TBData Key Showable -> [Maybe a])
+     -> [(t, TableK Key, NonEmpty (FTB Showable),
+          PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () [Maybe A.Object]
+         )]
     -> Tidings (S.Set (TableK Key))
      -> Mode
      -> [Char]
@@ -141,24 +151,25 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
-    edits <- traverseUI (traverse (\tref->  do
+    traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,fields,proj)-> do
             let pred = WherePredicate . AndColl $ [timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
-            reftb <- ui $ refTables' inf t Nothing pred
+                selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
+            liftIO $ print (selection,(fst $ staticP proj))
+            reftb <- ui $ refTablesProj inf t Nothing pred selection
             let v = reftb ^. _2
             let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts v <@>  evc
             tdib <- ui $ stepper Nothing evsel
             let tdi = tidings tdib evsel
             ui $ onEventIO evsel hselg
             traverseUI
-              (\i ->calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap proj $ G.toList (primary i))) v
-                                  ) ref) . F.toList ) sel
+              (\i ->calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap (evalPlugin proj) $ G.toList (primary i))) v) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
-      patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i)) ))
+      patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i))))
     return ([innerCalendar],tidings bhsel eselg)
 
 calendarSelRow readSel (agenda,resolution,incrementT) = do

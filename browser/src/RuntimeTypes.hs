@@ -563,10 +563,8 @@ liftTableF f inf  tname i  =  kvlist $ liftFieldF  f inf  tname <$> unkvlist i
     ta = lookTable inf tname
 
 
-
 liftTable' :: Show a => InformationSchema -> Text -> TBData Text a -> TBData Key a
 liftTable' = liftTableF lookupKeyName
-
 
 
 findRefTableKey

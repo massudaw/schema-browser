@@ -5,13 +5,14 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module TP.MapSelector (mapWidgetMeta,mapSelector,mapCreate,moveend,eventClick,createLayers,legendStyle,mapDef) where
+module TP.MapSelector (mapWidgetMeta,mapSelector,setPosition,mapCreate,moveend,eventClick,createLayers,legendStyle,mapDef) where
 
 import Step.Host
 import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
 import Environment
 import Types.Patch
+import qualified Control.Lens  as Le 
 import Data.String
 import Control.Arrow
 import Data.Functor.Identity
@@ -61,13 +62,12 @@ import Data.Text (Text)
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
-removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
-createBounds el tname evs= runFunction $ ffi "createBounds(%1,%3,%2)" el evs tname
+removeLayers el tname = runFunctionDelayed el $ ffi "removeLayer(%1,%2)" el tname
+createLayers el tname evs= runFunctionDelayed el  $ ffi "createLayer(%1,%3,%2)" el evs tname
 
-createLayers el tname evs= runFunction $ ffi "createLayer(%1,%3,%2)" el evs tname
-mapCreate el Nothing = runFunction $ ffi "createMap(%1,null,null,null)" el
-mapCreate el (Just (ne,sw)) = runFunction $ ffi "createMap(%1,%2,%3,null)" el  (show ne) (show sw)
-
+mapCreate el = runFunctionDelayed el $ ffi "createMap(%1)" el
+mapCreate el  = runFunctionDelayed el $ ffi "createMap(%1)" el
+setPosition el (i,j) = runFunctionDelayed el $ ffi "setPosition(%1,%2,%3)"  el i j 
 
 
 mapDef inf
@@ -98,116 +98,101 @@ mapDef inf
       color <- iinline "geo" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
       let
         table = lookTable inf tname
-        recFTB KOptional = fmap fromJust . iopt
-        recFTBs l = F.foldl' (flip (.)) ivalue (recFTB <$> l)
-        convert (RelAccess (Inline i) j) = iinline (keyValue i) (recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
-        convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (recFTBs tyi . irecord $ convert j ) 
-          where
-            tyi = _keyFunc $ mergeFKRef  (keyType . _relOrigin <$> relUnComp i)
-        convert (Inline i) = ifield (keyValue i) (iany (readV PText ))
-        projfT ::  (Showable , (TBData Text Showable)) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom ((TBData T.Text Showable)))  Identity () A.Object 
+        projfT ::  (Showable , TBData Text Showable) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
         projfT (efield@(SText field),features) = irecord $ proc _ -> do
-          i <- convert (liftRel inf tname (indexerRel field))  -< ()
-          pkfields <- mapA (\(SText i) -> (i, ) <$> convert (liftRel inf tname $ indexerRel i)) pks -<  ()
-          fields <- mapA (\(SText i) ->  convert (liftRel inf tname $ indexerRel i)) (fromMaybe pks desc) -< ()
+          i <- convertRel inf tname field  -< ()
+          pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
+          fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
           returnA -< HM.fromList [("label", A.toJSON (HM.fromList
                                      [("position" :: Text,i)
                                      ,("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
                                      ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
                                      ]))
                                  ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
-        proj r = (\ v -> (Just . runIdentity $ evalEnv (projfT  v ) ( Atom (mapKey' keyValue  r),[] ))) <$> zip (F.toList efields) (F.toList features)
-      returnA -< ("#" <> renderPrim color ,table,fmap TB1 ( Non.fromList . F.toList $ efields),fmap TB1 . Non.fromList . F.toList <$> evfields,proj )
+        proj =  fmap (fmap Just ) . mapA projfT  $ zip (F.toList efields) (F.toList features)
+        pred predi positionB calT = WherePredicate $ AndColl $ predicate inf table (fmap  fieldKey <$>efields' ) (fmap fieldKey <$> Just   gfields' ) (positionB,Just calT) : maybeToList (unPred <$> predi)
+          where
+            gfields' = fmap TB1 ( Non.fromList . F.toList $ efields)
+            efields' = fmap TB1 . Non.fromList . F.toList <$> evfields
+            unPred (WherePredicate e)  =e
+            fieldKey (TB1 (SText v))=  v
+      returnA -< ("#" <> renderPrim color, table, pred, proj)
 
-mapA f a = F.foldl' (flip (liftA2 (:)))  (pure []) (f   <$> a)
+
 
 mapWidgetMeta  inf =  do
-    importUI
-      =<< sequence
-        [js "leaflet.js"
-        ,css "leaflet.css"
-        ,js "leaflet-svg-markers.min.js"
-        ]
     fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (mapDef inf) ()
 
 
 legendStyle dashes lookDesc table b = traverse render item
   where
-    render (c, _, _, _, _) = do
+    render c = do
       element b # set UI.class_ "col-xs-1"
       label <-
         UI.div # set text (T.unpack  lookDesc) #
         set UI.class_ "fixed-label col-xs-11"
       UI.label # set children [b, label] #
-        set UI.style [("background-color", c)] #
+        set UI.style [("background-color", Le.view Le._1 c )] #
         set UI.class_ "table-list-item" #
         set UI.style [("display", "-webkit-box")]
     item =
-      M.lookup table (M.fromList $ fmap (\i@(a, b, c, _, _) -> (b, i)) dashes)
+      M.lookup table (M.fromList $ fmap (\i -> (Le.view Le._2 i, i)) dashes)
 
 mapSelector
-  :: (Show a ,A.ToJSON a ) =>
+  :: 
      InformationSchema
      -> Tidings (Maybe (TBPredicate Key Showable))
      -> (String,
          TableK Key,
-         Non.NonEmpty (FTB Showable),
-         Maybe (Non.NonEmpty (FTB Showable)),
-         TBData Key Showable -> [Maybe a])
+          Maybe (TBPredicate Key Showable)
+                     -> Maybe ([Double], [Double])
+                     -> (UTCTime, String)
+                     -> WherePredicate,
+         PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () [Maybe A.Object]
+         )
      -> Tidings (UTCTime, String)
      -> Tidings (Maybe (TBData Key Showable))
      -> (Event ([Double], [Double]),
          Tidings (Maybe ([Double], [Double])))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-mapSelector inf pred selected mapT sel (cposE,positionT) = do
+mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
         innermap <- UI.div # set UI.style [("height","250px"),("width","100%")]
         (eselg,hselg) <- ui newEvent
         (egselg,hgselg) <- ui newEvent
         evc <- eventClick innermap
-        let
-          fields = selected ^. _3
-          boundSel :: FTB Showable ->  TBData Key Showable -> Maybe (Interval Showable)
-          boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ head $ indexer field)   sel
-          boundsSel :: Tidings (Maybe (Interval Showable ))
-          boundsSel = join . fmap (\j -> fmap (((\(G.FTBNode i) -> i).G.union) . S.fromList) . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
-          leftEntry :: Interval Showable -> G.Node (FTB Showable)
-          leftEntry i  = G.FTBNode i
         onEvent cposE (liftIO . hgselg)
-        p <- currentValue (facts boundsSel)
+        -- p <- currentValue (facts boundsSel)
         pt <- currentValue (facts positionT)
         let
-            pb = join (convertInter <$> p) <|> pt
-            positionE = unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel)
-            setPosition = (\v@(sw,ne) -> runFunctionDelayed innermap $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
+            -- boundsSel :: Tidings (Maybe (Interval Showable ))
+            -- boundsSel = join . fmap (\j -> fmap (((\(G.FTBNode i) -> i).G.union) . S.fromList) . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
+            pb = {-join (convertInter <$> p) <|>-} pt
+            positionE = (Just <$> egselg) -- unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel)
+            setP = setPosition innermap  
 
-        positionB <- ui $stepper  pb  positionE
+        position <- ui $ stepperT  pb  positionE
 
         let
-          positionT = tidings positionB positionE
-          pcal = liftA2 (,)   positionT mapT
+          pcal = liftA3 wherePred pred position mapT
+          tname = tableName tb
 
-        mapCreate  innermap (Nothing :: Maybe ([Double],[Double]))
+        mapCreate  innermap 
         move <- moveend innermap
         onEvent move (liftIO . hgselg)
-        traverseUI (traverse setPosition ) =<< ui (calmT positionT)
+        traverseUI (traverse setP) =<< ui (calmT positionT)
 
-        fin <- (\(_,tb,fields,efields,proj) -> do
-          let
-            tname = tableName tb
-          traverseUIInt (\(predi,(positionB,calT))-> do
-            let pred = WherePredicate $ AndColl $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT) : maybeToList (unPred <$> predi)
-                unPred (WherePredicate e)  =e
-                fieldKey (TB1 (SText v))=  v
-            reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-            let v =  primary <$> reftb ^. _2
-            traverseUI (\i -> do
-              createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
+        fin <- traverseUIInt (\pred-> do
+            let 
+              selection = projectFields inf tb (fst $ staticP proj) $ allFields inf tb
+            reftb <- ui $ refTablesProj inf tb Nothing pred selection
+            let v = primary <$> reftb ^. _2
+            traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
-            onEvent evsel (liftIO . hselg)
-            ) $ liftA2 (,) pred pcal
-          ) selected
+            onEvent evsel (liftIO . hselg)) pcal
         mapSel <- ui $ stepperT Nothing (fmap snd <$> eselg )
         return (TrivialWidget mapSel innermap)
+
+              
 
 readMapPK v = case unsafeFromJSON v of
       [i,j]  -> Just (i,readBool j)

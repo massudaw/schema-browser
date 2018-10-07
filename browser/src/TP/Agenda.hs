@@ -51,14 +51,6 @@ import Data.Text (Text)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-calendarCreate m cal def = runFunctionDelayed cal $ ffi "createAgenda(%1,%2,%3)" cal def m
-
-calendarAddSource cal t evs = do
-  runFunctionDelayed cal $ ffi "addSource(%1,%2,%3)" cal (tableName t) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  $ evs)
-  ui $ registerDynamic (fmap fst $ runDynamic $ evalUI cal $ calendarRemoveSource cal t)
-
-calendarRemoveSource cal t = runFunctionDelayed cal $ ffi "removeSource(%1,%2)" cal (tableName t)
-
 
 eventWidget (incrementT,resolutionT) sel inf cliZone = do
     dashes <- eventWidgetMeta inf

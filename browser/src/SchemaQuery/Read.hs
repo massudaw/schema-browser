@@ -278,7 +278,6 @@ getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> mayb
   where
     pluginCheck i@(PluginField _) tbf = Just mempty
     pluginCheck i tbf  = refLookup (relComp $ pathRelRel i) tbf
-
     sorted =  sortValues (relComp . pathRelInputs inf (tableName table)) $ rawFKS table <> functionRefs table <> pluginFKS table
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
@@ -394,7 +393,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
       Just (sq,idx) ->
         if (sq > G.size reso)
         then case  M.lookup pageidx idx of
-          Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v)of
+          Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
               liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
               readNew sq i

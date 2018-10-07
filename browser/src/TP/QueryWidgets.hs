@@ -21,6 +21,7 @@ import qualified Data.Aeson as A
 import Control.Lens ( _1, _2)
 import PrimEditor
 import qualified Control.Lens as Le
+import Environment
 import qualified Control.Category as Cat
 import Serializer (decodeT)
 import Control.Monad
@@ -1294,7 +1295,6 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       nav <- openClose dblClickT
       let
         merge :: Editor (TBIdx CoreKey Showable ) -> Editor (TBIdx CoreKey Showable) -> Editor (TBIdx CoreKey Showable) -> Editor (PTBRef CoreKey Showable)
-        -- merge i j k | traceShow ("merge",i,j,k) False = undefined -- if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
         merge (Diff i) (Diff j) (Diff k) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
         merge (Diff i) (Diff j) Keep = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j [])
         merge Keep (Diff i) Keep = Diff $ PTBRef [] i []
@@ -1373,7 +1373,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
                     let selection = conv $ fromJust hasMap
-                        conv (i ,t, j ,k,l) = (i,t,Non.fromList (F.toList j ),Non.fromList . F.toList <$> k ,l)
+                        conv (i ,t, j ,l) = (i,t,j ,l)
                     t <- liftIO getCurrentTime
                     TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, pure Nothing)
                     element el # set UI.class_ selSize

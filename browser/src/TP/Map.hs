@@ -62,14 +62,10 @@ instance A.ToJSON (G.Node (FTB Showable)) where
   toJSON (G.FTBNode i) = A.toJSON i
 
 mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
+    dashes <- mapWidgetMeta inf
     let
       minf = meta inf
-    dashes <- mapWidgetMeta inf
-
-    let
       chooser  = do
-        mapOpen <- liftIO getCurrentTime
-        let
         map <-UI.div
         (eselg,hselg) <- ui newEvent
         start <- ui$stepper Nothing (filterE (maybe False (not .snd.fst)) eselg)
@@ -81,9 +77,8 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         (positionLocal,h) <- ui newEvent
         let positionE = unionWith const (rumors prepositionT) positionLocal
         pb <- currentValue (facts prepositionT)
-        positionB <- ui $stepper  pb positionE
+        positionT <- ui $ stepperT  pb positionE
         let
-          positionT = tidings positionB positionE
           calFun selected = do
             innermap <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
             let
@@ -92,41 +87,36 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             pb <- currentValue (facts positionT)
             editor <- UI.div
             element map # set children [innermap,editor]
-            mapCreate  innermap pb
+            mapCreate innermap 
+            traverse (setPosition innermap ) pb
             move <- moveend innermap
-            onEvent  move (liftIO . h. Just)
-            onEvent (filterJust $ rumors prepositionT) (\(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
+            onEvent move (liftIO . h. Just)
+            onEvent (filterJust $ rumors prepositionT) (setPosition innermap )
 
-            fin <- mapM (\(_,tb,fields,efields,proj) -> do
-              let pcal =  liftA2 (,) positionT  mapT
+            fin <- mapM (\(_,tb,wherePred,proj) -> do
+              let pcal =  liftA2 (wherePred mempty) positionT mapT
                   tname = tableName tb
-              traverseUIInt (\(positionB,calT)-> do
-                let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
-                    fieldKey (TB1 (SText v))=  v
+              traverseUIInt (\pred -> 
                 if mempty /= pred  
-                   then do  
-
-                  reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
-                  let v = primary <$> reftb ^. _2
-                  let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
-                  onEvent evsel (liftIO . hselg)
-                  tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
-                  let tdi = tidings tdib (fmap snd <$> evsel)
-                      table = lookTable inf tname
-                  el <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
-                  traverseUIInt (\i ->
-                    createLayers innermap tname (A.toJSON $ catMaybes  $ concatMap proj i)) v
-                  stat <- UI.div  # sink text (show . M.lookup pred . unIndexMetadata <$>   facts (reftb ^. _1))
-                  edit <- UI.div # set children [getElement el] # sink UI.style  (noneShow . isJust <$> tdib)
-                  UI.div # set children [stat,edit]
-                  else UI.div
-                ) pcal
+                  then do  
+                    reftb <- ui $ refTablesProj inf tb Nothing pred (projectFields inf tb (fst $ staticP proj) $ allFields inf tb)
+                    let v = primary <$> reftb ^. _2
+                    let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+                    onEvent evsel (liftIO . hselg)
+                    tdi <- ui $ stepperT Nothing (fmap snd <$> evsel)
+                    el <- crudUITable inf tb reftb mempty [] (allRec' (tableMap inf) tb)  tdi
+                    traverseUIInt (createLayers innermap tname . A.toJSON . catMaybes . concatMap (evalPlugin proj)) v
+                    stat <- UI.div # sink text (show . M.lookup pred . unIndexMetadata <$> facts (reftb ^. _1))
+                    edit <- UI.div # set children [getElement el] # sink UI.style (noneShow . isJust <$> facts tdi)
+                    UI.div # set children [stat,edit]
+                  else 
+                    UI.div) pcal
               ) selected
             let els = foldr (liftA2 (:)) (pure []) fin
-            element editor  # sink children (facts els)
+            element editor # sink children (facts els)
             return ()
         let calInp = (\i -> filter (flip L.elem (F.toList i) .  (^. _2)) dashes) <$> sel
-        onFFI "$(document).ready((%1))" (evalUI map $ traverseUIInt calFun calInp)
+        (traverseUIInt calFun calInp)
         return [map]
 
 

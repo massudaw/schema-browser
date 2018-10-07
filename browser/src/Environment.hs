@@ -4,6 +4,8 @@ module Environment where
 import RuntimeTypes
 import Step.Host
 import Step.Client
+import Data.Functor.Identity
+import qualified Control.Lens as Le
 import Types
 import Data.Maybe
 import Types.Index as G
@@ -33,6 +35,18 @@ data RowModifier
   | RowUpdate
   deriving(Show)
 
+mapA f a = F.foldr (liftA2 (:))  (pure []) (f <$> a)
+
+convertRel inf tname =  convert . liftRel inf tname . indexerRel 
+  where
+    convert (RelAccess (Inline i) j) = iinline (keyValue i) (recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
+    convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (recFTBs tyi . irecord $ convert j ) 
+      where
+        tyi = _keyFunc $ mergeFKRef  (keyType . _relOrigin <$> relUnComp i)
+    convert (Inline i) = ifield (keyValue i) (iany (readV PText ))
+    recFTB KArray = id 
+    recFTB KOptional = fmap fromJust . iopt
+    recFTBs l = F.foldl' (flip (.)) ivalue (recFTB <$> l)
 
 type MutationTy = Mutation (Prim KPrim (Text,Text))
 
@@ -72,6 +86,8 @@ data Universe u n t pk k
 
 runEnv  r  e  =  (\(_,_,i) -> i) <$> runRWST   ( (runKleisli $ dynP r ) ()) e ()
 evalEnv  r  e  =  (\(i,_,_) -> i) <$> runRWST   ( (runKleisli $ dynP r ) ()) e ()
+
+evalPlugin v r = (runIdentity $ evalEnv v  ( Atom (mapKey' keyValue  r),[] ))
 
 indexTID (PIdIdx  ix )  (ArrayTB1 l) = l NonS.!! ix
 indexTID PIdOpt  (LeftTB1 l) = justError "no opt value" l
@@ -316,6 +332,12 @@ matchFTB f (TipPath i ) (TB1 v ) =  f i v
 matchFTB f (NestedPath PIdOpt  l ) (LeftTB1 v ) =  maybe False (matchFTB f l) v
 matchFTB f i j = error$  show (i,j)
 
+projectFields :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
+projectFields inf t s l = kvlist . catMaybes $ pattr l <$> (F.toList =<< s )
+  where 
+    pattr v (G.PathAttr i _) =  kvLookup (Inline (lookKey inf (tableName t) i)) v <|> listToMaybe (unkvlist (kvFilter (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v))
+    pattr v (G.PathInline i (G.TipPath n)) =  Le.over ifkttable (fmap (projectFields inf t [n])) <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
+ 
 
 translate
   :: (Show k,Ord k)
