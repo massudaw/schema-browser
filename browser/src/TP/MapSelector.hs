@@ -182,13 +182,13 @@ mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
         traverseUI (traverse setP) =<< ui (calmT positionT)
 
         fin <- traverseUIInt (\pred-> do
-            let 
-              selection = projectFields inf tb (fst $ staticP proj) $ allFields inf tb
-            reftb <- ui $ refTablesProj inf tb Nothing pred selection
-            let v = primary <$> reftb ^. _2
-            traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v
-            let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
-            onEvent evsel (liftIO . hselg)) pcal
+          let 
+            selection = projectFields inf tb (fst $ staticP proj) $ allFields inf tb
+          reftb <- ui $ refTablesProj inf tb Nothing pred selection
+          let v = primary <$> reftb ^. _2
+          traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v
+          let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+          onEvent evsel (liftIO . hselg)) pcal
         mapSel <- ui $ stepperT Nothing (fmap snd <$> eselg )
         return (TrivialWidget mapSel innermap)
 

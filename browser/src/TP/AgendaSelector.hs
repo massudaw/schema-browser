@@ -116,7 +116,7 @@ agendaDef inf
             convField i = errorWithStackTrace (show i)
             scolor =  "#" <> renderPrim color
             projfT ::  Showable  -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
-            projfT efield@(SText field) = irecord $ proc _ -> do
+            projfT efield@(SText field) = irecord $ proc _-> do
               i <- convertRel inf tname field  -< ()
               pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
               fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
@@ -126,9 +126,15 @@ agendaDef inf
                   ,("table",txt tname)
                   ,("color" , txt $ T.pack  scolor )
                   ,("field", TB1 efield )] <> convField i
-            proj =  fmap (fmap Just ) . mapA projfT  $ F.toList efields
+            proj =  fmap (fmap Just ) . mapA projfT  $ efields
+            wherePred predicate  time  =  pred
+              where
+                pred = WherePredicate . AndColl $ [timePred inf table (fieldKey . TB1 <$> efields ) time] ++ fmap unPred (maybeToList predicate)
+                fieldKey (TB1 (SText v))=   v
+                unPred (WherePredicate i) = i
 
-          returnA -< (txt $ T.pack $ scolor ,table,fmap TB1 (Non.fromList. F.toList $ efields),proj )
+
+          returnA -< (txt $ T.pack $ scolor ,table,wherePred ,proj )
 
 
 calendarView
@@ -136,7 +142,8 @@ calendarView
      InformationSchema
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
-     -> [(t, TableK Key, NonEmpty (FTB Showable),
+     -> [(t, TableK Key,  Maybe (TBPredicate Key Showable)
+                            -> (UTCTime, String) -> WherePredicate ,
           PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () [Maybe A.Object]
          )]
     -> Tidings (S.Set (TableK Key))
@@ -153,13 +160,9 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
     traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
-      traverse (\(_,t,fields,proj)-> do
-            let pred = WherePredicate . AndColl $ [timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
-                fieldKey (TB1 (SText v))=   v
-                unPred (WherePredicate i) = i
-                selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
-            liftIO $ print (selection,(fst $ staticP proj))
-            reftb <- ui $ refTablesProj inf t Nothing pred selection
+      traverse (\(_,t,pred ,proj)-> do
+            let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
+            reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
             let v = reftb ^. _2
             let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts v <@>  evc
             tdib <- ui $ stepper Nothing evsel

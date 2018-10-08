@@ -1380,7 +1380,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     return (LayoutWidget i el (pure (12,1)))),
                   ("Agenda" ,do
                     let selection = conv $ fromJust hasAgenda
-                        conv (i ,j ,k,l) = (i,j , Non.fromList . F.toList $ k ,l)
+                        conv (i ,j ,k,l) = (i,j , k ,l)
                     (sel ,(j,i)) <- calendarSelector
                     el <- traverseUI (\(delta ,time) -> do
                       (e,l) <- calendarView inf mempty cliZone [selection] (pure (S.singleton targetTable )) Basic delta time

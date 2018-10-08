@@ -335,7 +335,7 @@ matchFTB f i j = error$  show (i,j)
 projectFields :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
 projectFields inf t s l = kvlist . catMaybes $ pattr l <$> (F.toList =<< s )
   where 
-    pattr v (G.PathAttr i _) =  kvLookup (Inline (lookKey inf (tableName t) i)) v <|> listToMaybe (unkvlist (kvFilter (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v))
+    pattr v (G.PathAttr i _) =  kvLookup (Inline (lookKey inf (tableName t) i)) v <|> kvFind (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v
     pattr v (G.PathInline i (G.TipPath n)) =  Le.over ifkttable (fmap (projectFields inf t [n])) <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
  
 
