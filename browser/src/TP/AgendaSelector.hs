@@ -109,7 +109,7 @@ agendaDef inf
             table = lookTable inf tname
             toLocalTime = fmap to
                 where
-                  to (STime (STimestamp i ))  = STime $ STimestamp $  i
+                  to (STime (STimestamp i ))  = STime . STimestamp $  i
                   to (STime (SDate i )) = STime $ SDate i
             convField (IntervalTB1 i) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
             convField v = [("start",toLocalTime $v)]
@@ -132,8 +132,6 @@ agendaDef inf
                 pred = WherePredicate . AndColl $ [timePred inf table (fieldKey . TB1 <$> efields ) time] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
-
-
           returnA -< (txt $ T.pack $ scolor ,table,wherePred ,proj )
 
 
@@ -163,14 +161,10 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
       traverse (\(_,t,pred ,proj)-> do
             let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
             reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
-            let v = reftb ^. _2
-            let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts v <@>  evc
-            tdib <- ui $ stepper Nothing evsel
-            let tdi = tidings tdib evsel
+            let output  = reftb ^. _2
+                evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc
             ui $ onEventIO evsel hselg
-            traverseUI
-              (\i ->calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap (evalPlugin proj) $ G.toList (primary i))) v) ref) . F.toList ) sel
-
+            addSource innerCalendar t (evalPlugin proj) output) ref) . F.toList) sel
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
       patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i))))
     return ([innerCalendar],tidings bhsel eselg)
@@ -195,11 +189,7 @@ calendarSelRow readSel (agenda,resolution,incrementT) = do
     return (tidings bhevs evs,readSel <$> evc, innerCalendar)
 
 
-addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
-    let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
-        fieldKey (TB1 (SText v))=   v
-    reftb <- ui $ refTables' inf t Nothing pred
-    let v = reftb ^. _2
+addSource innerCalendar t proj v = do
     traverseUI
       (\i -> calendarAddSource innerCalendar  t (concatMap catMaybes $ fmap proj $ G.toList (primary i))) v
 
