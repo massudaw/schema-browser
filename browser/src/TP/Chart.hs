@@ -113,7 +113,7 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
       calFun (resolution,incrementT,positionB) = do
         edits <- ui$ accumDiff (\tref->  evalUI chart $ do
           charts <- UI.div # set UI.class_ "row" # set UI.style [("height", "300px"),("width", "900px")]
-          chartCreate  charts
+          chartCreate charts
           let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
           F.traverse_ (\(_,t,fields,(timeFields,geoFields,chart),proj)-> do
                 let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
@@ -123,7 +123,7 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                 traverseUI
                   (\i -> do
                     chartAddSource charts chart t (renderShowable <$> fields ) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap proj $ L.sortOn (G.getIndex (tableMeta t)) $ G.toList i)
-                    ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ chartRemoveSource charts t)) v
+                    finalizerUI (chartRemoveSource charts t)) v
                                ) ref
           return charts) sel
 
@@ -133,8 +133,6 @@ chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
         pure <$> UI.div # sink children (pure <$> facts v)
 
     return  (legendStyle , dashes ,exec)
-
-
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

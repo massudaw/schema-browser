@@ -101,7 +101,7 @@ refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
   ref <- liftIO $ lookDBVar inf mmap (tableMeta table)
-  (idxTds,dbTds ) <- convertChan inf table mempty ref
+  (idxTds,dbTds ) <- convertChan inf table mempty (allFields inf table) ref
   return (DBVar2 ref idxTds  dbTds )
 
 
@@ -305,7 +305,7 @@ tableLoader  table page fixed tbf = do
   ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page fixed tbf
 
   inf <- askInf
-  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) rep  nchan
+  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) tbf rep  nchan
   idxTds <- lift $ convertChanStepper0 inf table nidx fixedChan
   dbvar <- liftIO $ prerefTable inf table
   return (DBVar2 dbvar idxTds vpt)
@@ -444,7 +444,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                      liftIO $ putStrLn $ "Loading Not unique complement : " <> show (G.size reso)
                      readNew maxBound tbf
            else do
-             liftIO $ putStrLn $ "Loading empty predicate" <> show (G.size reso)
+             liftIO $ putStrLn $ "Loading empty predicate:  " <> show (G.size reso)
              readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
 
@@ -488,36 +488,58 @@ convertChan
   :: InformationSchema
   -> TableK Key
      -> (TBPredicate Key Showable, [Key])
+     -> TBData Key ()
      -> DBRef Key Showable
      -> Dynamic
       (Tidings (IndexMetadata Key Showable ),Tidings (TableRep Key Showable))
-convertChan inf table fixed dbvar = do
+convertChan inf table fixed tbf dbvar = do
   ((ini,result),cloneddbvar) <- liftIO $ atomically $
     cloneDBVar  fixed dbvar
-  (,) <$> convertChanStepper0 inf table ( ini) (idxChan cloneddbvar)
-      <*> convertChanTidings0 inf table fixed ( result ) (patchVar cloneddbvar)
+  (,) <$> convertChanStepper0 inf table ini (idxChan cloneddbvar)
+      <*> convertChanTidings0 inf table fixed tbf result (patchVar cloneddbvar)
+
+restrictPatch :: TBData Key () -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
+restrictPatch v = nonEmpty . filter (\i -> isJust $ kvLookup (index i) v)
+
+restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
+restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
+
+restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
+restrict tbf (RowPatch (i,CreateRow j)) = RowPatch . (i,). CreateRow <$> restrictRow tbf j
+restrict tbf (RowPatch (i,PatchRow j)) = RowPatch . (i,). PatchRow <$> restrictPatch tbf j
 
 convertChanEvent
   ::
     InformationSchema -> TableK Key
      -> (TBPredicate Key Showable, [Key])
+     -> TBData Key ()
      -> Behavior (TableRep Key Showable)
      -> TChan [TableModificationU Key Showable]
      -> Dynamic
           (Event [RowPatch Key Showable])
-convertChanEvent inf table fixed bres chan = do
+convertChanEvent inf table fixed select bres chan = do
   (e,h) <- newEvent
-  dynFork $ forever $ catchJust notException (do
+  dynFork . forever $ catchJust notException (do
     ml <- atomically $ takeMany chan
     TableRep (_,_,v) <- currentValue bres
     let
       meta = tableMeta table
       m =  tableDiff <$> concat  ml
-      newRows =  filter (\d -> checkPatch fixed d && L.any (\i -> isNothing  (G.lookup i v)) (index d) ) m
-      filterPred = nonEmpty . filter (checkPatch fixed)
-      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (checkPatch fixed d) then Just (rebuild (index d) DropRow )  else Nothing )
+      match :: RowPatch Key Showable -> Bool 
+      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of 
+                  Just r -> G.checkPred (apply r j )   (fst fixed )
+                  Nothing -> False  
+      match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
+        where
+           check = case G.lookup i v  of 
+            Just r -> G.checkPred r (fst fixed)
+            Nothing ->  False
+      match (RowPatch (i,DropRow)) = isJust (G.lookup i v)
+
+      newRows =  filter match m
+      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
       oldRows = filterPredNot v m
-      patches = oldRows <> filterPred m
+      patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> (oldRows <> nonEmpty newRows)
     traverse  h patches
     return ()) (\e -> atomically (takeMany chan) >>= (\d -> putStrLn $  show ("error convertChanEvent"  ,e :: SomeException,d)<>"\n"))
   return e
@@ -532,11 +554,12 @@ convertChanTidings0
   :: InformationSchema
   -> TableK Key
   -> (TBPredicate Key Showable, [Key])
+  -> (TBData Key ())
   -> TableRep Key Showable
   -> TChan [TableModificationU Key Showable]
   -> Dynamic (Tidings (TableRep Key Showable))
-convertChanTidings0 inf table fixed ini nchan = mdo
-    evdiff <-  convertChanEvent inf table  fixed (snd <$> facts t) nchan
+convertChanTidings0 inf table fixed select ini nchan = mdo
+    evdiff <-  convertChanEvent inf table  fixed select (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
     t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
     return  (snd <$> t)

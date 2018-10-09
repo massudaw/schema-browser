@@ -59,7 +59,7 @@ calendarCreate m cal def = runFunctionDelayed cal $ ffi "createAgenda(%1,%2,%3)"
 
 calendarAddSource cal t evs = do
   runFunctionDelayed cal $ ffi "addSource(%1,%2,%3)" cal (tableName t) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  $ evs)
-  ui $ registerDynamic (fmap fst $ runDynamic $ evalUI cal $ calendarRemoveSource cal t)
+  finalizerUI (calendarRemoveSource cal t)
 
 calendarRemoveSource cal t = runFunctionDelayed cal $ ffi "removeSource(%1,%2)" cal (tableName t)
 

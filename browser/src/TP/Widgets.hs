@@ -898,5 +898,10 @@ joinT t = do
   b <- stepper el e
   return (tidings b e)
 
+finalizerUI a = do
+  w <- askWindow
+  ui $ registerDynamic (closeDynamic $ runUI w a)  
+
+
 
 method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e

@@ -63,7 +63,10 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 removeLayers el tname = runFunctionDelayed el $ ffi "removeLayer(%1,%2)" el tname
-createLayers el tname evs= runFunctionDelayed el  $ ffi "createLayer(%1,%3,%2)" el evs tname
+
+createLayers el tname evs = do
+  runFunctionDelayed el  $ ffi "createLayer(%1,%3,%2)" el evs tname
+  finalizerUI (removeLayers el tname)
 
 mapCreate el = runFunctionDelayed el $ ffi "createMap(%1)" el
 mapCreate el  = runFunctionDelayed el $ ffi "createMap(%1)" el

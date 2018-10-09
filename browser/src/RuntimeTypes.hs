@@ -255,7 +255,7 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
       (el ,u) <- applyUndo v patom
       return $
         (case G.notOptionalM (G.getIndex m el) of
-          Just pk ->  (if i == pk
+          Just pk ->  (if G.notOptionalM i == Just pk
             then G.update (G.notOptional i) (flip apply patom)
             else G.insert (el, G.tbpred m el) G.indexParam .
                  G.delete (G.notOptional i) G.indexParam) l
@@ -708,7 +708,7 @@ genPredicateFullU' i s (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicate
 genPredicateFullU' i s (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
 
 genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
-genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
+genPredicateU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
 
 genPredicate o (IProd b l) =  (\i -> PrimColl (Inline l,Right (if o then i else Not i ) )) <$> b
 genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing (_relOrigin a)) else  Nothing ) <$> F.toList p

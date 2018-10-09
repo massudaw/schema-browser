@@ -228,5 +228,5 @@ subprojectsDeep v@(MP.Sum _ ps)      = v : concat (subprojectsDeep <$> Non.toLis
 subprojectsDeep i               = [i]
 
 
-groupTopLevel tname list =  maybe (Left "No task in period") (resolveReferences False ((\(j,_) -> (projectId j ,j)) <$> list) ["root"] .MP.Product (ProjectProperties (Just tname) Nothing Nothing Nothing Nothing Nothing)  ) (fmap (fmap (\(i,_) -> i ) . Non.fromList )$ nonEmpty $ filter (\(j,_) -> not $  S.member  (projectId j) refs) list)
+groupTopLevel tname list =  maybe (Left "No task in period") (resolveReferences False ((\(j,_) -> (projectId j ,j)) <$> list) ["root"] .MP.Product (ProjectProperties (Just tname) Nothing Nothing Nothing Nothing Nothing)  ) (fmap (fmap fst . Non.fromList )$ nonEmpty $ filter (\(j,_) -> not $  S.member  (projectId j) refs) list)
   where refs = S.fromList $ concat $ fmap (\(_,i) -> i) list
