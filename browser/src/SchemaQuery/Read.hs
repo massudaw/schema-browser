@@ -505,8 +505,9 @@ restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
 restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
 
 restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
-restrict tbf (RowPatch (i,CreateRow j)) = RowPatch . (i,). CreateRow <$> restrictRow tbf j
-restrict tbf (RowPatch (i,PatchRow j)) = RowPatch . (i,). PatchRow <$> restrictPatch tbf j
+restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of 
+    CreateRow j -> CreateRow <$> restrictRow tbf j
+    PatchRow j -> PatchRow <$> restrictPatch tbf j
 
 convertChanEvent
   ::
