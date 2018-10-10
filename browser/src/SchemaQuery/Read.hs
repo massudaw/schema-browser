@@ -532,7 +532,7 @@ convertChanEvent inf table fixed select bres chan = do
                   Nothing -> False  
       match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
         where
-           check = case G.lookup i v  of 
+          check = case G.lookup i v  of 
             Just r -> G.checkPred r (fst fixed)
             Nothing ->  False
       match (RowPatch (i,DropRow)) = isJust (G.lookup i v)

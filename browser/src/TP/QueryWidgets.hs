@@ -646,7 +646,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
     pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ pluginFKS table)
   let
     srefs :: [Rel Key]
-    srefs =  sortRels (M.keys pluginMap <> kvkeys ftb )
+    srefs =  traceShowId $ sortRels (M.keys pluginMap <> kvkeys ftb )
     plugmods = first traRepl <$> plmods
 
   let isSum = rawIsSum table
@@ -1399,7 +1399,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               return (TrivialWidget  loaded elout)
 
           let
-            fksel =  fmap TBRef . (\box ->  (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
+            fksel =  fmap TBRef . (\box -> (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
             output = fromMaybe Keep <$> (diff <$> facts oldItems <#> fksel)
           ui $ onEventIO (rumors output)
             (\i -> debugTime "selector True" $ do

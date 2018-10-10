@@ -37,7 +37,6 @@ import Utils
 import Network.Mail.Mime
 import Control.Monad.Reader
 import Data.Functor.Apply
--- import Debug.Trace
 import Prelude hiding (elem)
 import Data.Maybe
 import Data.Functor.Identity
@@ -701,6 +700,19 @@ checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url
       return $ attrT (h,opt double (Just v))
 
 
+totalDish = FPlugins "Dish Total" tname $ StatefullPlugin
+ [(([],[("acucar_total_g",atPrim PDouble),("energia_kcal",atPrim PDouble)]),PurePlugin url)]
+  where
+    pname , tname :: Text
+    pname = "Total"
+    tname = "dish"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      t <- atMA "ingredients"  
+        ((\(a,k) j -> (a * j, k * j)) <$> atR "food,prepare" ((,)<$> idxK "acucar_total_g" <*> idxK "energia_kcal" ) <*> idxK "amount")-< ()
+      odxR "acucar_total_g" -< ()
+      odxR "energia_kcal" -< ()
+      returnA -< Just $ kvlist [Attr "acucar_total_g" (sum (fst <$> t)),Attr "energia_kcal" (sum (snd <$> t))]
 
 notaPrefeitura = FPlugins "Nota Prefeitura" tname $ IOPlugin url
   where
@@ -833,4 +845,4 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       returnA -< artInp v
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [ costPlugins,delayedDate,jurosMulta,subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,{-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [ totalDish,costPlugins,delayedDate,jurosMulta,subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,{-,lplugOrcamento  lplugContract ,lplugReport,-}siapi3Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,{-queryCEPBoundary,-}queryGeocodeBoundary,{-queryCPFStatefull , queryCNPJStatefull,-} queryArtAndamento,germinacao,preparoInsumo,fetchofx]

@@ -395,7 +395,8 @@ pluginStatic' (PurePlugin  a) = staticP a
 pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
 
 
-pathRelInputs inf table (PluginField (_,FPlugins _ _ a)) =  S.fromList  ((concat $ genRel M.empty . liftAccess inf table <$> F.toList (fst $ pluginStatic' a)) <> (concat . fmap (fmap Output .relAccesGen') . fmap ( liftAccess inf table) . L.filter (isJust. filterEmpty)  $ F.toList (snd $ pluginStatic' a)))
+pathRelInputs inf table (PluginField (_,FPlugins _ _ a)) 
+  = S.fromList  ((concat $ genRel M.empty . liftAccess inf table <$> F.toList (fst $ pluginStatic' a)) <> (concat . fmap (fmap Output .relAccesGen') . fmap ( liftAccess inf table) . L.filter (isJust. filterEmpty)  $ F.toList (snd $ pluginStatic' a)))
 pathRelInputs _ _ i = pathRelRel i
 
 genRel :: Ord k => Map Int (Union (Access k)) -> Access k -> [Rel k]
@@ -669,7 +670,7 @@ liftAccessF lk inf tname (Nested i c) = Nested (Non.fromList r) (liftAccessF lk 
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref = fmap ((fst lk) inf tname )<$> i
     tb = lookTable inf tname
-    n = unRecRel $ justError ("no fk " ++ show (i,tname) )$ L.find (\i -> S.fromList (F.toList (_relOrigin <$> ref))== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
+    n = unRecRel $ justError ("no fk " ++ show (i,tname,S.map _relOrigin . pathRelRel <$> rawFKS tb,rawFKS tb) )$ L.find (\i -> S.fromList (_relOrigin <$> F.toList ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
     (r,l) = case n of
         FKJoinTable  r l   ->  (r,l)
         FKInlineTable  r l   ->  ([Inline r],l)

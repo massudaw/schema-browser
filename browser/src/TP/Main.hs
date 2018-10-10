@@ -8,6 +8,7 @@ module TP.Main where
 
 import TP.Selector
 import TP.Extensions
+import Control.Exception
 import ClientAccess
 import Query
 import Safe
@@ -247,7 +248,7 @@ loginWidget userI passI =  do
         # set UI.name "password"
         # set UI.class_ "form-control"
         # set UI.style [("width","142px")]
-        # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
+        # set UI.type_ "password" 
     usernameE <- fmap nonEmpty  <$> UI.valueChange username
     passwordE <- fmap nonEmpty <$> UI.valueChange password
 
@@ -274,7 +275,7 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (Idex [TB1 $ SNumeric ck]) (primary m)) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  loginCookie
-  (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+  (widT,widE) <- loginWidget (Just $ user sargs  ) Nothing 
   logInB <- UI.button # set UI.text "Log In" # set  UI.class_ "btn btn-primary"
   loadE <- UI.click logInB
   login <- UI.div # set children widE # set UI.class_ "row"
@@ -309,12 +310,15 @@ databaseChooser cookies smvar metainf sargs plugList init = do
   w <- askWindow
   metainf <- liftIO $ metaInf smvar
   let
-    logIn (user,pass)= do
-        [Only uid] <- liftIO $ query (rootconn metainf) "select oid from metadata.\"user\" where usename = ?" (Only user)
-        cli <- liftIO $ AuthCookie (User uid (T.pack user)) <$> randomIO <*> getCurrentTime
-        runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" (cookie cli)
-        transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
-        return (Just cli)
+    logIn (user',pass')= do
+        let connection = (connRoot (sargs {user = user' , pass = pass' }))
+        o <- liftIO $ (print connection  >> Just <$> connectPostgreSQL connection )   `catch` (\e -> liftIO ( print  ("Falied login: " <> show ( e :: SomeException )) >> return Nothing ))
+        fmap join $ traverse (\_ ->   do
+          [Only uid] <- liftIO $ query (rootconn metainf) "select oid from metadata.\"user\" where usename = ?" (Only user')
+          cli <- liftIO $ AuthCookie (User uid (T.pack user')) <$> randomIO <*> getCurrentTime
+          runUI w . runFunction $ ffi "document.cookie = 'auth_cookie=%1'" (cookie cli)
+          transaction metainf $ fullInsert (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
+          return (Just cli) )  o
     invalidateCookie cli = do
         transaction metainf $ deleteFrom (lookMeta (metainf) "auth_cookies") (liftTable' metainf "auth_cookies" $ encodeT cli)
         return Nothing
