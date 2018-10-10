@@ -87,7 +87,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             pb <- currentValue (facts positionT)
             editor <- UI.div
             element map # set children [innermap,editor]
-            mapCreate innermap 
+            mapCreate innermap
             traverse (setPosition innermap ) pb
             move <- moveend innermap
             onEvent move (liftIO . h. Just)
@@ -96,9 +96,9 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             fin <- mapM (\(_,tb,wherePred,proj) -> do
               let pcal =  liftA2 (wherePred mempty) positionT mapT
                   tname = tableName tb
-              traverseUIInt (\pred -> 
-                if mempty /= pred  
-                  then do  
+              traverseUIInt (\pred ->
+                if mempty /= pred
+                  then do
                     reftb <- ui $ refTablesProj inf tb Nothing pred (projectFields inf tb (fst $ staticP proj) $ allFields inf tb)
                     let v = primary <$> reftb ^. _2
                     let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
@@ -109,7 +109,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                     stat <- UI.div # sink text (show . M.lookup pred . unIndexMetadata <$> facts (reftb ^. _1))
                     edit <- UI.div # set children [getElement el] # sink UI.style (noneShow . isJust <$> facts tdi)
                     UI.div # set children [stat,edit]
-                  else 
+                  else
                     UI.div) pcal
               ) selected
             let els = foldr (liftA2 (:)) (pure []) fin

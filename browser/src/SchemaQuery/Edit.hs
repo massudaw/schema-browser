@@ -44,7 +44,7 @@ isDeleteRule _ _ = False
 isUpdate a (i,UpdateRule _) =  i (mapKey' keyValue a)
 isUpdate _ _ = False
 
-matchInsert = matchRule isCreate 
+matchInsert = matchRule isCreate
 matchDelete = matchRule isDeleteRule
 matchUpdate = matchRule isUpdate
 
@@ -78,7 +78,7 @@ updateFrom m a pk b = do
 
 patchFrom m  r   = do
   let l = RowPatch r
-  asyncPatches m (pure l)
+  asyncPatches m (traceShowId $ pure l)
   return l
 
 deleteFrom  m a   = do

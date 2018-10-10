@@ -681,11 +681,20 @@ loadItems inf table tbf preoldItems
     (traverse
       (\i -> do
         v <- transactionNoLog inf . getItem $ i
-        return $ maybe i (justError "cant apply" . applyIfChange i) v))
+        return  $ maybe i (either error fst . applyUndo i )  v))
     preoldItems
   where
     getItem v = getFrom table tbf v
-
+{-
+  = joinT =<< mapTidingsDyn
+    (fmap sequenceA . traverse
+      (\i -> do
+        v <- transactionNoLog inf . getItem $ i
+        return  $ (either error fst . foldUndo i ) <$> v))
+    preoldItems
+  where
+    getItem v = listenFrom table tbf v
+-}
 crudUITable
    :: InformationSchema
    -> Table
@@ -698,7 +707,7 @@ crudUITable
 crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <-  ui $ loadItems inf table ftb =<< calmT preoldItems2
+  preoldItems <-  ui $ loadItems inf table ftb preoldItems2
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
@@ -856,7 +865,7 @@ processPanelTable
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element,Event [String])
-processPanelTable lbox inf reftb@(res,trep,_) inscrudp table oldItemsi = do
+processPanelTable lbox inf reftb@(_,trep,_) inscrudp table oldItemsi = do
   let
     inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
     m = tableMeta table
