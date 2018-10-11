@@ -677,24 +677,15 @@ loadItems
      -> Tidings (t (TBData CoreKey Showable))
      -> Dynamic (Tidings (t (TBData CoreKey Showable)))
 loadItems inf table tbf preoldItems
-  = mapTidingsDyn
-    (traverse
-      (\i -> do
-        v <- transactionNoLog inf . getItem $ i
-        return  $ maybe i (either error fst . applyUndo i )  v))
-    preoldItems
-  where
-    getItem v = getFrom table tbf v
-{-
   = joinT =<< mapTidingsDyn
     (fmap sequenceA . traverse
       (\i -> do
-        v <- transactionNoLog inf . getItem $ i
-        return  $ (either error fst . foldUndo i ) <$> v))
+        fmap (fromMaybe i )<$>  (transactionNoLog inf . getItem $ i)
+        ))
     preoldItems
   where
     getItem v = listenFrom table tbf v
--}
+
 crudUITable
    :: InformationSchema
    -> Table

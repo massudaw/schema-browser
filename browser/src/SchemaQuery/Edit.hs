@@ -78,7 +78,7 @@ updateFrom m a pk b = do
 
 patchFrom m  r   = do
   let l = RowPatch r
-  asyncPatches m (traceShowId $ pure l)
+  asyncPatches m (pure l)
   return l
 
 deleteFrom  m a   = do

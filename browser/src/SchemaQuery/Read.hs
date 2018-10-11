@@ -163,9 +163,10 @@ listenFrom table allFields b = mdo
     pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
   r <- getFrom table allFields b
   ref <- liftIO $ prerefTable inf table
-  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure (TableRep (m,M.empty,G.empty))) (patchVar ref)
-  t <- lift $ stepperT (maybeToList r ) (fmap (\(RowPatch (_,(PatchRow i)))-> i) <$> e)
-  return t
+  clonedRef <- liftIO . atomically $ cloneTChan (patchVar ref)
+  let result = applyIfChange b =<< r
+  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((maybe id (flip apply) $  (createRow' m <$> result)) (TableRep (m,M.empty,G.empty)) ))  (clonedRef )
+  lift $ accumT result ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
 
 
 
@@ -512,7 +513,7 @@ convertChan inf table fixed tbf dbvar = do
       <*> convertChanTidings0 inf table fixed tbf result (patchVar cloneddbvar)
 
 restrictPatch :: TBData Key () -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
-restrictPatch v = nonEmpty . filter (\i -> traceShow (isJust $ kvLookup (index i) v,index i) $ isJust $ kvLookup (index i) v)
+restrictPatch v = nonEmpty . filter (\i -> isJust $ kvLookup (index i) v)
 
 restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
 restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
