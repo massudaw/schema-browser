@@ -250,11 +250,10 @@ applyGiSTChange (m,l) (RowPatch (patom,DropRow))=
   maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
     ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch . createRow' m <$> G.lookup (create <$> patom) l
 applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
-  first (m,) <$>case flip G.lookup l =<< (G.notOptionalM i)  of
+  first (m,) <$>case  flip G.lookup l =<< (G.notOptionalM i)  of
     Just v -> do
       (el ,u) <- applyUndo v patom
-      return $
-        (case G.notOptionalM (G.getIndex m el) of
+      return  (case G.notOptionalM (G.getIndex m el) of
           Just pk ->  (if G.notOptionalM i == Just pk
             then G.update (G.notOptional i) (flip apply patom)
             else G.insert (el, G.tbpred m el) G.indexParam .
@@ -306,19 +305,19 @@ applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableR
   where
     out = M.mapWithKey didxs sidxs
     didxs un sidx =  maybe sidx alterAttrs attrs
-      where 
+      where
         alterAttrs = F.foldl' (\idx (ref ,u) -> G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u idx) sidx . recAttr un
         attrs = safeHead . unkvlist $ elAttr
         elAttr = kvFilter (\k -> not .
                                  S.null $ (relOutputSet k) `S.intersection`
-                                 (S.fromList un)) el 
+                                 (S.fromList un)) el
     el = fmap create elp
 applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = maybe sidx (F.foldl' (\sidx  (ref,u)  -> G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx ) sidx. recAttr un ) $  safeHead $ F.toList . unkvlist $ kvFilter (\k -> not . S.null $ (relOutputSet k) `S.intersection` (S.fromList un)) el
     el = justError "cant find"$ G.lookup ix l
     eln = apply el elpn
-applySecondary _ _ j = j 
+applySecondary _ _ j = j
 
 applyTableRep
   ::  (NFData k,  PatchConstr k Showable)
@@ -742,7 +741,7 @@ mergeCreate Nothing Nothing = Nothing
 
 
 recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key ->  TBData Key () -> WherePredicate -> TBData Key  a -> Maybe (TBData Key ())
-recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p 
+recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
   where
     attrList  = _relOrigin . fst <$> F.toList i
     filterAttrs :: [Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())

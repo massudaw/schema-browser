@@ -10,6 +10,7 @@ module SchemaQuery.Read
   , selectFrom
   , selectFromProj
   , getFrom
+  , listenFrom
   , refTable
   , refTables
   , refTablesDesc
@@ -126,13 +127,12 @@ selectFrom t a d = do
   let tb = lookTable inf t
   tableLoader tb a d (allFields inf tb)
 
-
-getFrom table allFields b = do
+getFrom table allFields b = mdo
   inf <- askInf
   let
     m = tableMeta table
-    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m  
-    comp = recComplement inf m allFields pred b 
+    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
+    comp = recComplement inf m allFields pred b
   join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
 
@@ -149,10 +149,24 @@ getFrom table allFields b = do
         result = either (const Nothing) (diff b)  output
       traverse (fetchPatches m [] . pure . (RowPatch . (G.getIndex m b,).PatchRow)) result
       traverse (\i -> do
-        liftIO . putStrLn $ "Old\n" <> show b 
+        liftIO . putStrLn $ "Old\n" <> show b
         liftIO . putStrLn $ "Result\n" <> (maybe ("") show result)
         liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<<  (applyIfChange b =<< result )
       return result) n)) comp
+
+
+
+listenFrom table allFields b = mdo
+  inf <- askInf
+  let
+    m = tableMeta table
+    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
+  r <- getFrom table allFields b
+  ref <- liftIO $ prerefTable inf table
+  clonedRef <- liftIO . atomically $ cloneTChan (patchVar ref)
+  let result = applyIfChange b =<< r
+  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((maybe id (flip apply) $  (createRow' m <$> result)) (TableRep (m,M.empty,G.empty)) ))  (clonedRef )
+  lift $ accumT result ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
 
 
 
@@ -317,7 +331,7 @@ tableLoader'
    -> TBData Key ()
    -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
 tableLoader' table  page fixed tbf = do
-  pageTable (\table page token size presort predicate tbf reso -> do 
+  pageTable (\table page token size presort predicate tbf reso -> do
     inf <- askInf
     let
       unestPred (WherePredicate l) = WherePredicate $ go predicate l
@@ -330,16 +344,16 @@ tableLoader' table  page fixed tbf = do
     (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
 
     let preresult =  mapResult <$> res
-        mapResult i = do 
-            case G.lookup (G.getIndex (tableMeta table) i) reso of 
-                Just orig -> case recComplement inf (tableMeta table) tbf  predicate orig of 
+        mapResult i = do
+            case G.lookup (G.getIndex (tableMeta table) i) reso of
+                Just orig -> case recComplement inf (tableMeta table) tbf  predicate orig of
                     Just _ ->  Left i
                     Nothing -> Right orig
-                Nothing -> Left i 
+                Nothing -> Left i
     result <- if L.any isLeft preresult
       then do
-        resFKS <- getFKS inf predicate table (lefts preresult) tbf 
-        return (either resFKS Right <$> preresult) 
+        resFKS <- getFKS inf predicate table (lefts preresult) tbf
+        return (either resFKS Right <$> preresult)
       else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
       print ("lefts",tableName table ,lefts result)
@@ -372,7 +386,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
              resK = if predNull fixed then resOut else G.filterRows fixed resOut
              -- # removeAlready fetched results
              diffNew i
-                -- FIXME: When we have a partially loaded filter this code 
+                -- FIXME: When we have a partially loaded filter this code
                 -- can generate wrong createRow', we should diff against the
                 --  main index instead of a filtered view
                 = case G.lookup (G.getIndex m i) reso of
@@ -404,8 +418,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             liftIO . putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
-          let 
-            pagetoken = M.lookupLE (maybe pagesize (*pagesize) page) idx 
+          let
+            pagetoken = M.lookupLE (maybe pagesize (*pagesize) page) idx
             existingProjection = fmap (fst .snd) pagetoken
             projection = recComplement inf m tbf fixed =<< existingProjection
           when (sq < G.size reso) $ do
@@ -505,7 +519,7 @@ restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
 restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
 
 restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
-restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of 
+restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
     PatchRow j -> PatchRow <$> restrictPatch tbf j
 
@@ -526,10 +540,10 @@ convertChanEvent inf table fixed select bres chan = do
     let
       meta = tableMeta table
       m =  tableDiff <$> concat  ml
-      match :: RowPatch Key Showable -> Bool 
-      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of 
+      match :: RowPatch Key Showable -> Bool
+      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of
                   Just r -> G.checkPred (apply r j )   (fst fixed )
-                  Nothing -> False  
+                  Nothing -> False
       match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
         where
           check = case G.lookup i v  of 
@@ -541,7 +555,7 @@ convertChanEvent inf table fixed select bres chan = do
       filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
       oldRows = filterPredNot v m
       patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> (oldRows <> nonEmpty newRows)
-    traverse  h patches
+    traverse h patches
     return ()) (\e -> atomically (takeMany chan) >>= (\d -> putStrLn $  show ("error convertChanEvent"  ,e :: SomeException,d)<>"\n"))
   return e
 

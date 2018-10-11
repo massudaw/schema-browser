@@ -129,6 +129,7 @@ poller schmRef authmap user db plugs is_test = do
                               case elemp of
                                 Right action  -> do
                                   getP <-  getFrom  table (allFields inf table)  inp
+
                                   ovm  <- fmap (liftTable' inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
                                          fullEdit (tableMeta $ lookTable inf a)inp ov

@@ -44,7 +44,7 @@ isDeleteRule _ _ = False
 isUpdate a (i,UpdateRule _) =  i (mapKey' keyValue a)
 isUpdate _ _ = False
 
-matchInsert = matchRule isCreate 
+matchInsert = matchRule isCreate
 matchDelete = matchRule isDeleteRule
 matchUpdate = matchRule isUpdate
 
