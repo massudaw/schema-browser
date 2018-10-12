@@ -128,14 +128,14 @@ poller schmRef authmap user db plugs is_test = do
                           i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transaction inf $
                               case elemp of
                                 Right action  -> do
-                                  getP <-  getFrom  table (allFields inf table)  inp
+                                  (_,getP) <-  getFrom  table (allFields inf table)  inp
 
                                   ovm  <- fmap (liftTable' inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
                                          fullEdit (tableMeta $ lookTable inf a)inp ov
                                          return ()) ovm
                                 Left action -> do
-                                  getP <- getFrom table (allFields inf table)  inp
+                                  (_,getP) <- getFrom table (allFields inf table)  inp
                                   ovm  <- fmap (liftPatch inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
                                       fullEdit (tableMeta $ lookTable inf a) inp (apply inp ov)

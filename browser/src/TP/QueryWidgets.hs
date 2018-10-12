@@ -646,7 +646,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
     pluginMap = M.fromList $ fmap (\i -> (plugKeyToRel inf table ftb $ pluginStatic (snd i) ,i )) $ filter ((== rawName table )  . _pluginTable .snd) (fmap (\(PluginField i ) -> i) $ pluginFKS table)
   let
     srefs :: [Rel Key]
-    srefs =  traceShowId $ sortRels (M.keys pluginMap <> kvkeys ftb )
+    srefs =  sortRels (M.keys pluginMap <> kvkeys ftb )
     plugmods = first traRepl <$> plmods
 
   let isSum = rawIsSum table

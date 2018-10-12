@@ -133,11 +133,10 @@ getFrom table allFields b = mdo
     m = tableMeta table
     pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
     comp = recComplement inf m allFields pred b
-  join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
+  ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
+      <- createTable pred (tableMeta table)
+  r <- join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
-
-    ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
-      <- createTable mempty (tableMeta table)
     let n = (recComplement inf m  allFields pred ) =<< new
         new = G.lookup (G.getIndex m b) reso
     (maybe (return $ diff b =<< new) (\comp -> do
@@ -153,6 +152,7 @@ getFrom table allFields b = mdo
         liftIO . putStrLn $ "Result\n" <> (maybe ("") show result)
         liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<<  (applyIfChange b =<< result )
       return result) n)) comp
+  return (dbvar,r)
 
 
 
@@ -161,11 +161,10 @@ listenFrom table allFields b = mdo
   let
     m = tableMeta table
     pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
-  r <- getFrom table allFields b
+  (dbref,r) <- getFrom table allFields b
   ref <- liftIO $ prerefTable inf table
-  clonedRef <- liftIO . atomically $ cloneTChan (patchVar ref)
   let result = applyIfChange b =<< r
-  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((maybe id (flip apply) $  (createRow' m <$> result)) (TableRep (m,M.empty,G.empty)) ))  (clonedRef )
+  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((maybe id (flip apply) $  (createRow' m <$> result)) (TableRep (m,M.empty,G.empty)) ))  (patchVar dbref)
   lift $ accumT result ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
 
 
@@ -522,6 +521,7 @@ restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showab
 restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
     PatchRow j -> PatchRow <$> restrictPatch tbf j
+    i-> Just i  
 
 convertChanEvent
   ::

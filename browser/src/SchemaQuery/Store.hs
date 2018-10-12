@@ -21,6 +21,7 @@ module SchemaQuery.Store
   , fetchPatches 
   , tellPatches
   , asyncPatches 
+  , newDBRef
   ) where
 
 import Control.Concurrent
