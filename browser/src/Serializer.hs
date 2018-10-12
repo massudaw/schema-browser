@@ -306,7 +306,7 @@ prim :: (Show k ,Ord k,Functor f, DecodeShowable a, DecodeTB1 f) =>
 prim ix = SIso (Many [AttrRef (Primitive l kp ) ix])  (tell . mk. (execWriter . fs) . fmap (onlyLast . execWriter . fsp) ) (fmap (bsp. Last. Just) . bs . lk)
     where i@(SIso l fs bs) = isoFTB
           j@(SIso kp fsp bsp) = isoS
-          lk =  _tbattr . justError ("no attr" ++ show (S.singleton $ Inline ix)) . kvLookup (Inline ix)
+          lk v =  _tbattr . justError ("no attr: " ++ show (ix ))  $ ( kvLookup (Inline ix)  v <|> kvLookup (Inline ix ) (tableNonRef v)) 
           mk = kvSingleton . Attr ix
 
 nestJoin :: (Functor f, DecodeTB1 f) =>

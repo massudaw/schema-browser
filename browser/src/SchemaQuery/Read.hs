@@ -142,7 +142,7 @@ getFrom table allFields b = mdo
     (maybe (return $ diff b =<< new) (\comp -> do
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
       let newRow = apply b v
-      resFKS  <- getFKS inf mempty table  [newRow] comp
+      resFKS  <- getFKS inf pred table  [newRow] comp
       let
         output = resFKS newRow
         result = either (const Nothing) (diff b)  output
@@ -163,9 +163,9 @@ listenFrom table allFields b = mdo
     pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
   (dbref,r) <- getFrom table allFields b
   ref <- liftIO $ prerefTable inf table
-  let result = applyIfChange b =<< r
-  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((maybe id (flip apply) $  (createRow' m <$> result)) (TableRep (m,M.empty,G.empty)) ))  (patchVar dbref)
-  lift $ accumT result ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
+  let result = fromMaybe b $ applyIfChange b =<< r
+  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((flip apply  (createRow' m  result)) (TableRep (m,M.empty,G.empty)) ))  (patchVar dbref)
+  lift $ accumT (Just result) ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
 
 
 
@@ -520,8 +520,11 @@ restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
 restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
 restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
-    PatchRow j -> PatchRow <$> restrictPatch tbf j
+    PatchRow j -> traceNothing (j,tbf) $ PatchRow <$> restrictPatch tbf j
     i-> Just i  
+
+traceNothing f Nothing = traceShow ("Filtered:  ",f) Nothing 
+traceNothing _ i = traceShow ("Passed:   ",i) i
 
 convertChanEvent
   ::
@@ -541,9 +544,9 @@ convertChanEvent inf table fixed select bres chan = do
       meta = tableMeta table
       m =  tableDiff <$> concat  ml
       match :: RowPatch Key Showable -> Bool
-      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of
-                  Just r -> G.checkPred (apply r j )   (fst fixed )
-                  Nothing -> False
+      match (RowPatch (i,PatchRow j)) = traceShow (i,j) $ case G.lookup i v  of
+                  Just r -> traceShow ("exist", G.checkPred (apply r j )   (fst fixed ),fixed) $  G.checkPred (apply r j )   (fst fixed )
+                  Nothing -> traceShow ("dont exist",i,fixed) $ False
       match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
         where
           check = case G.lookup i v  of 
@@ -551,8 +554,8 @@ convertChanEvent inf table fixed select bres chan = do
             Nothing ->  False
       match (RowPatch (i,DropRow)) = isJust (G.lookup i v)
 
-      newRows =  filter match m
       filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
+      newRows =  filter match m
       oldRows = filterPredNot v m
       patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> (oldRows <> nonEmpty newRows)
     traverse h patches

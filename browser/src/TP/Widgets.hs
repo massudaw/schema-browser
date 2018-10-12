@@ -895,8 +895,7 @@ joinT t = do
   init <- currentValue (facts t)
   el <- currentValue (facts init)
   mapTEventDyn  (mapTEventDyn (liftIO. h)) t
-  b <- stepper el e
-  return (tidings b e)
+  stepperT el e
 
 finalizerUI a = do
   w <- askWindow
