@@ -137,7 +137,7 @@ getFrom table allFields b = mdo
       <- createTable pred (tableMeta table)
   r <- join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
-    let n = (recComplement inf m  allFields pred ) =<< new
+    let n = recComplement inf m  allFields pred  =<< new
         new = G.lookup (G.getIndex m b) reso
     (maybe (return $ diff b =<< new) (\comp -> do
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
@@ -156,6 +156,13 @@ getFrom table allFields b = mdo
 
 
 
+expandOperation (PatchRow i ) = Diff i
+expandOperation (CreateRow j ) = Diff (patch j)
+expandOperation (DropRow  ) =  Delete 
+
+expandPatch (RowPatch (i,j)) = expandOperation j  
+expandPatch (BatchPatch i j) = expandOperation j  
+
 listenFrom table allFields b = mdo
   inf <- askInf
   let
@@ -164,8 +171,8 @@ listenFrom table allFields b = mdo
   (dbref,r) <- getFrom table allFields b
   ref <- liftIO $ prerefTable inf table
   let result = fromMaybe b $ applyIfChange b =<< r
-  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure ((flip apply  (createRow' m  result)) (TableRep (m,M.empty,G.empty)) ))  (patchVar dbref)
-  lift $ accumT (Just result) ((\e i -> either error fst . foldUndo i . fmap (\(RowPatch (_,(PatchRow i)))-> Diff i) $  e  )  <$> e)
+  e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure (apply (TableRep (m,M.empty,G.empty)) (createRow' m  result)))  (patchVar dbref)
+  lift $ accumT (Just result) ((\e i -> either error fst . foldUndo i . fmap expandPatch  $  e  )  <$> e)
 
 
 
@@ -511,17 +518,31 @@ convertChan inf table fixed tbf dbvar = do
   (,) <$> convertChanStepper0 inf table ini (idxChan cloneddbvar)
       <*> convertChanTidings0 inf table fixed tbf result (patchVar cloneddbvar)
 
+restrictAttr :: TB Key () -> PathAttr Key Showable -> Maybe (PathAttr Key Showable)
+restrictAttr (Attr _ _ ) (PAttr _ _) =  Nothing
+restrictAttr (Fun _ _ _ ) (PFun _ _ _ ) =  Nothing
+restrictAttr (IT l n ) (PInline i k) = fmap (PInline i ) $ traverse (restrictPatch t) k 
+  where t = head (F.toList n)
+restrictAttr (FKT l m n ) (PFK i j k) = fmap (PFK i j ) $ traverse (restrictPatch t) k 
+  where t = head (F.toList n)
+
 restrictPatch :: TBData Key () -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
-restrictPatch v = nonEmpty . filter (\i -> isJust $ kvLookup (index i) v)
+restrictPatch v = join . fmap (nonEmpty . catMaybes .fmap (\i -> join $ fmap (flip restrictAttr i) (kvLookup (index i) v)  )) . nonEmpty . filter (\i -> isJust $ kvLookup (index i) v)
+
 
 restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
 restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
 
-restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
-restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> case v of
+restrictOp :: TBData Key () -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
+restrictOp tbf v = case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
-    PatchRow j -> traceNothing (j,tbf) $ PatchRow <$> restrictPatch tbf j
+    PatchRow j -> {-traceNothing (j,tbf) $ -}PatchRow <$> restrictPatch tbf j
     i-> Just i  
+
+restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
+restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> restrictOp tbf v  
+restrict tbf (BatchPatch i v) =  BatchPatch  i <$> (restrictOp tbf v)
+    
 
 traceNothing f Nothing = traceShow ("Filtered:  ",f) Nothing 
 traceNothing _ i = traceShow ("Passed:   ",i) i
@@ -544,15 +565,16 @@ convertChanEvent inf table fixed select bres chan = do
       meta = tableMeta table
       m =  tableDiff <$> concat  ml
       match :: RowPatch Key Showable -> Bool
-      match (RowPatch (i,PatchRow j)) = traceShow (i,j) $ case G.lookup i v  of
-                  Just r -> traceShow ("exist", G.checkPred (apply r j )   (fst fixed ),fixed) $  G.checkPred (apply r j )   (fst fixed )
-                  Nothing -> traceShow ("dont exist",i,fixed) $ False
+      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of
+                  Just r ->   G.checkPred (apply r j )   (fst fixed )
+                  Nothing -> False
       match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
         where
           check = case G.lookup i v  of 
             Just r -> G.checkPred r (fst fixed)
             Nothing ->  False
       match (RowPatch (i,DropRow)) = isJust (G.lookup i v)
+      match (BatchPatch i j) = maybe False (const True ) $ nonEmpty (filter (\ix -> match (RowPatch (ix,j)) ) i ) 
 
       filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
       newRows =  filter match m
@@ -579,7 +601,8 @@ convertChanTidings0
 convertChanTidings0 inf table fixed select ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed select (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
-    t <- accumT (0,ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
+    let projection (TableRep (a,b,i)) =  TableRep (a,b , fromJust . restrictRow select <$>   i)
+    t <- accumT (0,projection ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
     return  (snd <$> t)
 
 tryTakeMany :: TChan a -> STM [a]

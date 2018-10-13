@@ -125,12 +125,6 @@ addEvent ev b = do
  stepperT v nev
 
 
-
-
-
-mapTEventDyn :: (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
-mapTEventDyn f x = mapTidingsDyn f x
-
 cacheTidings :: Tidings a -> Dynamic (Tidings a)
 -- cacheTidings  t = return t
 cacheTidings  t = do
@@ -894,7 +888,7 @@ joinT t = do
   (e,h) <- newEvent
   init <- currentValue (facts t)
   el <- currentValue (facts init)
-  mapTEventDyn  (mapTEventDyn (liftIO. h)) t
+  mapTidingsDyn (mapTidingsDyn  (liftIO. h)) t
   stepperT el e
 
 finalizerUI a = do

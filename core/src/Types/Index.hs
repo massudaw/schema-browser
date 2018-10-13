@@ -583,6 +583,8 @@ instance ( Range v
           ma (ArrayTB1 i, Flip (AnyOp o)) j = F.any (\i -> ma (i, o) j) i
           ma (i@(TB1 _), op) (IntervalTB1 j) = i `Interval.member` j
           ma (IntervalTB1 i, op) j@(TB1 _) = j `Interval.member` i
+          ma (IntervalTB1 i, Equals) (IntervalTB1 j) =
+            j == i
           ma (IntervalTB1 i, Contains) (IntervalTB1 j) =
             j `Interval.isSubsetOf` i
           ma (IntervalTB1 j, Flip Contains) (IntervalTB1 i) =

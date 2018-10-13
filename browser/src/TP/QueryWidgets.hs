@@ -175,11 +175,11 @@ pluginUI inf oldItems pl@(idp,FPlugins n t p) =
       ini <- currentValue (facts tdInput)
       let ecv1 = unionWith const (const (const Nothing) <$> rumors tdInput) ecv
       bcv <- ui $ accumT ini ecv1
-      pgOut  <- ui $mapTEventDyn (liftIO . execute inf t pl)  bcv
+      pgOut  <- ui $ mapTidingsDyn (liftIO . execute inf t pl)  bcv
       return (headerP, (out,  pgOut ))
     uipure = do
       headerP <- headerUI
-      pgOut <- ui $ mapTEventDyn (liftIO . execute inf t pl) tdInput
+      pgOut <- ui $ mapTidingsDyn (liftIO . execute inf t pl) tdInput
       return (headerP, (out,   pgOut ))
 
 
