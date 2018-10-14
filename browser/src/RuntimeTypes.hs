@@ -745,9 +745,9 @@ recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
   where
     attrList  = _relOrigin . fst <$> F.toList i
     filterAttrs :: [Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
-    filterAttrs r m e
-      | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) = const Nothing
-      | otherwise = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV
+    filterAttrs r m e v
+      | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) =  (\i -> kvlist . pure <$>  ((\v -> go r m (index i ) i v) =<< kvLookup (index i) v)) =<< L.find (isJust . unLeftItens) (unkvlist e)
+      | otherwise = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV $ v
       where notPKOnly k =   if S.unions (relOutputSet  <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i

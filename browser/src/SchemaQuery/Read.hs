@@ -518,25 +518,33 @@ convertChan inf table fixed tbf dbvar = do
   (,) <$> convertChanStepper0 inf table ini (idxChan cloneddbvar)
       <*> convertChanTidings0 inf table fixed tbf result (patchVar cloneddbvar)
 
-restrictAttr :: TB Key () -> PathAttr Key Showable -> Maybe (PathAttr Key Showable)
-restrictAttr (Attr _ _ ) (PAttr _ _) =  Nothing
-restrictAttr (Fun _ _ _ ) (PFun _ _ _ ) =  Nothing
-restrictAttr (IT l n ) (PInline i k) = fmap (PInline i ) $ traverse (restrictPatch t) k 
+restrictAttr :: TB Key () -> TB Key Showable -> Maybe (TB Key Showable)
+restrictAttr (Attr _ _ ) i@(Attr _ _) =  Just i  
+restrictAttr (Fun _ _ _ ) i@(Fun _ _ _ ) =  Just i  
+restrictAttr (IT l n ) (IT i k) = fmap (IT i ) $ traverse (restrictRow t) k 
   where t = head (F.toList n)
-restrictAttr (FKT l m n ) (PFK i j k) = fmap (PFK i j ) $ traverse (restrictPatch t) k 
+restrictAttr (FKT l m n ) (FKT i j k) = fmap (FKT i j ) $ traverse (restrictRow t) k 
+  where t = head (F.toList n)
+
+restrictPAttr :: TB Key () -> PathAttr Key Showable -> Maybe (PathAttr Key Showable)
+restrictPAttr (Attr _ _ ) a@(PAttr _ _) =  Just a 
+restrictPAttr (Fun _ _ _ ) a@(PFun _ _ _ ) =  Just a 
+restrictPAttr (IT l n ) (PInline i k) = fmap (PInline i ) $ traverse (restrictPatch t) k 
+  where t = head (F.toList n)
+restrictPAttr (FKT l m n ) (PFK i j k) = fmap (PFK i j ) $ traverse (restrictPatch t) k 
   where t = head (F.toList n)
 
 restrictPatch :: TBData Key () -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
-restrictPatch v = join . fmap (nonEmpty . catMaybes .fmap (\i -> join $ fmap (flip restrictAttr i) (kvLookup (index i) v)  )) . nonEmpty . filter (\i -> isJust $ kvLookup (index i) v)
+restrictPatch v = nonEmpty . mapMaybe (\i -> flip restrictPAttr i =<<  kvLookup (index i) v )
 
 
 restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
-restrictRow v =  kvNonEmpty . kvFilter (\i -> isJust $ kvLookup i v)
+restrictRow v = kvNonEmpty . mapKVMaybe (\i -> flip restrictAttr i =<< (kvLookup (index i) v) )
 
 restrictOp :: TBData Key () -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
 restrictOp tbf v = case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
-    PatchRow j -> {-traceNothing (j,tbf) $ -}PatchRow <$> restrictPatch tbf j
+    PatchRow j -> {-traceNothing (j,tbf) $-} PatchRow <$> restrictPatch tbf j
     i-> Just i  
 
 restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
@@ -545,7 +553,7 @@ restrict tbf (BatchPatch i v) =  BatchPatch  i <$> (restrictOp tbf v)
     
 
 traceNothing f Nothing = traceShow ("Filtered:  ",f) Nothing 
-traceNothing _ i = traceShow ("Passed:   ",i) i
+traceNothing f i = traceShow ("Passed:   ",f) i 
 
 convertChanEvent
   ::
@@ -601,7 +609,7 @@ convertChanTidings0
 convertChanTidings0 inf table fixed select ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed select (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
-    let projection (TableRep (a,b,i)) =  TableRep (a,b , fromJust . restrictRow select <$>   i)
+    let projection (TableRep (a,b,i)) =  TableRep (a,b , (\i -> justError ("empty projection " ++ show (i,select)). restrictRow select $ i)<$>   i)
     t <- accumT (0,projection ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
     return  (snd <$> t)
 

@@ -30,6 +30,7 @@ module Types.Common
   , tbUn
   , unAttr
   , mapKV
+  , mapKVMaybe
   , findKV
   , mapKey'
   , mapKey
@@ -293,6 +294,8 @@ mapBothKV :: (Ord a,Ord b) => (a -> b) -> (TB a c -> TB b d) -> KV a c -> KV b d
 mapBothKV k f (KV n) = KV (Map.mapKeys (relSortMap k) $ Map.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) )  n)
 
 mapKV f (KV n) = KV (Map.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) ) n)
+
+mapKVMaybe  f (KV n) = KV (runIdentity $ Map.traverseMaybeWithKey (\k ->  Identity . fmap valueattr . f . recoverAttr . (originalRel k ,) ) n)
 
 mergeKV (KV i ) (KV j) = KV $ Map.unionWith const i j
 
