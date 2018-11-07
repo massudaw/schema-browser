@@ -172,7 +172,7 @@ parseDefValue i v = fromShowable i <$> (A.decode . BSL.pack . T.unpack $ v)
 
 parseExpr v = case  parseValue v of
   Left v -> Nothing
-  Right v ->toExpr v
+  Right v -> toExpr v
   where 
     toExpr v =  case v of
       Lit v ->  if T.null v then Nothing else Just (ConstantExpr v)
@@ -182,7 +182,7 @@ parseExpr v = case  parseValue v of
 
 instance DecodeTable (FKey (KType (Prim (Text,Text,Maybe Word32) (Text,Text)))) where
   isoTable = iassoc6 
-    (IsoArrow (\(i,j,k,l,m,n) -> Key i j k (join $ traverse (parseDefValue (mapKType n)) <$> l) m n) (\(Key i j k l m n) -> (i,j,k,fmap (T.pack . renderShowable) <$>  l,m,n))) 
+    (IsoArrow (\(i,j,k,l,m,n) -> Key i j k l m n) (\(Key i j k l m n) -> (i,j,k, l,m,n))) 
     (identity <$$> prim "column_name") 
     (prim "field_modifiers") 
     (identity <$$> prim "ordinal_position") 

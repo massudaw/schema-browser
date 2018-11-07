@@ -43,7 +43,7 @@ import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
 
-codeOps = SchemaEditor (error "no ops 2") (error "no ops 3" ) (error "no ops 4") (error "no ops 5")(\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _ i-> return [])   mapKeyType  ((\ a -> liftIO . logTableModification a)) ((\ a -> liftIO . logUndoModification a))400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops")
+codeOps = SchemaEditor (error "no ops 2") (error "no ops 3" ) (error "no ops 4") (error "no ops 5")(\ _ _ _ _ _ _ _ -> return ([],TableRef ((I.NegInf,True) `I.interval` (I.PosInf,True) ),0)) (\ _ _ i-> return [])   mapKeyType  ((\ a -> liftIO . logTableModification a)) ((\ a -> liftIO . logUndoModification a))  400  (\inf -> id {-withTransaction (conn inf)-})   (error "no ops")
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList

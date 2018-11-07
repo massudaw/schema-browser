@@ -8,6 +8,8 @@ module TP.View where
 
 import qualified Data.Aeson as A
 import Utils
+import qualified Data.Aeson.Diff as AP
+import qualified Data.Aeson.Pointer as AP
 import Safe
 import qualified NonEmpty as Non
 import Data.Functor.Identity
@@ -51,6 +53,16 @@ instance A.ToJSON (Column Key Showable)  where
       Primitive [] (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
       i ->  A.toJSON v
   toJSON (IT k v) = A.toJSON (fmap TRow v)
+
+
+instance A.ToJSON a => A.ToJSON (PathFTB a) where
+  toJSON  = toPatch
+    where 
+      toPatch (PAtom i) = A.toJSON i
+      toPatch (PIdx ix i ) = A.toJSON $  case i of 
+                        Just i ->  AP.Add (AP.Pointer [AP.AKey ix] ) (A.toJSON $ toPatch i)
+                        Nothing ->  AP.Rem (AP.Pointer [AP.AKey ix] )
+
 
 instance A.ToJSON a => A.ToJSON (FTB a) where
     toJSON (TB1 i) = A.toJSON i

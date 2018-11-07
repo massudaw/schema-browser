@@ -91,9 +91,10 @@ rawTable = do
   t <- name
   return $ SQLRReference (Just s) t
 
-value =  tryFun function (tryFun cast (boolean <|> paren <|> ref))
+value =  tryFun function (tryFun cast (str <|> boolean <|> paren <|> ref))
   where
     tryFun f i = f i <|> i
+    str = Lit  <$> (char '\'' *> name  <* char '\'')
     boolean = Lit . T.pack .BS.unpack <$> (string "true" <|> string "false")
     paren = (char '(' >> many space ) *> value <* (many space >> char ')')
     ref =  Ref <$> parseColumn
@@ -106,7 +107,7 @@ value =  tryFun function (tryFun cast (boolean <|> paren <|> ref))
        return $ Cast  v ty
     function i = do
        n <- name
-       args  <- char '(' *> sepBy i  (char ',') <* char ')'
+       args  <- char '(' *> sepBy (many space  *> i <* many space)   (char ',') <* char ')'
        return $ ApplyFun n args
 
 

@@ -76,12 +76,16 @@ renderPatch (PFun k j v ) = [(0,renderRel (RelFun (Inline k) (fst j) (snd j) ) +
 
 renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
 renderAttr (FKT k rel v )
-  = [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ (if L.null ref then [] else [(0,"[" ++ L.intercalate "," ref ++ "] => ")])
-  ++ (renderFTB renderTable v)
-  where ref = concat $ fmap snd .renderAttr <$> unkvlist k
-renderAttr (Attr k v ) = (\i -> [(0,show k ++ " => " ++ ident i)]) (renderFTB render v)
-renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ offset 1 i )  (renderFTB renderTable v)
+  =
+    ref
+    ++ [(0,L.intercalate " && " (fmap renderRel rel))]
+  ++ (first (+1) <$> renderFTB renderTable v)
+  where ref = concat $ renderAttr <$> unkvlist k
+renderAttr (Attr k v ) = breakLine  (renderFTB render v)
+  where breakLine i 
+          | L.length i > 1 =  [(0,show k ++ " => ")]  ++ offset 1 i
+          |  otherwise = [(0,show k ++ " => " ++ ident i)]
+renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ i  )  (first (+1) <$> renderFTB renderTable v)
 renderAttr (Fun i k v) = renderAttr (Attr i v)
 
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
@@ -100,7 +104,7 @@ renderFTBPatch f (PInter b i)  = [(0,showFin i)]
 renderFTB :: (a -> [(Int,String)]) -> FTB a -> [(Int,String)]
 renderFTB f (TB1 i) = f i
 renderFTB f (LeftTB1 i) = concat $ maybeToList $ fmap (renderFTB f ) i
-renderFTB f (ArrayTB1 i)  = concat $ F.toList $ fmap (renderFTB f) i
+renderFTB f (ArrayTB1 i)  = concat$ zipWith (\ i j -> (0,show i  ++ " :") : offset 1 j )  [0..] (F.toList $ fmap (renderFTB f) i)
 renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
   where
     showInterval (Interval.Interval (i,j) (l,m)) = ocl j <> (showFin i) ++ "," ++ (showFin l) <> ocr m

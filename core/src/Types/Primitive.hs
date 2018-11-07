@@ -16,6 +16,7 @@ module Types.Primitive where
 import Control.Applicative
 import Data.Functor.Identity
 import Patch
+import Utils
 import Control.DeepSeq
 import Control.Monad.Reader
 import Control.Arrow (Kleisli(..))
@@ -227,11 +228,18 @@ type Column k a = TB k a
 
 type Key = CoreKey
 
+data DefaultExprType 
+  = ReadDef
+  | ReadWriteDef 
+  | ConstantDef 
+  deriving (Show,Eq,Generic)
+   
+
 data FKey a = Key
   { keyValue :: Text
   , keyModifier :: [FieldModifier]
   , keyPosition :: Int
-  , keyStatic :: Maybe (FExpr Text (FTB Showable))
+  , keyStatic :: Maybe (FExpr Text Text)
   , keyTable :: Int
   , _keyTypes :: a
   } deriving (Functor, Generic)
@@ -242,6 +250,9 @@ keyFastUnique k = (keyTable k, keyPosition k)
 type KeyUnique = (Int, Int)
 
 instance NFData a => NFData (FKey a)
+
+instance NFData DefaultExprType 
+instance Binary DefaultExprType 
 
 keyType = _keyTypes
 
@@ -683,7 +694,9 @@ unLeftItens ::
      (Show k, Show a) => TB (FKey (KType k)) a -> Maybe (TB (FKey (KType k)) a)
 unLeftItens = unLeftTB
   where
-    unLeftTB (Attr k v) = Attr (unKOptional k) <$> unSOptional v
+    unLeftTB (Attr k v) 
+        | isSerial (keyType k )= Just $ Attr k  v
+        | otherwise = Attr (unKOptional k) <$> unSOptional v
     unLeftTB (Fun k rel v) = Fun (unKOptional k) rel <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l)) = IT (unKOptional na) <$> l
     unLeftTB i@(IT na (TB1 l)) = Just i

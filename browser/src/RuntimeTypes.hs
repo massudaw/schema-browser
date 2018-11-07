@@ -170,7 +170,10 @@ data DBRef k v =
          , idxChan :: TChan (IndexMetadataPatch k v)
          , collectionState  :: TVar (TableRep k v)
          , threadIds :: [ThreadId]
+         , dblogger  :: TEvent String
          }
+
+type TEvent a = (TVar [a] , TChan a)
 
 meta inf = fromMaybe inf (metaschema inf)
 

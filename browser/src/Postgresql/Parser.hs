@@ -14,6 +14,7 @@ import RuntimeTypes
 import Control.Monad.Trans.Class
 import Control.Monad.RWS
 import Data.Time.Format
+import SchemaQuery.Store
 import Data.Ord
 import qualified Data.Aeson as A
 import qualified Control.Lens as Le
@@ -278,10 +279,10 @@ parsePrimJSON i  v =
       i -> error ("not defined " <> show i)
   ) v
 
-executeLogged :: (ToRow q ,MonadIO m) => Connection -> Query -> q -> m ()
-executeLogged conn sqr args = liftIO $ do
-  putStrLn . BS.unpack =<< formatQuery conn sqr args
-  fromIntegral <$> execute conn sqr args
+executeLogged :: (ToRow q ,MonadIO m) => InformationSchema -> KVMetadata Key -> Query -> q -> m ()
+executeLogged inf table sqr args = liftIO $ do
+  logTable inf table . BS.unpack =<< formatQuery (conn inf) sqr args
+  fromIntegral <$> execute (conn inf) sqr args
   return ()
 
 queryLogged :: (FromRow o ,ToRow q ,MonadIO m) => Connection -> Query -> q -> m [o]

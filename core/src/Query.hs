@@ -296,8 +296,11 @@ backFKRefType
 backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . nonEmpty . catMaybes . reorderPK . concat . fmap aattr . unkvlist
   where
     reorderPK  = fmap lookFKsel
-    lookFKsel (ko,v)=  (\kn tkn -> (kn , transformKey (keyType ko ) tkn v)) <$> knm <*> tknm
+    lookFKsel (ko,v)=  join $ transformType <$> knm <*> tknm
         where
+          transformType kn tkn
+            | isSerial (keyType ko) =  (kn ,)  <$> unSOptional  (transformKey (keyType ko) tkn v)
+            | otherwise =  Just (kn , transformKey (keyType ko) tkn v)
           knm = M.lookup ko relTable
           tknm =  M.lookup ko relType
 

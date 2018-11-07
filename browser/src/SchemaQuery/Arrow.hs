@@ -85,6 +85,7 @@ innerJoinR (P j k) (P l n) srel alias
           joined i = flip addAttr i <$> joinFK i
         return (G.fromList' $ catMaybes $ (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap)) -< (kv,nv))
 
+
 leftJoinR
   :: DatabaseM (View T.Text T.Text)  a (G.GiST (TBIndex Showable) (TBData Key Showable))
   -> DatabaseM (View T.Text T.Text)  a (G.GiST (TBIndex Showable) (TBData Key Showable))
@@ -110,7 +111,7 @@ leftJoinR (P j k) (P l n) srel alias
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
           joined i = addAttr (joinFK i) i
-        return $  joined  <$> emap)-< (kv,nv))
+        return $ joined <$> emap)-< (kv,nv))
 
 projectV
   :: (Show k , Traversable t2) =>

@@ -1,7 +1,7 @@
 {-# LANGUAGE BangPatterns,FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
 module TP.Widgets where
 
-import PStream
+import Reactive.Threepenny.PStream
 import Control.Monad.Writer hiding((<>))
 import Debug.Trace
 import Data.Ord
@@ -623,7 +623,6 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 hlabel h = UI.span # set UI.class_ (L.intercalate " "$ ["label","label-default"] ++ h )
-
 infixl 4 <$|>
 
 (<$|>) = traverseUI
@@ -714,7 +713,7 @@ switchManyLayout  bool map = do
           return el
         Nothing -> error ("no ix " ++ (show x))
 
-  els <- traverseUI fun bool
+  els <- traverseUI fun =<< ui (calmT bool)
   currentEl <- currentValue (facts els)
   currentLayout <- currentValue (facts $ getLayout currentEl)
   currentResult <- currentValue (facts $ triding currentEl)
@@ -894,7 +893,6 @@ joinT t = do
 finalizerUI a = do
   w <- askWindow
   ui $ registerDynamic (closeDynamic $ runUI w a)  
-
 
 
 method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e

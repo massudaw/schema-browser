@@ -54,7 +54,7 @@ nonEmpty [] = Nothing
 nonEmpty (x:xs) = Just (x :| S.fromList xs)
 
 imap :: (Int -> a -> b) -> NonEmptySeq a -> NonEmptySeq b 
-imap f (i :| j ) = (f 0 i :| S.mapWithIndex f j )
+imap f (i :| j ) = (f 0 i :| S.mapWithIndex (\ i -> f (i+1) ) j )
 length (i :| l)  = S.length  l + 1
 
 head :: NonEmptySeq a -> a 

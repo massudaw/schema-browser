@@ -11,6 +11,7 @@ import Data.Functor.Apply
 import Data.Interval (Extended(..), upperBound)
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
 import Data.String
 import qualified Data.Text as T
@@ -48,14 +49,14 @@ insertPatch  inf conn table row  = liftIO $ if not (kvNull serialTB)
           (iquery, namemap)= codegen $ do
             j <- projectTree inf table serialTB 
             return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
-        print  =<< formatQuery conn (fromString iquery) directAttr
+        liftIO $ logTable inf table . BS.unpack =<< formatQuery conn (fromString iquery) directAttr
         [out] <- queryWith (fromRecordJSON inf table serialTB namemap) conn (fromString iquery) directAttr
         let gen =  patch out
         return (patch out)
       else do
         let
           iquery = T.unpack prequery
-        executeLogged  conn (fromString iquery) directAttr
+        executeLogged  inf table (fromString iquery) directAttr
         return []
     where
       prequery = "INSERT INTO " <> kvMetaFullName table <> " (" <> T.intercalate "," (key <$> directAttrProj) <> ") VALUES (" <> T.intercalate "," (value <$> directAttrProj) <> ")"
@@ -79,11 +80,12 @@ attrValueName (IT i  _) = keyValue i
 
 deleteIdx
   ::
-     Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
-deleteIdx conn m ix@(Idex kold) t = do
-    executeLogged conn qstr qargs
+     InformationSchema ->  KVMetadata Key -> TBIndex Showable -> Table -> IO ()
+deleteIdx inf mk ix@(Idex kold) t = do
+    executeLogged inf mk qstr qargs
     return ()
   where
+    m = recoverFields inf <$> mk
     qstr = fromString $ T.unpack del
     qargs = koldPk
     equality k = escapeReserved (attrValueName k) <> "="  <> "?"
@@ -93,12 +95,12 @@ deleteIdx conn m ix@(Idex kold) t = do
 
 applyPatch
   ::
-     Connection -> KVMetadata PGKey ->([TBIndex Showable] ,TBIdx PGKey Showable) -> IO ()
-applyPatch conn m patch  = do
-    executeLogged conn qstr qargs
+     InformationSchema -> KVMetadata Key ->([TBIndex Showable] ,TBIdx PGKey Showable) -> IO ()
+applyPatch inf m patch  = do
+    executeLogged inf m qstr qargs
     return ()
   where
-    (qstr,qargs,_) = updateQuery m patch
+    (qstr,qargs,_) = updateQuery (recoverFields inf <$> m)  patch
 
 updateQuery
   :: IsString a1 =>
@@ -193,7 +195,7 @@ paginate
 paginate inf meta t order off size koldpre wherepred = do
   let ((que,attr),name) = selectQuery inf meta t koldpre order wherepred
   let quec = fromString $ T.unpack $ "SELECT row_to_json(q),(case WHEN ROW_NUMBER() over () = 1 then count(*) over () else null end) as count FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-  print  =<< formatQuery (conn  inf) quec (fromMaybe [] attr)
+  liftIO $ logTable inf meta . BS.unpack =<< formatQuery (conn inf ) quec (fromMaybe [] attr)
   v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr) `catch` (\e -> print (t,wherepred ) >> throw (e :: SomeException))
   let estimateSize = maybe 0 (\c-> c - off ) $ join $ safeHead ( fmap snd v :: [Maybe Int])
   print estimateSize
@@ -243,7 +245,7 @@ deleteMod m t = do
   liftIO $  do
       let table = lookTable inf (_kvname m)
           idx = G.getIndex m t
-      deleteIdx (conn inf) (recoverFields inf <$> m) idx  table
+      deleteIdx inf m idx  table
       l <- liftIO getCurrentTime
       return $  RowPatch (idx,DropRow )
 
@@ -253,7 +255,7 @@ patchMod m pk patch = do
   inf <- askInf
   liftIO $ do
     traverse (\i -> 
-      applyPatch (conn inf) (recoverFields inf <$> m) (pk, firstPatch (recoverFields inf) i)) (nonEmpty (patchNoRef $ filterWritablePatch patch))
+      applyPatch inf m (pk, firstPatch (recoverFields inf) i)) (nonEmpty (patchNoRef $ filterWritablePatch patch))
     return $ rebuild  pk (PatchRow patch)
 
 getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
@@ -267,7 +269,7 @@ getRow table  delayed (Idex idx) = do
              (str,namemap) = codegen (getFromQuery inf m delayed)
              pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_kvpk m) idx
              qstr = (fromString $ T.unpack str)
-         print  =<< formatQuery (conn  inf) qstr pk
+         liftIO $ logTable inf m . BS.unpack =<< formatQuery (conn inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
          case is of
            [i] -> return $ patch i
@@ -305,4 +307,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 tSize = 100
 
 
-postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll getRow mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules
+postgresOps = SchemaEditor patchMod insertMod deleteMod  batchEd  selectAll getRow mapKeyType (\ a -> liftIO . logTableModification a) (\a -> liftIO . logUndoModification a) tSize  (\inf -> withTransaction (conn inf))  overloadedRules

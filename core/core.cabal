@@ -20,7 +20,6 @@ library
     NonEmpty
     Data.Sequence.NonEmpty
     Query
-    Patch
     Types
     Types.Common
     Types.Primitive
@@ -35,6 +34,7 @@ library
   hs-source-dirs: src
   build-depends:
     ordered
+   , patch
    , deepseq
    , base >= 4.8 && < 5.0
    , vector >=0.10 && <0.13

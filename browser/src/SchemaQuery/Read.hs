@@ -11,6 +11,7 @@ module SchemaQuery.Read
   , selectFromProj
   , getFrom
   , listenFrom
+  , listenLogTable
   , refTable
   , refTables
   , refTablesDesc
@@ -136,21 +137,26 @@ getFrom table allFields b = mdo
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
   r <- join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
-    liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
     let n = recComplement inf m  allFields pred  =<< new
         new = G.lookup (G.getIndex m b) reso
-    (maybe (return $ diff b =<< new) (\comp -> do
+        delta = diff b =<< new
+    (maybe (return delta )  (\comp -> do
+      liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
-      let newRow = apply b v
+      let newRow = apply (apply b (fromMaybe [] delta)) v
       resFKS  <- getFKS inf pred table  [newRow] comp
       let
         output = resFKS newRow
-        result = either (const Nothing) (diff b)  output
+        result = either (const Nothing) (Just. patch )  output
       traverse (fetchPatches m [] . pure . (RowPatch . (G.getIndex m b,).PatchRow)) result
       traverse (\i -> do
+        liftIO . putStrLn $ "Pred\n" <> show pred
         liftIO . putStrLn $ "Old\n" <> show b
-        liftIO . putStrLn $ "Result\n" <> (maybe ("") show result)
-        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<<  (applyIfChange b =<< result )
+        liftIO . putStrLn $ "Delta\n" <> (maybe ("") show delta)
+        liftIO . putStrLn $ "Get\n" <> (show v)
+        liftIO . putStrLn $ "Result\n" <> (either show (ident.renderTable) output)
+        liftIO . putStrLn $ "DiffResult\n" <> (maybe "" show  result)
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
       return result) n)) comp
   return (dbvar,r)
 
@@ -274,11 +280,14 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
           atttar = getAtt tar nonRef
           attinj = getAtt inj nonRef
       add :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-      add r = addAttr r  . kvFilter (\k -> not $ relOutputSet k `S.isSubsetOf` refl && isInlineRel k)
+      add r = addAttr r  . kvFilter (\k ->  not $ relOutputSet k `S.isSubsetOf` refl && isInlineRel k)
       joined i = do
          fk <- joinFK i
          return $ add fk i
     return (me >=> joined,old <> refl)
+
+traceIfFalse i False = traceShow i  False
+traceIfFalse i True = True
 
 mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
@@ -352,9 +361,9 @@ tableLoader' table  page fixed tbf = do
     let preresult =  mapResult <$> res
         mapResult i = do
             case G.lookup (G.getIndex (tableMeta table) i) reso of
-                Just orig -> case recComplement inf (tableMeta table) tbf  predicate orig of
-                    Just _ ->  Left i
-                    Nothing -> Right orig
+                Just orig -> case recComplement inf (tableMeta table) tbf predicate orig   of
+                    Just _ ->  Left (apply orig (patch i))
+                    Nothing -> Right  orig
                 Nothing -> Left i
     result <- if L.any isLeft preresult
       then do
@@ -408,7 +417,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             then do
               liftIO . putStrLn $ "No new fields";
               return (nidx,(sidx,reso))
-            else return (nidx,either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) )(newRes))
+            else return (nidx,either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) )newRes)
     (nidx,(sidx2,ndata)) <- case hasIndex of
       Just (sq,idx) ->
         if (sq > G.size reso)
@@ -436,8 +445,15 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
               liftIO . putStrLn $ (ident $ renderTable remain)
               readNew  sq tbf
             Nothing -> do
-              liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso)
-              return ((max (G.size reso) sq,idx), (sidx,reso))
+              case pagetoken of 
+                Nothing ->  if F.any (isJust . recComplement inf (tableMeta table) tbf fixed ) reso
+                            then readNew sq tbf
+                            else  do
+                              liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso,existingProjection)
+                              return ((max (G.size reso) sq,idx), (sidx,reso))
+                Just i -> do
+                  liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso,existingProjection)
+                  return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " <> show (fixed)
         let m = rawPK table
@@ -491,6 +507,23 @@ convertChanEventIndex inf table nchan = do
       h =<<  atomically (takeMany nchan)
       ) (\e -> atomically (takeMany nchan) >>= (\d ->  putStrLn $ show ("error convertChanStep"  ,e :: SomeException,d)<>"\n"))
     return e
+
+listenLogTable :: InformationSchema -> Table -> Dynamic (Tidings [String]) 
+listenLogTable inf t  = do 
+  ref <- liftIO $ prerefTable inf t  
+  convertEventChan (dblogger ref)
+
+convertEventChan 
+  :: TEvent s 
+  -> Dynamic (Tidings [s])
+convertEventChan (v,c) = do
+    (e,h) <- newEvent
+    (cc,ini) <- liftIO $ atomically $ do
+      (,) <$> cloneTChan c <*> readTVar v
+    dynFork . forever $  do
+      h =<<  atomically (takeMany cc)
+    accumT ini ((++)<$> e)
+
 
 convertChanStepper0
   :: Show v =>

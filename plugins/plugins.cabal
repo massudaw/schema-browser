@@ -40,6 +40,7 @@ executable schema-browser
   default-extensions: TupleSections,OverloadedStrings
   build-depends:
      core
+   , patch
    , browser
    , master-plan
    , exceptions

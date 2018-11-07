@@ -10,6 +10,9 @@ module Default where
 import Types
 import qualified Data.Poset as P
 import Utils
+import Data.Time
+import GHC.IO.Unsafe
+import Serializer
 import qualified NonEmpty as Non
 import RuntimeTypes
 import Debug.Trace
@@ -30,10 +33,13 @@ foldTopologicaly iniset fun fks = snd (F.foldl' (filterDuplicated fun) (iniset,[
 
 filterDuplicated  fun (i,l)  j = (i <> S.map _relOrigin (pathRelRel j) ,fun i j : l)
 
-evaluateKeyStatic (ConstantExpr i) = Just i
-evaluateKeyStatic (Function _ _ ) = Nothing -- evaluateKeyStatic
+evaluateKeyStatic n (ConstantExpr i) = parseDefValue n i
+evaluateKeyStatic n (Function v i ) = evaluateFun v i
+  where
+    evaluateFun "now" [] = Just . TB1 . STime .STimestamp $ unsafePerformIO getCurrentTime 
+    evaluateFun _ _  = Nothing
 
-defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateKeyStatic  =<< keyStatic k))
+defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateKeyStatic  (keyType k)=<< keyStatic k))
   where
     go ty  =
       case  ty of

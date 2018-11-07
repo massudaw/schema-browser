@@ -71,9 +71,9 @@ queryAuthorization conn schema user = do
     return $ M.fromList $ convert <$> sq
   where aq = "select \"table\",authorizations from metadata.authorization where schema= ? and grantee = ? "
 
-tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
+tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM pg_class c JOIN pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
-fromShowable2 i v = join (traverse (parseDefValue i) <$> parseExpr v)
+fromShowable2 i v = parseExpr v
 
 testSerial = (=="nextval"). fst . T.break(=='(')
 
@@ -305,7 +305,7 @@ logUndoModification inf (RevertModification id ip) = do
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
       ltime =  utcToLocalTime utc time
-  liftIO $ executeLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
+  liftIO $ executeLogged inf (lookMeta inf "catalog_schema")   (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
   let modt = lookTable (meta inf)  mod
   return ()
 

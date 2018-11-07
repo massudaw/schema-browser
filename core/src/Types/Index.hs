@@ -365,7 +365,7 @@ data AttributePath  k b
   deriving(Eq,Ord,Show,Functor,Generic)
 
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ())
--- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
+-- indexPredIx i a | traceShow ("indexPredIx",i) False = undefined 
 indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
   = case  refLookup (Inline key) r of
     Nothing -> Nothing
@@ -385,17 +385,16 @@ indexPredIx (n@(RelAccess nk nt ) ,eq) r
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = error (show ("IndexPredIx",i))
--- indexPredIx  (a,i) r | traceShow (a,i,indexField a r) False = undefined
 indexPredIx (a@(Inline key),eqs) r =
   case attrLookup a  (tableNonRef r) of
     Nothing ->  Nothing
     Just rv  ->
-      PathAttr key <$> recPred rv
+      PathAttr key <$>  (recPred (snd eq) rv)
   where
-    Just (k,eq) = L.find ((==key).fst) eqs
-    recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
-    recPred i  =  if match eq (Right i) then  Just (TipPath ()) else Nothing
+    Just (k,Left eq) = L.find ((==key).fst) eqs
+    recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq) i
+    recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
+    recPred op i  =    if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
 indexPredIx i v= error (show ("IndexPredIx",i,v))
 
 
@@ -580,6 +579,7 @@ instance ( Range v
             Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList (F.toList j)
           ma (j, AnyOp o) (ArrayTB1 i) = F.any (ma (j, o)) i
           ma (j, Flip (AnyOp o)) (ArrayTB1 i) = F.any (ma (j, o)) i
+          ma (ArrayTB1 i , Equals) (ArrayTB1 j ) = i ==  j 
           ma (ArrayTB1 i, Flip (AnyOp o)) j = F.any (\i -> ma (i, o) j) i
           ma (i@(TB1 _), op) (IntervalTB1 j) = i `Interval.member` j
           ma (IntervalTB1 i, op) j@(TB1 _) = j `Interval.member` i

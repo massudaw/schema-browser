@@ -56,7 +56,7 @@ createColumnCatalog  =
             inf <- lift askInf
             let sqr = "ALTER TABLE ?.? ADD COLUMN ? ?.? "
                 args = (DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty )
-            executeLogged (rootconn inf)  sqr args
+            executeLogged inf (lookMeta inf "catalog_columns")  sqr args
             return ()) -< (s,t,c,sty,ty)
 
 dropColumnCatalog
@@ -74,7 +74,7 @@ dropColumnCatalog  = do
               (ivalue $ irecord (ifield "table_name" (ivalue (readV PText)))) -< ()
           act (\(t,s,c) -> do
             inf <- lift askInf
-            executeLogged (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
+            executeLogged inf (lookMeta inf "catalog_columns")   "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
           returnA -< ()
 
 
@@ -89,7 +89,7 @@ createTableCatalog = do
           s <- schema_name "schema_name"  -< ()
           oid <- act (\(sc ,n) -> do
               inf <- lift askInf
-              _ <-  liftIO $ executeLogged (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted sc ,DoubleQuoted  n)
+              _ <-  liftIO $ executeLogged inf (lookMeta inf "catalog_tables") "CREATE TABLE ?.? ()"(DoubleQuoted sc ,DoubleQuoted  n)
               [Only i] <- liftIO $ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
               return i) -< (TB1 s,TB1 t)
           ifield "oid" (iftb PIdOpt (ivalue (writeV (PInt 8)))) -< SNumeric oid
@@ -113,7 +113,7 @@ dropTableCatalog = do
                     "BASE TABLE" -> "TABLE"
                     "VIEW" -> "VIEW"
                     _ -> error "invalid pattern"
-              liftIO$ executeLogged (rootconn inf) ("DROP " <> tys <> " ?.?") (DoubleQuoted sc ,DoubleQuoted n)
+              liftIO$ executeLogged inf (lookMeta inf "catalog_tables") ("DROP " <> tys <> " ?.?") (DoubleQuoted sc ,DoubleQuoted n)
               ) -< (ty,TB1 s,TB1 t)
           returnA -< ()
 
@@ -132,8 +132,8 @@ createSchema  = do
           oid <- act (\(n,onewm) ->  do
             inf <- lift askInf
             _ <- maybe
-              (executeLogged (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted n))
-              (\o -> executeLogged (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted n, DoubleQuoted o)) onewm
+              (executeLogged inf (lookMeta inf "catalog_schema") "CREATE SCHEMA ? "(Only $ DoubleQuoted n))
+              (\o -> executeLogged inf (lookMeta inf "catalog_schema") "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted n, DoubleQuoted o)) onewm
             liftIO $ print =<< formatQuery  (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
             [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
             return i) -< (TB1 s,fmap TB1 o)
@@ -154,9 +154,9 @@ alterSchema = do
           act (\(n,o,onewm,nnewm) -> do
             inf <- lift askInf
             when (onewm /= o) . void $
-              executeLogged (rootconn inf) "ALTER SCHEMA ? OWNER TO ?" (DoubleQuoted n, DoubleQuoted onewm)
+              executeLogged inf (lookMeta inf "catalog_schema") "ALTER SCHEMA ? OWNER TO ?" (DoubleQuoted n, DoubleQuoted onewm)
             when (nnewm /= n) . void $
-              executeLogged (rootconn inf) "ALTER SCHEMA ? RENAME TO ?" (DoubleQuoted n, DoubleQuoted nnewm) ) -< (n,o,onewm,nnewm)
+              executeLogged inf (lookMeta inf "catalog_schema")  "ALTER SCHEMA ? RENAME TO ?" (DoubleQuoted n, DoubleQuoted nnewm) ) -< (n,o,onewm,nnewm)
           returnA -< ()
 
 dropSchema
@@ -169,7 +169,7 @@ dropSchema = do
           s <- ifield "name" (ivalue (readV  PText))-< ()
           act (\n->  do
             inf <- lift askInf
-            _ <- liftIO$ executeLogged (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted n)
+            _ <- liftIO$ executeLogged inf (lookMeta inf "catalog_schema")  "DROP SCHEMA ?"(Only $ DoubleQuoted n)
             return ()) -< TB1 s
           returnA -< ()
 

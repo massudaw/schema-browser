@@ -17,6 +17,7 @@ module SchemaQuery.Store
   , transaction
   -- Create table
   , createTable
+  , logTable
   -- Log changes to current monad
   , fetchPatches 
   , tellPatches
@@ -93,7 +94,7 @@ cloneDBVar pred dbvar@DBRef{..} = do
   ix <- readTVar refSize
   (i,idxchan) <- readIndex dbvar
   (s,statechan) <- readState pred dbvar
-  let clonedVar = DBRef dbRefTable  (ix+1) refSize statechan idxVar idxchan collectionState []
+  let clonedVar = DBRef dbRefTable  (ix+1) refSize statechan idxVar idxchan collectionState [] dblogger
   return $ ((i,s),clonedVar)
 
 
@@ -221,6 +222,12 @@ readCollectionSTM ref = do
    TableRep (_,_,st) <- readTVar (collectionState ref)
    return (( idx,  st) ,ref)
 
+eventChan ini = do
+  v <- newTVar  ini
+  c <- newBroadcastTChan 
+  nc <- dupTChan c
+  return (v,nc)
+
 newDBRef inf table (iv,v)= do
     let
       sidx :: M.Map [Key] (SecondaryIndex Key Showable)
@@ -230,12 +237,19 @@ newDBRef inf table (iv,v)= do
     nchanidx <- liftIO$ atomically $ dupTChan chanidx
     nmdiff <- liftIO$ atomically $ dupTChan mdiff
     midx <-  liftIO$ atomically$ newTVar iv
+    dblogger <-  liftIO$ atomically$ eventChan []
     refSize <- liftIO $ atomically $  newTVar 1
     collectionState <-  liftIO$ atomically $ newTVar  (TableRep (tableMeta table,sidx,v))
-    let dbref = DBRef table 0 refSize nmdiff midx nchanidx collectionState []
+    let dbref = DBRef table 0 refSize nmdiff midx nchanidx collectionState [] dblogger
     liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert (tableMeta table ) dbref)
     return dbref
 
+logTable :: InformationSchema -> KVMetadata Key -> String -> IO ()
+logTable inf t s = do 
+  mmap <- readTVarIO (mvarMap inf)
+  ref <- lookDBVar inf mmap t 
+  t <- getCurrentTime 
+  atomically $ writeTChan (snd (dblogger ref)) (show t <> " : " <> s )
 
 createTableRefs :: InformationSchema -> Table -> IO (Collection Key Showable,DBRef Key Showable)
 createTableRefs inf (Project table (Union l)) = do
@@ -277,6 +291,7 @@ createTableRefs inf table = do
           liftIO $ atomically $ readCollectionSTM ref
         Nothing -> do
           dbref@(DBRef {..}) <- newDBRef inf table (iv,v)
+          tilog <- dynFork $ forever $ logChanges dblogger 
           tidix <- dynFork $ forever $ updateIndex dbref
           tidst <- dynFork $ forever $ updateTable inf dbref
           let
@@ -289,7 +304,15 @@ createTableRefs inf table = do
             return (l,o)) (M.toList childrens)
           newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
           tidsrefs <- mapM (\(j,var)-> dynFork $ forever $ updateReference j var dbref) newNestedFKS
-          return ((iv,v),dbref {threadIds = tidix:tidst:tidsrefs})
+          return ((iv,v),dbref {threadIds = tilog:tidix:tidst:tidsrefs})
+
+logChanges :: TEvent String ->  IO ()
+logChanges  (e,c) = 
+    atomically $ do
+       m <- takeMany c
+       i <- readTVar e 
+       writeTVar e (m ++ i)
+
 
 updateReference ::
      (v ~ Index v, PatchConstr k1 v, Foldable t, Functor t)
@@ -298,7 +321,7 @@ updateReference ::
   -> DBRef k1 v
   -> IO ()
 updateReference j var (DBRef {..}) = do
-  putStrLn ("Update Reference: " ++ T.unpack (tableName dbRefTable ))
+  let label = "Update Reference: " ++ T.unpack (tableName dbRefTable )
   catchJust
     notException
     (atomically
@@ -307,7 +330,7 @@ updateReference j var (DBRef {..}) = do
                isPatch _ = False
            ls <- filter isPatch . concat . fmap tableDiffs . concat <$> takeMany var
            when (not $ L.null ls) $ do
-             state <- readTVar collectionState
+             state <- trace (unlines (label : (show <$> ls ))) $ readTVar collectionState
              let patches = compact . concat $ (\f -> f ls state) <$> j
              when (not $ L.null patches) $
                writeTChan patchVar (FetchData dbRefTable <$> patches)))

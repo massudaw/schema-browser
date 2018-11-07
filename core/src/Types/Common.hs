@@ -20,6 +20,7 @@ module Types.Common
   , mapFValue
   , mapFAttr
   , relComp
+  , relNull
   , relUnComp
   , replaceRecRel
   , traFAttr
@@ -401,6 +402,9 @@ _relTarget (Rel _ _ i) = i
 -- _relTarget (RelComposite i ) = _relTarget <$> i
 _relTarget (RelAccess _ i) = _relTarget i
 _relTarget i = error (show i)
+
+relNull (RelComposite []) = True
+relNull i = False
 
 relComp :: Ord a => Foldable f => f (Rel a) -> Rel a
 relComp  i 

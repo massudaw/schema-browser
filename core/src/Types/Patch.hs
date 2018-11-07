@@ -408,7 +408,9 @@ unLeftItensP = unLeftTB
     unLeftTB (PAttr k (PatchSet l)) =
       PAttr (unKOptional k) . PatchSet <$>
       Non.catMaybes (unSOptionalP <$> l)
-    unLeftTB (PAttr k v) = PAttr (unKOptional k) <$> unSOptionalP v
+    unLeftTB (PAttr k v) 
+        | isSerial (keyType k )= Just $ PAttr k v
+        | otherwise = PAttr (unKOptional k) <$> unSOptionalP v
     unLeftTB (PFun k rel v) = PFun (unKOptional k) rel <$> unSOptionalP v
     unLeftTB (PInline na l) = PInline (unKOptional na) <$> unSOptionalP l
     unLeftTB (PFK rel ifk tb) =
@@ -599,15 +601,15 @@ instance Patch (TBRef Key Showable) where
     (t,tu) <- applyUndo j l <|> Right (j,[])
     (t',tu') <- applyUndo t e <|> Right (t,tu)
     return (TBRef (s,t'),PTBRef su tu tu')
-  createIfChange (PTBRef i j k ) = do
+  createIfChange (PTBRef i j k ) = (do
     (s,t) <-
       ((,) <$> createIfChange i <*> createIfChange j) <|>
       -- create non reflective
       (( kvlist [],) <$> createIfChange j) <|>
       -- TODO: check if we need to create no ref ptbref
       ((, kvlist []) <$> createIfChange i)
-    t' <- applyIfChange t k
-    return (TBRef (s,t'))
+    t' <- applyIfChange t k 
+    return (TBRef (s,t'))) <|> (TBRef . (kvlist [] ,)  <$> createIfChange k)
 
 type PatchConstr k a
    = ( Show (Index a)
