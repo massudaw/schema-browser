@@ -222,7 +222,7 @@ batchEd m i =  do
       where names ix = "r" <> T.pack (show ix)
             tables = zip (names <$> [0..]) ((\(i,_,_) -> i ) <$> l)
     l = codeGen  . firstPatchRow (recoverFields inf) <$> F.toList i
-  l <- queryLogged (rootconn inf) (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
+  l <- queryLogged inf m (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
   liftIO $ print (l :: [Only(Maybe Int)])
   return i
 

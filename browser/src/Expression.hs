@@ -1,6 +1,7 @@
 module Expression (buildAccess,readFun,funmap,evaluateFFI,evaluate) where
 
 import Control.Monad
+import RuntimeTypes
 import Data.Either
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
@@ -49,10 +50,10 @@ parseFunction =  do
   many (char ' ')
   return (Function (pack $ BS.unpack fun ) f)
 
-callFunction :: Connection -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (Maybe (FTB Showable))
-callFunction conn fun ty inp = do
+callFunction :: InformationSchema -> KVMetadata Key -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (Maybe (FTB Showable))
+callFunction inf table fun ty inp = do
   let func = fromString $ " SELECT to_json(" ++ fun ++ ") "
-  Only i <- L.head <$> queryLogged conn func (L.zip (fst ty) inp)
+  Only i <- L.head <$> queryLogged  inf table func (L.zip (fst ty) inp)
   return $ either (error "cant parse" ) id .   (A.parseEither (fmap fst . codegent . parseShowableJSON parsePrimitiveJSON  (snd ty)))<$>  i
 
 multProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5,a6+b6,a7+b7)
@@ -102,21 +103,15 @@ buildAccess n@(RelAccess i o) =  joinKType $ const (buildAccess o ) <$> (mergeFK
 buildAccess (Inline l) = keyType l
 buildAccess (Rel l _ op ) = buildAccess l
 
-testFFI = do
-  conn <-  connectPostgreSQL  "dbname=incendio user=postgres password=jacapodre"
-  let fun = readFun "dimensionalmult(%0,dimensionalmult(%1,%2))" :: Expr
-  print fun
-  evaluateFFI conn fun funmap [Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))) ,Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))),Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0)))] [TB1 (SDouble 3 ) , TB1 (SDouble 2),TB1 (SDouble 3)]
 
-
-evaluateFFI :: Connection -> Expr -> Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable) -> [KType (Prim KPrim (Text,Text)) ] -> [FTB Showable]  -> IO (Maybe (FTB Showable))
-evaluateFFI conn expr fs ac2 res = evalTop expr
+evaluateFFI :: InformationSchema -> KVMetadata Key -> Expr -> Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable) -> [KType (Prim KPrim (Text,Text)) ] -> [FTB Showable]  -> IO (Maybe (FTB Showable))
+evaluateFFI inf table expr fs ac2 res = evalTop expr
   where
     evalTop ::  Expr -> IO (Maybe (FTB Showable))
     evalTop fun@(Function i e) = do
         let rl = replaceList  (ktypeToType <$> ac2)
         let out = either (error . show ) schemeToKType $ inferExpr ops  rl  fun
-        callFunction conn (renderPostgres fun) (ac2, out ) res
+        callFunction inf table (renderPostgres fun) (ac2, out ) res
     evalTop (Value i ) = return (Just $ justError "no expr" $ res `atMay` fromIntegral i)
 
 

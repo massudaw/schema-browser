@@ -300,13 +300,14 @@ catchPluginException inf pname tname  idx i =
 logUndoModification
   :: InformationSchema
   -> RevertModification Table (RowPatch Key Showable)  -> IO ()
+logUndoModification inf (RevertModification (FetchData id ip) _) = return ()
 logUndoModification inf (RevertModification id ip) = do
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
       ltime =  utcToLocalTime utc time
-  liftIO $ executeLogged inf (lookMeta inf "catalog_schema")   (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
-  let modt = lookTable (meta inf)  mod
+      modt = lookMeta (meta inf)  mod
+  liftIO $ executeLogged (meta inf) modt (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
   return ()
 
 logTableModification
@@ -322,7 +323,7 @@ logTableModification inf (TableModification Nothing ts u table ip) = do
   let mod = modificationEnv env
   let ltime =  utcToLocalTime utc time
 
-  [Only id] <- queryLogged (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
+  [Only id] <- queryLogged inf (tableMeta table) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
   dbref  <- prerefTable (meta inf) modt
 

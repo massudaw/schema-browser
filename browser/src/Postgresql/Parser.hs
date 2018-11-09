@@ -285,10 +285,10 @@ executeLogged inf table sqr args = liftIO $ do
   fromIntegral <$> execute (conn inf) sqr args
   return ()
 
-queryLogged :: (FromRow o ,ToRow q ,MonadIO m) => Connection -> Query -> q -> m [o]
-queryLogged conn sqr args = liftIO $ do
-  putStrLn . BS.unpack =<< formatQuery conn sqr args
-  query conn sqr args
+queryLogged :: (FromRow o ,ToRow q ,MonadIO m) => InformationSchema -> KVMetadata Key -> Query -> q -> m [o]
+queryLogged inf table sqr args = liftIO $ do
+  logTable inf table . BS.unpack =<< formatQuery (conn inf) sqr args
+  query (conn inf) sqr args
 
 
 -- parseGeom a | traceShow a False = undefined

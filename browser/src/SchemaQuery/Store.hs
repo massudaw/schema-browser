@@ -369,9 +369,8 @@ updateTable inf (DBRef {..})
         traverse (\v -> writeTVar collectionState . fst$  v) out
         return  $ zip cpatches . snd <$> out
     either (putStrLn  .("### Error applying: " ++ ) . show ) (
-      mapM_ (\(m,u) -> (do
-        let mmod =   m
-        mmod2 <- case mmod of
+      mapM_ (\(m,u) -> do
+        mmod2 <- case m of
           BatchedAsyncTableModification t l -> do
             let m = tableMeta t
             closeDynamic . transactionNoLog inf $ do
@@ -390,11 +389,7 @@ updateTable inf (DBRef {..})
               wrapModification m l
           i -> return i
         val <- logger (schemaOps inf) inf mmod2
-        case val of
-          TableModification (Just v) i j k _ -> do
-            undo (schemaOps inf) inf (RevertModification val ( u))
-            return ()
-          _ -> return () ))
+        undo (schemaOps inf) inf (RevertModification val  u) )
       ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
     return ())  (\e -> atomically ( readTChan patchVar ) >>= printException e )
 

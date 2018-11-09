@@ -481,7 +481,7 @@ lookSMeta :: InformationSchema -> Prim KPrim (Text,Text) -> KVMetadata Key
 lookSMeta inf (RecordPrim r ) = tableMeta$ lookSTable inf r
 
 lookTable :: InformationSchema -> Text -> Table
-lookTable inf t = justError ("no table: " <> T.unpack t) $ HM.lookup t (_tableMapL inf)
+lookTable inf t = justError ("no table: " <> T.unpack t  <> " - " <> show (schName $ schemaProperties inf  )) $ HM.lookup t (_tableMapL inf)
 
 lookTableM :: InformationSchema -> Text -> Maybe Table
 lookTableM inf t =  HM.lookup t (_tableMapL inf)

@@ -326,7 +326,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItems preoldItems = do
     liftType [] i = i
     liftKey = fmap (liftType (_keyFunc $ keyType i).join)
   -- Only executes if not all patches are Keep and all values are Just
-  funinp <-  ui $ liftKey <$> mapEventDyn (liftIO . traverse ( evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes . fmap snd ) (filterE (not . all fst) $ rumors refs)
+  funinp <-  ui $ liftKey <$> mapEventDyn (liftIO . traverse ( evaluateFFI inf (tableMeta table)  (fst rel) funmap (buildAccess <$> snd rel)) . allMaybes . fmap snd ) (filterE (not . all fst) $ rumors refs)
 
   -- FIXME : Function evaluation is producing Delete when using offset.
   let pout = (\i j ->  ignoreDelete $ diff' i j )<$> facts preoldItems <@> (fmap (Fun i rel) <$> funinp)
@@ -703,12 +703,15 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
   (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
-  errors <- printErrors e
-  logger <- logConsole inf table
-  debug <- debugConsole   preoldItems tablebdiff
-  out <- UI.div # set children [listBody,panelItems,errors,debug,logger]
+  
+  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+  info <- switchManyLayout (triding navMeta) 
+    (M.fromList [("Status", emptyLayout  $ printErrors e), ("Backend Log", emptyLayout $ logConsole inf table), ("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)])
+  
+  out <- UI.div # set children [listBody,panelItems,getElement navMeta,getElement info]
   return $ LayoutWidget tablebdiff out layout
 
+emptyLayout i = (\i -> LayoutWidget (pure Nothing) i (pure (10,10)))  <$> i 
 openClose open = do
   let translate True = "expand"
       translate False = "collapse-up"
@@ -831,31 +834,24 @@ logConsole inf table = do
 debugConsole oldItemsi inscrudp = do
     let
       inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
-    debugBox <- checkedWidget (pure False)
-    debugT <- traverseUI (\i ->
-            if i
-            then do
-              let
-                gen (h,s) = do
-                  v <- ui $ currentValue s
-                  header <- UI.h6
-                            # set UI.class_ "header"
-                            # set UI.text h
-                            # set UI.style [("text-align","center")]
-                  out <- UI.mkElement "textarea"
-                            # set UI.value v
-                            # set UI.style [("max-height","300px"),("width","100%")]
-                  element out # method  "textAreaAdjust(%1)"
-                  UI.div # set children [header,out]
-                         # set UI.class_ "col-xs-6"
-              mapM gen
+      gen (h,s) = do
+        v <- ui $ currentValue s
+        header <- UI.h6
+                  # set UI.class_ "header"
+                  # set UI.text h
+                  # set UI.style [("text-align","center")]
+        out <- UI.mkElement "textarea"
+                  # set UI.value v
+                  # set UI.style [("max-height","300px"),("width","100%")]
+        element out # method  "textAreaAdjust(%1)"
+        UI.div # set children [header,out]
+               # set UI.class_ "col-xs-6"
+    debugT <- mapM gen
                   [-- ("Last", maybe "" (ident . renderTable) <$> facts oldItemsi),
                   -- ("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud),
                   ("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
                   ,("Undo", maybe "" (onDiff (ident . renderRowPatch) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
-            else  return []) (triding debugBox)
-    debug <- UI.div # sink children (facts debugT) # set UI.class_ "col-xs-12"
-    UI.div #  set children [getElement debugBox,debug]
+    UI.div # set children debugT # set UI.class_ "col-xs-12"
 
 processPanelTable
   :: Element
@@ -981,8 +977,10 @@ buildUIDiff f check (Primitive l prim) = go l
                         # sink text  (show <$> facts (triding wid))
                       UI.div # set children [ldelta]
                   lb <- detailsLabel (sink UI.text (show . (+ix) <$> facts offsetT ) . (>>= paintEditDiff valix (triding wid))) dynShow
-                  element wid # set UI.class_ "col-xs-12"
-                  row <- UI.div # set children [lb,getElement wid]
+                  element lb # set UI.style [("width", "5%")]
+                  element wid # set UI.style [("width", "95%")]
+                  row <- UI.div # set children [lb,getElement wid] # set UI.class_ "col-xs-12"
+                    # set UI.style [("display", "inline-flex")]
                   return $ LayoutWidget (triding wid) row (getLayout wid) ) unIndexEl unplugix (isJust  . filterTB1 check )
 
             element offset # set UI.class_ "label label-default pull-right col-xs-2"
