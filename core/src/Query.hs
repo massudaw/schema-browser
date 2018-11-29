@@ -363,23 +363,31 @@ searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable 
 
     lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . join . fmap safeHead . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 
-joinRel2 :: (Show k , Ord k,Ord a ,Show a,G.Predicates (TBIndex a)) => KVMetadata k->  [(Rel k ,FTB a)] -> G.GiST (TBIndex a) (TBData k a) -> Maybe (FTB (TBData k a))
-joinRel2 tb ref table
-  | L.any (isLeft.snd) ref
-  = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb ) table) (Tra.traverse (traverse unSOptional) ref )
-  | L.any (isArray.snd) ref
-  = let
-      arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
-   in join .fmap ( fmap (ArrayTB1 .  NonS.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) [0..(NonS.length (unArray $ snd arr)   - 1)])
-  | otherwise
-    =  TB1 <$> tbel
-      where
-            isLeft (LeftTB1 i) = True
-            isLeft i = False
-            isArray (ArrayTB1 i) = True
-            isArray i = False
-            idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relOrigin . _relTarget .fst )) ref
-            tbel = G.lookup idx table
+joinRel2
+  :: (Show k , Ord k,Ord a ,Show a,G.Predicates (TBIndex a)) 
+   => KVMetadata k
+   -> [(Rel k ,FTB a)]
+   -> G.GiST (TBIndex a) (TBData k a) 
+   -> Maybe (FTB (TBData k a))
+joinRel2 tb ref table = recurse ref
+  where
+    recurse ref 
+      | L.any (isLeft.snd) ref
+        = Just $ LeftTB1  $ join $ fmap recurse  (Tra.traverse (traverse unSOptional) ref )
+      | L.any (isArray.snd) ref
+        = let
+            arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
+            arrayTB1 =  fmap (ArrayTB1 .  NonS.fromList ).nonEmpty
+         in join . fmap arrayTB1 . Tra.sequenceA   $ fmap (recurse . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) [0..(NonS.length (unArray $ snd arr)   - 1)])
+      | otherwise
+        =  TB1 <$> G.lookup idx table
+        where
+          idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relOrigin . _relTarget .fst )) ref
+    isLeft (LeftTB1 i) = True
+    isLeft i = False
+    isArray (ArrayTB1 i) = True
+    isArray i = False
+
 
 
 checkGist t un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM t  un pk)

@@ -789,6 +789,16 @@ filterTB1 f (ArrayTB1 l ) = ArrayTB1 . NonS.fromList <$> nonEmpty (filter (isJus
 filterTB1 f (LeftTB1 l) = Just . LeftTB1 . join $ filterTB1 f <$> l
 filterTB1 f (TB1 i) = if f i  then Just (TB1 i) else Nothing
 
+liftOrigin  rel l = F.foldl' (flip (merge (:) id pure)) (defaultTy ty) rels
+  where 
+    defaultTy :: [KTypePrim] -> FTB [w]
+    defaultTy l  = foldr (.)  TB1 (match  <$> l) $ []
+    match KArray  = ArrayTB1 . NonS.fromList . L.replicate 50
+    match KOptional = LeftTB1 . Just
+    ty  = (if L.any isOptional rels  then (KOptional:) else id) $ foldl1 mergeOpt (inferTy <$> rel)
+    rels = catMaybes $ findRel l <$> rel
+    isOptional (LeftTB1 i) = True
+    isOptional _ = False
 
 
 liftRelFK l rel f =
@@ -796,25 +806,19 @@ liftRelFK l rel f =
     (,)
     (kvlist [], )
     (, kvlist [])
-    (kvlist <$> F.foldl' (flip (merge (:) id pure)) (defaultTy ty) rels)
+    (kvlist <$> liftOrigin  rel l)
     f
   where
-    defaultTy :: [KTypePrim] -> FTB [w]
-    defaultTy l  = foldr (.)  TB1 (match  <$> l) $ []
-    match KArray  = ArrayTB1 . NonS.fromList . L.replicate 50
-    match KOptional = LeftTB1 . Just
-    isOptional (LeftTB1 i) = True
-    isOptional _ = False
-    ty  = (if isOptional f then (KOptional:) else id) $ foldl1 mergeOpt (inferTy <$> rel)
-    rels = catMaybes $ findRel l <$> rel
 
 findRel l (Rel k op j) = do
-  Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) l
+  let isAttr (Attr _ _ ) = True
+      isAttr _ = False
+  Attr k v <- L.find (\(Attr i v) -> i == _relOrigin k) (L.filter isAttr l ) 
   return $ fmap (Attr k . TB1) v
 
 
 inferTy (Rel i (AnyOp v) k ) = KArray : inferTy (Rel i v k)
-inferTy _  = []
+inferTy _ = [] 
 
 -- mergeFKRef  $ keyType . _relOrigin <$>rel
 mergeFKRel :: [Rel CoreKey ] -> KType [(Rel CoreKey , KType CorePrim)]
@@ -895,6 +899,7 @@ keyattrs = keyattr
 replaceRel rel (Attr k v) =
   (justError "no replaceRel" $ L.find ((== k) . _relOrigin) rel, v)
 
+{-
 atTBValue ::
      (Applicative f, Ord k)
   => [Rel k]
@@ -913,7 +918,6 @@ atTBValue l f g h v = alterKV (relComp l) (traverse modify) v
           recoverFK (_relOrigin . keyattr <$> (unkvlist l)) i <$>
             h ( liftFK t)
 
-{-
           APrim j -> APrim <$> f j
           ARef j -> ARef <$> g j
           ti -> case recoverAttr (F.toList key,ti) of

@@ -102,11 +102,12 @@ import GHC.Exts
 
 newtype Atom a = Atom { unAtom' :: a } deriving (Eq,Ord,Show,Functor,Foldable,Traversable)
 
-instance (Compact (Index a ),Patch a) => Patch (Atom a) where
+instance Patch a => Patch (Atom a) where
   type Index (Atom a) = [Index a]
-  createIfChange l =  do
-    n <- safeHead (compact l)
-    Atom <$> createIfChange n
+  createIfChange l =  Atom <$> F.foldl'  build Nothing l 
+    where 
+      build Nothing i = createIfChange i  
+      build (Just i) v = applyIfChange i v 
   applyUndo (Atom i) j = first Atom <$> foldUndo  i j
 
 
@@ -140,7 +141,7 @@ data EitherDiff a b
 
 filterDiff = fmap (\(Diff i) -> i) . filter isDiff
 
-instance (Compact (Index a),Compact (Index b),Patch a , Patch b) => Patch (a,b) where
+instance (Patch a , Patch b) => Patch (a,b) where
   type Index (a,b) = (Index (Atom a) , Index (Atom b))
   createIfChange (i,j) = liftA2 (,) (unAtom' <$> createIfChange i ) (unAtom' <$>createIfChange j)
   applyUndo  (i,j) (a,b)  = do

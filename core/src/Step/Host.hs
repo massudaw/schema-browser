@@ -49,11 +49,11 @@ indexField p@(IProd b l) v =
     Nothing ->
       case findFK [l] (v) of
         Just (FKT ref _ _) ->
-          ((\l -> L.find ((== [l]) . fmap _relOrigin . relUnComp . keyattr) $ unkvlist ref) $
+          ((\l -> L.find ((== [l]) .concat . fmap (fromMaybe [] . _relOutputs). relUnComp . keyattr) $ unkvlist ref) $
            l)
         Nothing -> findFKAttr [l] v
     i -> i
-indexField n@(Nested ix nt) v = findFK (F.toList (_relOrigin <$> ix)) v
+indexField n@(Nested ix nt) v = kvLookup (relComp $ F.toList ix) v <|> findFK (concat $ F.toList (fromMaybe [] . _relOutputs <$> ix)) v
 indexField i _ = error (show i)
 
 joinFTB (LeftTB1 i) = LeftTB1 $ fmap joinFTB i

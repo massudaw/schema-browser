@@ -2,6 +2,7 @@
 module Environment where
 
 import RuntimeTypes
+import Debug.Trace
 import Step.Host
 import Step.Client
 import Data.Functor.Identity
@@ -37,7 +38,18 @@ data RowModifier
 
 mapA f a = F.foldr (liftA2 (:))  (pure []) (f <$> a)
 
-convertRel inf tname =  convert . liftRel inf tname . indexerRel 
+convertRel inf tname = buildRel . splitRel inf tname
+
+splitRel inf tname = liftRel inf tname . indexerRel 
+
+buildRel :: Monad m =>  Rel Key
+                    -> PluginM
+                         (AttributePath Text MutationTy)
+                         (Atom (TBData Text Showable))
+                         m 
+                         w
+                         (FTB Showable)
+buildRel =  convert 
   where
     convert (RelAccess (Inline i) j) = iinline (keyValue i) (recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
     convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (recFTBs tyi . irecord $ convert j ) 
@@ -235,7 +247,8 @@ iforeign ::
   => [Rel k]
   -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested(Non.fromList s) (Many [])) $ i )). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) 
+  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested(Non.fromList s) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 
@@ -243,14 +256,15 @@ mapNonEmpty f i = join . maybeToList $ fmap f <$>  nonEmpty i
 
 -- Row
 
-isum :: ((Show k,Monad m ,Show s,Show (Index s)))
-  => [PluginM (AttributePath k p) (Atom ((TBData k s))) m i (Maybe a)]
+itotal :: Functor m => PluginM (Union (AttributePath k p)) (Atom (TBData k s))  m  i (Maybe a) 
+       -> PluginM (Union (AttributePath k p))  (Atom (TBData k s))  m  i a
+itotal i = justError "no value " <$> i
 
-  -> PluginM (Union (AttributePath k p))  (Atom ((TBData k s)))  m  i a
--- -> PluginM (Union(AttributePath k p)) o m i a
-isum  lsp = irecordU ISum $ P ( concat $ fmap (fst .staticP) ls, concat $ fmap (snd.staticP)  ls ) (Kleisli (\i -> fmap (justError "no value ") $ foldr (liftA2 (<|>)) (return Nothing) $ (\ j -> (unKleisli . dynP $ j) i ) <$> ls))
-  where unKleisli (Kleisli op) = op
-        ls =  lsp
+isum :: (Monad m ,Show s,Show (Index s))
+  => [PluginM c (Atom s) m i (Maybe a)]
+  -> PluginM c  (Atom s)  m  i (Maybe a)
+isum ls = P (concat $ fmap (fst .staticP) ls, concat $ fmap (snd.staticP) ls) 
+    (Kleisli (\i ->  F.foldl' (liftA2 (<|>)) (return Nothing) $ (($i) . runKleisli . dynP <$> ls)))
 
 arow
   :: (Show (Index s)
@@ -269,17 +283,20 @@ mapUnion f i = maybeToList $ f <$> nonEmpty i
 mapUnionU f i = manyU . maybeToList $ f <$> nonEmptyU i
 nonEmptyU (Many i) = Many <$> nonEmpty i
 
-instance (Show u, Patch a) => Patch (M.Map u a) where
-  type Index (M.Map u a) = [(u,Index a)]
+newtype ChangeMap u  a = ChangeMap (M.Map u a )
 
+instance (Show u, Patch a) => Patch (ChangeMap u a) where
+  type Index (ChangeMap u a) = [(u,Index a)]
+
+clookup k (ChangeMap m ) = M.lookup k m
 -- Table
 
 itable :: Monad m
        => (Show t ,Ord t)
        => t
        -> PluginM (Row pk k)  (TableIndex k Showable )  m  i a
-       -> PluginM (Module t pk k )  (M.Map t (TableIndex k Showable) )  m i a
-itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Module s) tidxi,mapUnion (Module s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (last . fmap snd) (justError ("no table "++ show s). M.lookup  s ) . op ))
+       -> PluginM (Module t pk k )  (ChangeMap t (TableIndex k Showable) )  m i a
+itable s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Module s) tidxi,mapUnion (Module s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (last . fmap snd) (justError ("no table "++ show s). clookup  s ) . op ))
 
 atable ::( Show t ,Monad m)
        => Ord t
@@ -292,9 +309,9 @@ atable s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Module s) tidxi,mapUni
 -- Schema
 ischema :: (Monad m ,Show s ,Ord s)
        => s
-       -> PluginM (Module t pk k)  (M.Map t (TableIndex k Showable ))  m  i a
-       -> PluginM (Namespace s t pk k )  (M.Map s (M.Map t (TableIndex k Showable)))  m i a
-ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Namespace s) tidxi,mapUnion (Namespace s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (concat .  fmap snd) (justError ("no schema" ++ show s). M.lookup  s ) . op ))
+       -> PluginM (Module t pk k)  (ChangeMap t (TableIndex k Showable ))  m  i a
+       -> PluginM (Namespace s t pk k )  (ChangeMap s (ChangeMap t (TableIndex k Showable)))  m i a
+ischema s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Namespace s) tidxi,mapUnion (Namespace s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (concat .  fmap snd) (justError ("no schema" ++ show s). clookup  s ) . op ))
 
 aschema :: (Monad m ,Ord s)
        => s
@@ -302,16 +319,16 @@ aschema :: (Monad m ,Ord s)
        -> PluginM (Namespace s t pk k )  o  m i a
 aschema s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Namespace s) tidxi,mapUnion (Namespace s) tidxo) (Kleisli (withReaderT id id . op ))
 
-from :: (Eq (Namespace s t pk k),Ord s, Ord t,Show t,Monad m ,Show s)=> s -> t -> PluginM (Namespace s t pk k )  (M.Map s (M.Map t (TableIndex k Showable)))  m i (TableIndex k Showable)
-from s t = P ([Namespace s ([Module t ([])])] ,[]) (Kleisli (\_ -> justError ("table not found: " ++ show (s,t)). (\i -> M.lookup t  =<<  M.lookup s i ) . fst <$>ask))
+from :: (Eq (Namespace s t pk k),Ord s, Ord t,Show t,Monad m ,Show s)=> s -> t -> PluginM (Namespace s t pk k )  (ChangeMap s (ChangeMap t (TableIndex k Showable)))  m i (TableIndex k Showable)
+from s t = P ([Namespace s ([Module t ([])])] ,[]) (Kleisli (\_ -> justError ("table not found: " ++ show (s,t)). (\i -> clookup t  =<<  clookup s i ) . fst <$>ask))
 
 
 -- Database
 iuniverse   :: (Monad m ,Show u ,Ord u)
        => u
-       -> PluginM (Namespace s t pk  k)  (M.Map s (M.Map t (TableIndex k Showable )))  m  i a
-       -> PluginM (Universe u s t pk  k )  (M.Map u (M.Map s (M.Map t (TableIndex k Showable)))) m i a
-iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Universe s) tidxi,mapUnion (Universe s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (concat . fmap snd) (justError ("no database " ++ show s). M.lookup  s ) . op ))
+       -> PluginM (Namespace s t pk  k)  (ChangeMap s (ChangeMap t (TableIndex k Showable )))  m  i a
+       -> PluginM (Universe u s t pk  k )  (ChangeMap u (ChangeMap s (ChangeMap t (TableIndex k Showable)))) m i a
+iuniverse s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapUnion (Universe s) tidxi,mapUnion (Universe s) tidxo) (Kleisli (withReaderT4 (pure . (s,)) (concat . fmap snd) (justError ("no database " ++ show s). clookup  s ) . op ))
 
 type PluginMethod  a b = PluginM (Namespace Text Text RowModifier Text) (Atom (TBData Text Showable)) TransactionM a b
 
@@ -333,10 +350,17 @@ matchFTB f (NestedPath PIdOpt  l ) (LeftTB1 v ) =  maybe False (matchFTB f l) v
 matchFTB f i j = error$  show (i,j)
 
 projectFields :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
-projectFields inf t s l = kvlist . catMaybes $ pattr l <$> (F.toList =<< s )
+projectFields inf t s l = kvlist . catMaybes $ pattr l .traceShowId <$> (F.toList =<< s )
   where 
     pattr v (G.PathAttr i _) =  kvLookup (Inline (lookKey inf (tableName t) i)) v <|> kvFind (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v
-    pattr v (G.PathInline i (G.TipPath n)) =  Le.over ifkttable (fmap (projectFields inf t [n])) <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
+    pattr v (G.PathInline i n) =  pfun (\n -> Le.over ifkttable (fmap (projectFields inf nt [n]))) n <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
+        where Primitive _ (RecordPrim nst) = keyType ki
+              ki  = (lookKey inf (tableName t) i)
+              nt = lookSTable inf nst 
+
+    pattr i j = error (show j )
+    pfun f (G.TipPath n ) = f n
+    pfun f (G.NestedPath _ n ) = pfun f n
  
 
 translate

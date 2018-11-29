@@ -1,5 +1,6 @@
 {-# LANGUAGE
     OverloadedStrings
+   , BangPatterns
    ,ScopedTypeVariables
    ,TypeFamilies
    ,FlexibleContexts
@@ -15,7 +16,7 @@ module TP.QueryWidgets (
 
 import Debug.Trace
 import Safe
-import Reactive.Threepenny.PStream  (accumS)
+import Reactive.Threepenny.PStream  (accumS,PStream(..))
 import qualified Data.Functor.Contravariant as C
 import Serializer
 import qualified Data.Aeson as A
@@ -951,7 +952,14 @@ unPOpt i = error (show i)
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (LayoutWidget (Editor (Index b)))
 
-buildUIDiff:: (Compact (Index b),Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> (b -> Bool) -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (LayoutWidget (Editor (PathFTB (Index b) )))
+buildUIDiff 
+  :: (Compact (Index b),Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) 
+  => AtomicUI k b 
+  -> (b -> Bool) 
+  -> KType k 
+  -> PluginRef (FTB b) 
+  -> Tidings (Maybe (FTB b)) 
+  -> UI (LayoutWidget (Editor (PathFTB (Index b) )))
 buildUIDiff f check (Primitive l prim) = go l
   where
     go [] plug tdi = fmap (fmap PAtom) <$> f (fmap (fmap (fmap unAtom)) <$>plug) (fmap unTB1 <$> tdi) prim
@@ -1244,7 +1252,7 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (const True) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (const True) (keyType na) (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
     where
@@ -1325,10 +1333,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
               let newdiff = fmap sourcePRef tbdiff
                   newtbsel = join $ applyIfChange initial tbdiff
                   newsel = join $ applyIfChange (fst .unTBRef <$> initial) (sourcePRef <$> tbdiff)
-              -- liftIO $ print ("selector False",oldsel , newdiff , not (matches rel newtbsel), newsel ,L.length rel)
-              -- if newdiff is different than old diff update
               when (oldsel /= newdiff) $ do
-                -- Just fetch if the arguments for all relations are present
                 when (maybe False ((L.length rel ==) .kvSize) newsel ) .void$
                   do
                     let
@@ -1336,10 +1341,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
                     flip mapTidingsDyn gist $ \(TableRep (_,s,g)) -> do
                       let out = searchGist rel targetTable  g s =<< newsel
-                      liftIO $ void $ traverse (\i -> do
-                        -- print ("TargetE",tableName targetTable,i)
-                        helselTarget i ) (diff (snd .unTBRef<$> initial) out)
-                -- liftIO $ print ("SourceE",tableName targetTable,oldsel,newdiff,(fst .unTBRef <$> initial),out)
+                      liftIO $ void $ traverse  helselTarget  (diff (snd .unTBRef<$> initial) out)
                 return ())
           pan <- UI.div
             # set UI.class_ "col-xs-11 fixed-label"
@@ -1352,7 +1354,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           element nav
             # set UI.class_ "col-xs-1"
           return $ [nav,pan] ++ celem
-        selector True = {-debugTime "selector True" $ -} do
+        selector True = do
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> facts oldItems) <#> (fmap sourcePRef <$> inipl)
@@ -1471,11 +1473,11 @@ fkUITableGen
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
-  = fmap (join. fmap (maybe Keep Diff . recoverPFK setattr rel ) ) <$> buildUIDiff 
-      (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs) 
-      (\((TBRef (i,j))) ->  not $ kvNull j )
-      (mergeFKRef  $ keyType . _relOrigin <$>rel) 
-      (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj)) 
+  = fmap (join. fmap (maybe Keep Diff . recoverPFK setattr rel )) <$> buildUIDiff 
+      (fkUITablePrim inf (liftRelation <$> rel,lookTable inf target) constr nonInjRefs)
+      (\((TBRef (i,j))) ->  not $ kvNull j)
+      (mergeFKRef  $ keyType . _relOrigin <$>rel)
+      (fmap (fmap (fmap liftPFK)) <$> (plmods <> concat replaceNonInj))
       (join .fmap liftFKM<$> foldl' (liftA2 mergeOrCreate) oldItems (snd <$> F.toList nonInjRefs ))
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
@@ -1552,16 +1554,18 @@ instance FromJS a => FromJS (PathFTB a ) where
 
 testPStream = do 
   (e,h) <- ui newEvent 
-  s <- ui $ accumS (ArrayTB1 (pure $ TB1 (SText "wefwe"))) e 
+  s <- ui $ accumS [] e 
   a <- UI.button  # set text "Add"
   d <- UI.button  # set text "Delete"
   aClick <- (UI.click a )
   dClick <- (UI.click d )
-  ui $ onEventIO   dClick $  
-    ( \_ -> void $ liftIO $ h (PIdx 1 (Nothing )))
-  ui $ onEventIO   aClick $  
-    ( \_ -> void $ liftIO $ h (PIdx 1 (Just $ PAtom (SText "efwef"))))
-  e <- UI.div # sinkDelta (ffiAttrDelta "$(%1).text()" "$(%2).text(JSON.stringify(%1))" "$(%2).text(JSON.stringify(jsonpatch.applyOperation(JSON.parse($(%2).text()), %1).newDocument))")  s
+  onEvent aClick $  
+    ( \_ -> void $ do 
+      e <- UI.div # set text "etewg"
+      liftIO $ h ([(0,e)],[]))
+  ui $ onEventIO ( psvalue s <@ dClick) $  ( \v ->  do
+    void $ liftIO $ h ([] ,[(0, v !! 0)]))
+  e <- UI.div # sinkDelta children  s
   UI.div # set children [a,d,e]
 
 

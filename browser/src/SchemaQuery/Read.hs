@@ -19,6 +19,8 @@ module SchemaQuery.Read
   , tableLoaderAll
   , selectFromTable
   , fromTable
+  , fkPredicate
+  , fkPredicateIx
   , refTables'
   -- Cache Only Operations
   , loadFKS
@@ -259,12 +261,8 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
       refl = S.fromList $ fmap _relOrigin $ filterReflexive i
       rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
       table = lookTable rinf $ snd j
-      genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
-      primPredicate o k  = do
-        i <- unSOptional ._tbattr  =<< lkAttr k o
-        return $ PrimColl (_relTarget k ,[(_relOrigin $ _relTarget k,Left (i,Flip $ _relOperator k))])
-      lkAttr k v =  kvLookup ((Inline (_relOrigin k))) (tableNonRef v)
-      refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+      refs = fkPredicate i set 
+      
       predm = refs <> predicate i predtop
     tb2 <-  case predm of
       Just pred -> do
@@ -292,6 +290,30 @@ traceIfFalse i True = True
 mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
+
+fkPredicateIx rel set =  refs
+  where 
+    genpredicate o = primPredicate o rel 
+    -- primPredicate o i | traceShow (i,kvkeys o) False = undefined
+    primPredicate o (RelAccess ref tar) =  case refLookup ref o  of
+                                             Just i -> join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
+                                             Nothing -> Nothing
+    primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes . fmap (primPredicate o ) $ l
+    primPredicate o (Rel ori op tar)  = do
+      i <- unSOptional ._tbattr  =<< lkAttr ori o
+      return $ PrimColl (tar,[(_relOrigin tar,Left (i,Flip op))])
+    lkAttr k v =  kvLookup (k) (tableNonRef v)
+    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+
+
+fkPredicate i set =  refs
+  where 
+    genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
+    primPredicate o k  = do
+      i <- unSOptional ._tbattr  =<< lkAttr k o
+      return $ PrimColl (_relTarget k ,[(_relOrigin $ _relTarget k,Left (i,Flip $ _relOperator k))])
+    lkAttr k v =  kvLookup ((Inline (_relOrigin k))) (tableNonRef v)
+    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 getFKS
   :: InformationSchemaKV Key Showable
@@ -733,7 +755,7 @@ printException e d = do
 
 fromTable origin whr = do
   inf <- askInf
-  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing (tablePredicate inf origin whr) Nothing
+  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing (liftPredicateF lookupKeyName inf origin whr) Nothing
   return (origin,inf,primary rep)
 
 select table  = do

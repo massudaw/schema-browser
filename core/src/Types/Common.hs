@@ -79,6 +79,7 @@ module Types.Common
   , findAttr
   , kvLookup
   , refLookup
+                                               , relAppend
   , recLookup
   , attrLookup
   , unkvlist
@@ -415,11 +416,12 @@ relUnComp (RelComposite l) = l
 relUnComp i = [i]
 
 _relOrigin (Rel i _ _) = _relOrigin i
--- _relOrigin (RelComposite i ) = _relOrigin <$> i
+_relOrigin (RelComposite i ) = error "origin needs to be unique" --  _relOrigin <$> i
 _relOrigin (Inline i) = i
 _relOrigin (Output i) = _relOrigin i
 _relOrigin (RelAccess _ i) = _relOrigin i
 _relOrigin (RelFun i _ _) = _relOrigin i
+
 
 -- TODO Fix Rel to store proper relaaccess
 _relInputs (Rel i _ _) = _relInputs i
@@ -802,6 +804,9 @@ findFKAttr l v =
     Just (k, i) -> error (show l)
     Nothing -> Nothing
 
+
+relAppend  (RelAccess i j ) v  = RelAccess i (relAppend j v )
+relAppend  i j = RelAccess i j  
 
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
 recLookup p@(Inline l) v = _tbattr <$> kvLookup p v

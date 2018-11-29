@@ -619,21 +619,45 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
 
 
 liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first ((fst m ) inf tname)))<$> i
+  
+liftASchRel :: (Text -> Text -> Maybe Table ) -> Text -> Text -> Text -> Text -> Rel Text  -> Rel Key
+liftASchRel inf s tname st ttarget (Rel l e t) = Rel (lookKey s tname <$> l) e (lookKey st ttarget <$> t)
+  where
+    lookKey s tname c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$> (inf s tname))
 
-liftASch :: (Text -> Text -> Maybe Table ) -> Text -> Text -> Rel Text  -> Rel Key
+-- liftASch inf s tname i | traceShow (s,tname,i) False = undefined
 liftASch inf s tname (Inline l) = Inline $  lookKey  l
   where
     tb = inf s tname
     lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
-liftASch inf s tname (RelComposite l) = RelComposite $ liftASch inf s tname <$> l
+liftASch inf s tname (RelComposite l) =  RelComposite $ maybe (liftASch inf s tname <$> l) (\(st,tt) -> liftASchRel inf s tname st tt <$> l) sch 
+  where
+    sch = do 
+       tb <- inf s tname
+       rel <- L.find (\i -> relOutputSet (relComp l) ==  relOutputSet (relComp (S.map (fmap keyValue) $ pathRelRel i))) (rawFKS tb)
+       return $ case unRecRel rel of
+                FKJoinTable  _ l -> l
+                FKInlineTable  _ l -> l
+
 liftASch inf s tname (RelAccess i c) = RelAccess (relComp $ pathRelRel rel) (liftASch inf sch st c)
   where
     ref = liftASch inf s tname i
     tb = inf s tname
-    rel  = justError "no fk" $ L.find (\i -> relOutputSet ref == relOutputSet (relComp (pathRelRel i)) ) =<< (rawFKS <$> tb)
+    rel  = justError ("no fk" ++ show i) $ L.find (\i -> relOutputSet ref == relOutputSet (relComp (pathRelRel i)) ) =<< ( rawFKS <$> tb)
     (sch,st) = case unRecRel rel of
           FKJoinTable  _ l -> l
           FKInlineTable  _ l -> l
+liftASch inf s tname l =  maybe (error $ "no match" ++ show l ) id rel
+  where
+    tb = inf s tname
+    rel = do 
+       rel <- L.find (\i -> relOutputSet l ==  (relOutputSet (relComp (S.map (fmap keyValue) $ pathRelRel i))) ) =<< (rawFKS <$> tb)
+       return $ case unRecRel rel of
+                FKJoinTable  l _ -> relComp l
+                FKInlineTable  i _ -> Inline i
+
+
+liftASch inf s tname i = error ("No match: " ++ show (s,tname,i))
 
 lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 
@@ -835,6 +859,7 @@ createUn m un   =  G.fromList  (justError ("empty"  ++ show un) .transPred) .  L
   where transPred =   G.notOptionalM . G.getUnique  un
 
 tablePredicate inf t p = (WherePredicate . AndColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
+tablePredicate' p = (WherePredicate . AndColl $ PrimColl .fixrel <$> p)
 
 lookRef k = _fkttable . lookAttrs' k
 

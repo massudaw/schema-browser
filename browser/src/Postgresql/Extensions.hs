@@ -34,7 +34,7 @@ column_type
   :: (Monad m ) =>
     PluginM (G.PathIndex PathTID (Union (G.AttributePath Text  MutationTy))) (Atom (FTB (TBData Text Showable)))   m i (Showable,Showable)
 column_type
-  = ivalue $ isum [iinline "primitive" . iopt . ivalue . irecord $
+  = ivalue $ itotal $ irecordU ISum $ isum [iinline "primitive" . iopt . ivalue . irecord $
              iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
                (ivalue $ irecord ((,) <$> ifield "nspname" (ivalue (readV PText)) <*> ifield "typname" (ivalue (readV PText))))
          ,iinline "composite" . iopt . ivalue . irecord $

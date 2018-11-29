@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns,FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
+{-# LANGUAGE RankNTypes,DeriveFunctor,TypeFamilies, BangPatterns,FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
 module TP.Widgets where
 
 import Reactive.Threepenny.PStream
@@ -153,11 +153,12 @@ greenRedBlue True True = [("background-color","blue")]
 greenRedBlue True False = [("background-color","green")]
 greenRedBlue False True = [("background-color","purple")]
 greenRedBlue False False= [("background-color","red")]
-
+  {-
 switch all (Just k) = do
         mapM_ (\e -> element e # set UI.style (noneShow False) ) all
         element k # set style (noneShow True)
         return ()
+-}
 
 tabbedChk :: [(String,(TrivialWidget Bool,Element))] -> UI Element
 tabbedChk [] = UI.div
@@ -826,11 +827,108 @@ accumDiffMapCounterIni iniIx f t = mdo
     execFinalizers fins
     out <- mapM (\(ix,v)-> evalDynamicMap (f ix) v) $zip [ix..] (M.toList add)
     return (evdel (M.keys del). evadd out)
-     )  $(,)<$>facts bs <@> diffEvent
-  bs <- accumT  (iniIx + M.size ini,M.fromList iniout)  eva
+     ) $ (,)<$>facts bs <@> diffEvent
+  bs <- accumT (iniIx + M.size ini,M.fromList iniout) eva
   registerDynamic (void $ join $ execFinalizers . F.toList  .snd <$> currentValue (facts bs))
   return (fmap fst . snd <$> bs)
 
+newtype MapPatch k u = MapPatch {unMapPatch :: (M.Map k u,[k]) }  deriving(Functor)
+
+type family PMap (f  :: * -> *) :: * -> * 
+type instance PMap (M.Map k) = MapPatch k
+
+pmap :: 
+    ( Functor f 
+    , Functor (PMap f) 
+    , Index (f b) ~ PMap f b
+    , Index (f a) ~ PMap f a)
+     => (a -> b) -> PStream (f a) -> PStream (f b)
+pmap  f (PStream e a ) = PStream (fmap f <$> e) (fmap f <$> a)
+
+pfst  (PStream b e) = PStream (fst <$> b) (filterJust $ safeHead .fst <$> e)
+psnd  (PStream b e) = PStream (snd <$> b) (filterJust $ safeHead .snd <$> e)
+
+pToList :: (Show k,Ord k) => PStream (M.Map k u ) -> PStream [u]
+pToList (PStream b e ) = PStream (F.toList <$> b ) ( patchList <$> b <@> e) 
+  where 
+    patchList b p@(MapPatch (a,d)) = 
+
+      ((\(k,v) -> (  justError (show ("insert",M.keys a,k,M.keys b)) $ M.lookupIndex k (apply b p),v)) <$> M.toList a,(\k -> (\ix -> (ix,snd $ M.elemAt ix b) ). justError (show ("delete",d,k,M.keys b)) $ M.lookupIndex k b )<$>  d )
+
+
+
+instance (Ord k ) => Patch (M.Map k u ) where
+  type Index (M.Map k u) = MapPatch k u  -- , M.Map k (Index u))
+  diff i j = Just $ MapPatch (M.difference j i,  M.keys $ M.difference i j)
+  applyUndo i (MapPatch (a,d)) =  Right (F.foldl' (flip M.delete) (i <> a) d, MapPatch (M.fromList $ (\ k -> (k,) . fromJust $ M.lookup k i) <$> d, M.keys a) )
+  createIfChange (MapPatch (a,d)) = Just a
+  patch i = (MapPatch (i,[]))
+
+newtype Counter i =  Counter i 
+
+instance Num i => Compact (Counter i) where
+  compact l = [foldl1 merge l]
+    where 
+      merge (Counter i ) (Counter j )=  Counter (i + j)
+
+instance Num u => Patch (Counter u)  where
+  type Index (Counter u) = u
+  applyUndo (Counter i ) j = Right  (Counter (i + j), negate j )
+  createIfChange i = Just (Counter i)
+
+isolateAt ix l = ((L.length h ,head t) ,h ++ tail t)
+  where (h,t) = splitAt ix l
+
+dropAtMany :: [Int] -> [a] -> [a]
+dropAtMany lix  = snd . isolateAtMany lix
+
+takeAtMany :: [Int] -> [a] -> [(Int,a)]
+takeAtMany lix = fst . isolateAtMany lix
+
+isolateAtMany :: [Int] -> [a] -> ([(Int,a)],[a])
+isolateAtMany lix l = foldr accum ([],l) lix
+  where 
+        accum ix (o,n) =  (h:o,t)
+          where 
+            (h,t) = isolateAt ix n
+
+insertAt :: a -> Int -> [a] -> [a]
+insertAt newElement 0 as = newElement:as
+insertAt newElement i (a:as) = a : insertAt newElement (i - 1) as
+
+insertAtMany :: [(Int,a)] -> [a] -> [a]
+insertAtMany ixa l = F.foldl' (\l (i,j)  -> insertAt j i  l ) l ixa
+
+instance Patch [a] where
+  type Index [a]  = ([(Int,a)],[(Int,a)])
+  createIfChange (i,_)  = Just (snd <$> i)
+  applyUndo l (a,d)  = Right (insertAtMany a $ dr,(tk,a))
+    where (tk,dr) = isolateAtMany  (fst <$> d) l 
+
+
+
+accumDeltaMapCounterIni
+  :: (Ord k) =>
+    Int
+     -> (Int -> (k,b) -> Dynamic c)
+     -> PStream (M.Map k b)
+     -> Dynamic
+          (PStream (M.Map k c))
+accumDeltaMapCounterIni iniIx f t = mdo
+  ini <- currentValue (psvalue t)
+  iniout <- liftIO $ mapM (\(ix,v)-> evalDynamicMap (f ix) v)$ zip [iniIx..] $M.toList ini
+  let diffEvent = psevent t
+      evadd del add = ([length add], [MapPatch (M.fromList add,del)])
+      execFinalizers fins = traverse sequence_ $ fmap snd fins
+  eva <- mapEventDynInterrupt (\((Counter ix,!fin),MapPatch (add,del)) -> liftIO $ do
+    let fins =  catMaybes $ fmap (flip M.lookup fin) del
+    execFinalizers fins
+    out <- mapM (\(ix,v)-> evalDynamicMap (f ix) v) $zip [ix..] (M.toList add)
+    return (evadd del out)
+     )  $(,)<$> psvalue bs <@> diffEvent
+  bs <- accumS  (Counter $ iniIx + M.size ini,M.fromList iniout)  eva
+  registerDynamic (void $ join $ execFinalizers . F.toList . snd <$> currentValue (psvalue bs))
+  return (pmap fst $  psnd bs)
 
 
 accumDiff

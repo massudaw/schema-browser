@@ -10,6 +10,7 @@ module TP.Browser where
 import ClientAccess
 import Control.Monad.Reader
 import qualified Data.List as L
+import Reactive.Threepenny.PStream (toPStream)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid hiding (Product(..))
@@ -42,6 +43,10 @@ data Layout
   deriving(Eq,Ord,Show)
 
 
+layoutSel' ::
+  (Num t, Ord k,Show k) =>
+  (t -> Element -> UI (Event b))
+  -> Tidings (M.Map k Element) -> UI (Element, Element)
 layoutSel' keyword list = do
   let styles = [Vertical,Horizontal]
   body <- UI.div
@@ -63,12 +68,17 @@ layoutSel' keyword list = do
         # set UI.style [("font-size","smaller"),("font-weight","bolder")])
 
   w <- askWindow
-  ui $ accumDiffMapCounter (\ix (k,v) -> runUI w $ do
-    element body # set UI.addChild v
+    
+  ui $ accumDiffMapCounterIni 0 (\ix (k,v) -> runUI w $ do
     element v # sink UI.class_ (facts $ (\sel list -> layFactsDiv sel (M.size list) )<$> triding sel <*> list)
       ) list
+  element body # sinkDelta children (pToList $ toPStream list)
   return (getElement sel,body)
 
+layoutSel ::
+  (Show k ,Num t, Ord k) =>
+  (t -> Element -> UI (Event b))
+  -> Tidings (M.Map k Element) -> UI Element
 layoutSel k l = do
   (i, j) <- layoutSel' k l
   UI.div # set children [i, j]

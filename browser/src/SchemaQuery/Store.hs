@@ -176,21 +176,8 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
           catMaybes $  (\i->  (G.getIndex m i,) <$> G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
-        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [recurseAttr t pattr]) ) <$> ts
-        taggedRef :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
-        taggedRef i p =  go i
-          where
-            go (G.ManyPath j) = justError "empty" .  patchSet .F.toList $ go <$> j
-            go (G.NestedPath i j) = matcher i (go j)
-            go (G.TipPath j) = PAtom (p j)
-            matcher (PIdIdx ix )  = PIdx ix . Just
-            matcher PIdOpt   = POpt . Just
-        recurseAttr (G.PathForeign _ i) p = PFK rel [] $ taggedRef i (const p)
-        recurseAttr (G.PathInline r i) p = PInline r $ taggedRef i  nested
-          where
-            nested  (Many i) =  flip recurseAttr p <$> i
-        recurseAttr (G.PathAttr i _ ) p = PFK rel [] $ (F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( keyType i)) $ p)
-          where ty KOptional = POpt . Just 
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
+        
     result = search sidx <$>  evs
    in  concat $ result))]
   where
@@ -198,6 +185,28 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
     targetTable = lookTable rinf $ snd target
     pkTable = rawPK targetTable
 
+joinPathFTB :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
+joinPathFTB i p =  go i
+  where
+    go (G.ManyPath j) = justError "empty" .  patchSet .F.toList $ go <$> j
+    go (G.NestedPath i j) = matcher i (go j)
+    go (G.TipPath j) = PAtom (p j)
+    matcher (PIdIdx ix )  = PIdx ix . Just
+    matcher PIdOpt   = POpt . Just
+
+joinPathRelation :: [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
+joinPathRelation prel (G.PathForeign rel i) p 
+  | prel == rel = PFK prel [] (joinPathFTB i (const p)) 
+  | otherwise   = PFK rel  [] (joinPathFTB i nested)
+  where
+    nested  (Many i) =  flip (joinPathRelation prel) p <$> i
+joinPathRelation rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
+  where
+    nested  (Many i) =  flip (joinPathRelation rel) p <$> i
+joinPathRelation rel (G.PathAttr i _) p   = PFK rel [] (ref p)
+  where 
+    ref = F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( keyType i)) 
+    ty KOptional = POpt . Just 
 
 dynFork a = do
   liftIO $  forkIO a

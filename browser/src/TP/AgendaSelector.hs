@@ -9,9 +9,11 @@ module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef) where
 
 import GHC.Stack
 import Environment
+import Data.Functor.Classes
 import Step.Host
 import TP.View
 import qualified Data.Interval as Interval
+import qualified Data.Sequence.NonEmpty as NonS
 import qualified Data.HashMap.Strict as HM
 import NonEmpty (NonEmpty)
 import qualified NonEmpty as Non
@@ -83,27 +85,56 @@ eventWidgetMeta inf =  do
        ]
     fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (agendaDef inf) ()
 
+data Tree f a 
+  = Leaf { unLeaf :: a}
+  | Tree a (f (Tree f a))
 
+instance (Foldable f, Show a) => Show (Tree f a ) where
+  show (Leaf i )=  show i 
+  show (Tree a i ) = show a <> " - " <> L.intercalate "," (show <$> F.toList i)
+
+explodeTree (Tree i f ) = concat $ zipWith (\(SText i) j -> RelAccess (Inline  i) <$> j ) (F.toList i) (fmap explodeTree (F.toList f))
+explodeTree (Leaf i ) = ((\(SText t) -> Inline t ) <$> F.toList i) 
 
 
 agendaDef inf
   = projectV
     (innerJoinR 
-      (leftJoinR
+      (fixLeftJoinR
         (innerJoinR
           (fromR "tables" `whereR` schemaPred2)
-          (fromR "event" `whereR` schemaPred2) [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event")
-        (fromR "table_description" `whereR` schemaNamePred) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+          (fromR "event") [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event")
+        (fromR "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
       (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
    where
+      indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
+                            (RelAccess (Inline "col_type")
+                                (RelAccess (Inline "composite")
+                                    (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
       schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
       schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+      eitherDescription = isum [nestedDescription , directDescription] 
+      directDescription = fmap (fmap Leaf) $ iinline "description" (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
+      nestedDescription = fmap (join .fmap (\(i,j) -> Tree i <$> NonS.pruneSequence j)) . iinline "description" . iopt . ivalue $ irecord 
+              (liftA2 (,) 
+                (ifield "description" (imap . ivalue $  readV PText))
+                (iforeign (relUnComp $ fmap keyValue $ liftRel (meta inf ) "table_description" $ relComp $ [Rel "description" Equals "column_name"] )
+                (imap . ivalue . irecord $ (iinline "col_type" 
+                  (ivalue . irecord . iinline "composite" . fmap join . iopt . ivalue $ irecord 
+                    (iforeign [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
+                       . ivalue . irecord $ eitherDescription 
+                        ))))))
       fields =  irecord $ proc t -> do
           SText tname <-
               ifield "table_name" (ivalue (readV PText))  -< ()
-          efields <- iinline "event" (ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-          desc <- iinline "description" (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText))) -< ()
+          efields <- iinline "event" 
+            (ivalue $ irecord 
+              (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] 
+                (imap . ivalue $ irecord 
+                  (ifield "column_name" 
+                    (ivalue $ readV PText))))) -< ()
+          desc <-  eitherDescription -< ()
           pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
           color <- iinline "event" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
@@ -119,8 +150,8 @@ agendaDef inf
             projfT ::  Showable  -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
             projfT efield@(SText field) = irecord $ proc _-> do
               i <- convertRel inf tname field  -< ()
+              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ) . NonS.fromList. explodeTree <$> desc) ) -< ()
               pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
-              fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
               returnA -< HM.fromList $ fmap (fmap A.toJSON) $
                   [("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
                   ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))

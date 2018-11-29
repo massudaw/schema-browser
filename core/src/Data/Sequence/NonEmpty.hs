@@ -48,6 +48,8 @@ nonEmptySeq = go . S.viewl
     go S.EmptyL = Nothing 
     go (x S.:< xs) = Just (x :| xs)
 
+pruneSequence  :: NonEmptySeq (Maybe a) -> Maybe (NonEmptySeq a)
+pruneSequence i =  nonEmptySeq $ fmap fromJust $ S.filter isJust (toSequence i  )
 
 nonEmpty :: [a] -> Maybe (NonEmptySeq a)
 nonEmpty [] = Nothing 

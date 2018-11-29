@@ -31,7 +31,6 @@ library
     Postgresql.Sql.Types
     Plugins.Schema
     Poller
-    PStream
     Default
     Serializer
     PrimEditor

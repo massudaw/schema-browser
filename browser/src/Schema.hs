@@ -304,10 +304,10 @@ logUndoModification inf (RevertModification (FetchData id ip) _) = return ()
 logUndoModification inf (RevertModification id ip) = do
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
-  let mod = modificationEnv env
+  let mod = "undo_" <> modificationEnv env
       ltime =  utcToLocalTime utc time
       modt = lookMeta (meta inf)  mod
-  liftIO $ executeLogged (meta inf) modt (fromString $ T.unpack $ "INSERT INTO metadata.undo_" <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
+  liftIO $ executeLogged (meta inf) modt (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (modification_id,data_index,modification_data) VALUES (?,? :: row_index ,? :: row_operation)" ) (justError "empty tableId" . tableId $ id, Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip)
   return ()
 
 logTableModification
@@ -323,8 +323,8 @@ logTableModification inf (TableModification Nothing ts u table ip) = do
   let mod = modificationEnv env
   let ltime =  utcToLocalTime utc time
 
-  [Only id] <- queryLogged inf (tableMeta table) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
+  [Only id] <- queryLogged (meta inf) (tableMeta modt) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,? ,?:: row_index,? :: row_operation ,?) returning modification_id ") (username inf ,ltime,tableName table,  Binary . B.encode $    index ip , Binary  . B.encode . content $ firstPatchRow keyValue ip, schemaName inf)
   dbref  <- prerefTable (meta inf) modt
 
   putPatch (patchVar dbref) [FetchData modt $ createRow' (tableMeta table) $ liftTable' (meta inf)  (modificationEnv env)   $ encodeT (TableModification (Just id) ts u (schemaName inf,tableName table ) (firstPatchRow keyValue ip ) )]

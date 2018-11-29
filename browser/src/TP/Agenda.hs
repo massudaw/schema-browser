@@ -69,7 +69,7 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
             # set UI.style [("display","-webkit-box")]
             ) item
       chooser = do
-        agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
+        agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i -> UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
         out <- traverseUI id $ calendarView inf Nothing cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
         out2 <- traverseUI (traverseUI (traverse (\(t,tdi) -> do
           reftb <- ui $ refTables inf t

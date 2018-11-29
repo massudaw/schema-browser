@@ -40,6 +40,8 @@ module Types.Index
   , AttributePath(..)
   , mapAttributePath
   , indexPred
+  , indexFTB
+  , recFTB
   , checkPred
   , checkPredId
   , projectIndex
@@ -364,39 +366,46 @@ data AttributePath  k b
   | PathForeign [Rel k ] (PathIndex PathTID (Union (AttributePath k b)))
   deriving(Eq,Ord,Show,Functor,Generic)
 
-indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ())
--- indexPredIx i a | traceShow ("indexPredIx",i) False = undefined 
-indexPredIx (n@(RelAccess (Inline key) nt ) ,eq) r
-  = case  refLookup (Inline key) r of
-    Nothing -> Nothing
-    Just i ->  fmap (PathInline key .fmap (Many . pure) ) $ recPred $ indexPredIx (nt , eq ) <$> i
+recFTB f i = fmap (Many . pure) <$>  recFTB  i
+  where 
+    recFTB (TB1 i ) = TipPath <$> f i
+    recFTB (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recFTB i
+    recFTB (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recFTB i ) i
+    recFTB i = error (show ("IndexPredIx",i))
+
+indexFTB  
+  :: (Show k ,Show a,Ord k) 
+  => (Rel k -> TBData k a -> Maybe (AttributePath k v )) 
+  -> Rel k 
+  -> TBData k a 
+  -> Maybe (AttributePath k v) 
+indexFTB f (RelAccess (Inline key ) nt) r
+ = do 
+   i <- refLookup (Inline key) r 
+   PathInline key <$> recFTB (indexFTB f nt) i
+indexFTB f n@(RelAccess nk nt )  r
+ = do
+    i <- relLookup nk r 
+    PathForeign (relUnComp nk )  <$> recFTB allRefs i
   where
-    recPred (TB1 i ) = TipPath <$> i
-    recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
-    recPred i = error (show ("IndexPredIx",i))
-indexPredIx (n@(RelAccess nk nt ) ,eq) r
-  = case  relLookup nk r of
-    Just i ->  PathForeign (relUnComp nk ) <$> recPred i
-    Nothing -> Nothing
-  where
-    allRefs (TBRef (i,v))= Many . pure <$> (indexPredIx (nt, eq ) i <|> indexPredIx (nt,eq) v)
-    recPred (TB1 i ) = TipPath <$> allRefs i
-    recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
-    recPred i = error (show ("IndexPredIx",i))
-indexPredIx (a@(Inline key),eqs) r =
-  case attrLookup a  (tableNonRef r) of
-    Nothing ->  Nothing
-    Just rv  ->
-      PathAttr key <$>  (recPred (snd eq) rv)
+    allRefs (TBRef (i,v))=  indexFTB f nt i <|> indexFTB f nt v
+indexFTB f a  r
+  =  f a r
+
+indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ()) 
+indexPredIx  (r,eqs) v
+  =  indexFTB (indexInline eqs) r v
+
+indexInline :: (Show k ,ShowableConstr a , Show a,Ord k) => [(k ,(AccessOp a))] -> Rel k -> TBData k a -> Maybe (AttributePath k ())
+  {-indexInline eqs key 
+  | L.any isRel rels = 
+    where rels = relUnComp key-}
+indexInline eqs (Inline key) r = fmap (PathAttr key) . recPred (snd eq)  =<< attrLookup (Inline key ) (tableNonRef r)
   where
     Just (k,Left eq) = L.find ((==key).fst) eqs
     recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq) i
     recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
-    recPred op i  =    if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
-indexPredIx i v= error (show ("IndexPredIx",i,v))
-
+    recPred op i = if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
 
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
