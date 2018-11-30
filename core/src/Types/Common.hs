@@ -68,6 +68,7 @@ module Types.Common
   , TBData
   , unKV
   , kvlist
+  , kvlistMerge
   , kvkeys
   , kvToMap
   , addAttr
@@ -79,7 +80,7 @@ module Types.Common
   , findAttr
   , kvLookup
   , refLookup
-                                               , relAppend
+  , relAppend
   , recLookup
   , attrLookup
   , unkvlist
@@ -274,8 +275,10 @@ topSortRels l = ((l!!) <$> sorted,sorted)
     findDep ix c = []
 
 
-kvlist :: Ord k => [TB k a] -> KV k a
+kvlist,kvlistMerge :: Ord k => [TB k a] -> KV k a
 kvlist = KV . mapFromTBList
+
+kvlistMerge = KV .mapFromTBListMerge
 
 kvToMap :: Ord k => KV k a -> Map.Map k (FTB a)
 kvToMap = Map.mapKeys _relOrigin . fmap _aprim . Map.fromList .fmap (first originalRel).  Map.toList . _kvvalues
@@ -285,6 +288,7 @@ kvkeys = fmap originalRel . Map.keys . _kvvalues
 
 unkvlist :: Ord k => KV k a -> [TB k a]
 unkvlist = fmap (recoverAttr . first originalRel). Map.toList . _kvvalues
+
 
 kvmap :: Ord k => Map.Map (Rel k) (TB k a) -> KV k a
 kvmap = KV . Map.fromList . fmap (first relSort . fmap valueattr). Map.toList
@@ -658,6 +662,14 @@ instance Fractional a => Fractional (FTB a) where
 
 mapFromTBList :: Ord k => [TB k a] -> Map (RelSort k) (AValue k a)
 mapFromTBList = Map.fromList . fmap (\i -> (relSort $ keyattr i, valueattr i))
+
+mapFromTBListMerge :: Ord k => [TB k a] -> Map (RelSort k) (AValue k a)
+mapFromTBListMerge = Map.fromListWith mergeAttr . fmap (\i -> (relSort $ keyattr i, valueattr i))
+
+mergeAttr (APrim _) a@(APrim _) =  a
+mergeAttr (ARef j)  (ARef  m) =  ARef $ (\ j m -> KV $ mapFromTBListMerge (unkvlist j ++ unkvlist m)) <$> j <*> m
+mergeAttr (ARel i j)  (ARel  l m) =  ARel (KV $ mapFromTBListMerge (unkvlist i ++ unkvlist l)) $ (\ j m -> KV $ mapFromTBListMerge (unkvlist j ++ unkvlist m)) <$> j <*> m
+
 
 keyattr :: Ord k => TB k a -> Rel k
 keyattr (Attr i _) = Inline i

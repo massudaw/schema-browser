@@ -38,7 +38,7 @@ data RowModifier
 
 mapA f a = F.foldr (liftA2 (:))  (pure []) (f <$> a)
 
-convertRel inf tname = buildRel . splitRel inf tname
+convertRel inf tname = fmap fromJust . buildRel . splitRel inf tname
 
 splitRel inf tname = liftRel inf tname . indexerRel 
 
@@ -48,17 +48,17 @@ buildRel :: Monad m =>  Rel Key
                          (Atom (TBData Text Showable))
                          m 
                          w
-                         (FTB Showable)
+                         (Maybe (FTB Showable))
 buildRel =  convert 
   where
-    convert (RelAccess (Inline i) j) = iinline (keyValue i) (recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
-    convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (recFTBs tyi . irecord $ convert j ) 
+    convert (RelAccess (Inline i) j) = iinline (keyValue i) (fmap join . recFTBs (_keyFunc $ keyType i ) . irecord $ convert j ) 
+    convert (RelAccess i j ) = iforeign (relUnComp $ keyValue <$> i) (fmap join . recFTBs tyi . irecord $ convert j ) 
       where
         tyi = _keyFunc $ mergeFKRef  (keyType . _relOrigin <$> relUnComp i)
-    convert (Inline i) = ifield (keyValue i) (iany (readV PText ))
+    convert (Inline i) = fmap Just $ ifield (keyValue i) (iany (readV PText ))
     recFTB KArray = id 
-    recFTB KOptional = fmap fromJust . iopt
-    recFTBs l = F.foldl' (flip (.)) ivalue (recFTB <$> l)
+    recFTB KOptional = fmap join . iopt
+    recFTBs l = F.foldl' (flip (.)) (fmap Just . ivalue) (recFTB <$> l)
 
 type MutationTy = Mutation (Prim KPrim (Text,Text))
 
@@ -349,10 +349,14 @@ matchFTB f (TipPath i ) (TB1 v ) =  f i v
 matchFTB f (NestedPath PIdOpt  l ) (LeftTB1 v ) =  maybe False (matchFTB f l) v
 matchFTB f i j = error$  show (i,j)
 
-projectFields :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
-projectFields inf t s l = kvlist . catMaybes $ pattr l .traceShowId <$> (F.toList =<< s )
+projectFields :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
+-- projectFields  _  _ s  l | traceShow  (s,l) False = undefined
+projectFields inf t s l = kvlistMerge . catMaybes $ pattr l <$> (F.toList =<< s )
   where 
-    pattr v (G.PathAttr i _) =  kvLookup (Inline (lookKey inf (tableName t) i)) v <|> kvFind (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v
+    pattr v (G.PathAttr i _) 
+      =  kvLookup (Inline (lookKey inf (tableName t) i)) v
+        <|> kvFind (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v 
+        <|> kvLookup (Inline (lookKey inf (tableName t) i)) (tableNonRef v)
     pattr v (G.PathInline i n) =  pfun (\n -> Le.over ifkttable (fmap (projectFields inf nt [n]))) n <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
         where Primitive _ (RecordPrim nst) = keyType ki
               ki  = (lookKey inf (tableName t) i)

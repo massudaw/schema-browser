@@ -170,10 +170,10 @@ fixLeftJoinR (P j k) (P l n) srel index alias
             index = indext --liftRel inf (tableName target) indext
             aliask = alias
             joinFK :: TBData Key Showable ->  PathAttr Key Showable
-            joinFK m  = traceShowId $ liftPatchAttr inf (tableName origin) $ justError ("cant index: "  ++ show  (srel , m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
+            joinFK m  = liftPatchAttr inf (tableName origin) $ justError ("cant index: "  ++ show  (srel , m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
               where
                 replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) srel,v)
-                findRef i v = maybe (traceShow (i,v) Nothing) Just $ patch . mapKey' keyValue <$> G.lookup ( traceShowId $ G.getUnique targetRel (kvlist v)) amap
+                findRef i v = maybe ( Nothing) Just $ patch . mapKey' keyValue <$> G.lookup ( G.getUnique targetRel (kvlist v)) amap
                   where targetRel = (_relOrigin <$> L.sortOn (\ i -> L.elemIndex (_relOrigin $ _relTarget i) targetPK )  i )
 
                 indexTarget rel' v = Just . PInline aliask . POpt $  indexContainer (findRef rel ) (checkLength v rel <$> liftOrigin rel (unkvlist (tableNonRef v)))

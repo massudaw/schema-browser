@@ -153,11 +153,11 @@ agendaDef inf
               fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ) . NonS.fromList. explodeTree <$> desc) ) -< ()
               pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
               returnA -< HM.fromList $ fmap (fmap A.toJSON) $
-                  [("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
-                  ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                  [("id" :: Text, txt (writePK' tname pkfields (TB1 efield)))
+                  ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> catMaybes (F.toList fields)))
                   ,("table",txt tname)
                   ,("color" , txt $ T.pack  scolor )
-                  ,("field", TB1 efield )] <> convField i
+                  ,("field", TB1 efield )] <> (convField i)
             proj =  fmap (fmap Just ) . mapA projfT  $ efields
             wherePred predicate  time  =  pred
               where
@@ -192,6 +192,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,pred ,proj)-> do
             let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
+            liftIO $ print ("selection",selection,(fst $ staticP proj))
             reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
             let output  = reftb ^. _2
                 evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc
