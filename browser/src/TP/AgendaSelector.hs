@@ -105,14 +105,12 @@ agendaDef inf
           (fromR "tables" `whereR` schemaPred2)
           (fromR "event") [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event")
         (fromR "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
-      (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+      (fromR "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
    where
       indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
                             (RelAccess (Inline "col_type")
                                 (RelAccess (Inline "composite")
                                     (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
-      schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
-      schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
       eitherDescription = isum [nestedDescription , directDescription] 
       directDescription = fmap (fmap Leaf) $ iinline "description" (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
@@ -191,13 +189,12 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,pred ,proj)-> do
-            let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
-            liftIO $ print ("selection",selection,(fst $ staticP proj))
-            reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
-            let output  = reftb ^. _2
-                evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc
-            ui $ onEventIO evsel hselg
-            addSource innerCalendar t (evalPlugin proj) output) ref) . F.toList) sel
+        let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
+        reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
+        let output  = reftb ^. _2
+            evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc
+        ui $ onEventIO evsel hselg
+        addSource innerCalendar t (evalPlugin proj) output) ref) . F.toList) sel
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
       patchFrom (tableMeta t) (ix ,PatchRow $ readPatch (k,i))))
     return ([innerCalendar],tidings bhsel eselg)

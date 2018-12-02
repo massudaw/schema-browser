@@ -167,30 +167,42 @@ taskWidget (incrementT,resolutionT) sel inf = do
                 els <- traverseUI
                   (\(done,i) -> do
                     let caption =  UI.caption # set text (T.unpack  (tableName table) )
-                        headers =  ["Id"
-                                   ,"Description"
+                        headers =  [-- "Id"
+                                   "Description"
                                    ,L.intercalate "," $ F.toList $ renderShowable <$> fields
                                    ,"Cost"
                                    ,"Trust"
                                    ,"Progress"
                                    ,"Duration"]
                         header = UI.tr # set items (mapM (\ i-> UI.th # set text i) headers)
-                        mpProject p = [ fromMaybe "No Id" $ MP.project_id p,fromMaybe "No Title" $ MP.title p,maybe "" show $ MP.creation_date p ]
+                        mpProject p = [fromMaybe "No Title" $ MP.title p,maybe "" show $ MP.creation_date p ]
                         computeProp a = [showCost (cost a), showTrust (trust a) , showProgress (progress a),showDuration (duration a)]
                         values a@(MP.Sum p l)
-                          = mpProject p <> computeProp a
+                          = mpProject p <> ["+"] <> computeProp a
                         values a@(MP.Sequence p l)
-                          = mpProject p <> computeProp a
+                          =  mpProject p <>[">>"] <>computeProp a
                         values a@(MP.Product p l)
-                          = mpProject p <> computeProp a
+                          =  mpProject p <>["*"] <> computeProp a
                         values (Atomic p (Cost c) (Trust t) (Progress pro) (Duration dur))
-                          = mpProject p <> [  show  c, show  t, show  pro,show dur]
+                          =  mpProject p <>["."] <> [  show  c, show  t, show  pro,show dur]
                         row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) (values v) )
-                        body = row <$> (either (const []) (tail . subprojectsDeep) figure)
+                        list i l= do
+                          let cid = (fromMaybe "root" $  MP.project_id =<< (properties i) )
+                          v <- row i 
+                              # set (UI.strAttr "data-tt-id") cid
+                              # set UI.style (if isAtomic i then [("background-color","light-grey")] else [("background-color","grey")])
+                          mapM_ (traverse (\e-> element  e  # set (UI.strAttr "data-tt-parent-id") cid)) (safeHead <$> l)
+                          return (v:concat l) 
+                        body = either (const (return []) )(subprojectsDeep list ) figure
                         dat =  catMaybes $ fmap proj  $ G.toList (primary i)
                         figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\ ~(_,_,_,Duration d) -> (if done then d > 0 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
 
-                    t <- UI.table # set items (sequence $ caption:header:body)
+
+                    c <- caption 
+                    h <- header
+                    b <- body
+                    t <- UI.table # set UI.class_ "treetable" # set children (c:h:b)
+                    runFunctionDelayed t (ffi "$(%1).treetable()" t)
                     svg <- UI.div # sink UI.html (facts $ fmap (fromMaybe "" )$ liftA2 (\w h -> either id  (MP.renderWithSVG (RenderOptions  False w  h allattrs))  figure ) <$> triding width <*> triding height )
                     UI.div # set children [t,svg]
                     ) (liftA2 (,) (triding hideDone) (collectionTid v))
@@ -203,6 +215,9 @@ taskWidget (incrementT,resolutionT) sel inf = do
                 ) $ (,) <$> sel <*> calendarSelT
          pure <$> UI.div # sink children (facts  els)
     return (legendStyle,dashes,calFun )
+
+isAtomic (MP.Atomic _ _ _ _ _) = True
+isAtomic _ = False
 
 showCost (Cost i) = show i
 showProgress (Progress i) = show i
@@ -221,11 +236,11 @@ filterProject f v@(MP.Product d ps)  = if (f (cost v,progress v , trust v , dura
 filterProject f v@(MP.Sum d ps)      = if (f (cost v,progress v , trust v , duration v) ) then (MP.Sum d <$> filterProjectList f ps) else Nothing
 filterProject f v               = if f (cost v,progress v , trust v , duration v)  then Just v else Nothing
 
-subprojectsDeep :: Project a -> [Project a]
-subprojectsDeep v@(MP.Sequence _ ps) = v : concat (subprojectsDeep <$> Non.toList ps)
-subprojectsDeep v@(MP.Product _ ps)  = v : concat (subprojectsDeep <$> Non.toList ps)
-subprojectsDeep v@(MP.Sum _ ps)      = v : concat (subprojectsDeep <$> Non.toList ps)
-subprojectsDeep i               = [i]
+subprojectsDeep :: Monad m => (Project a -> [b] -> m b) -> Project a -> m b 
+subprojectsDeep f v@(MP.Sequence _ ps) = f v =<< mapM (subprojectsDeep f) (Non.toList ps)
+subprojectsDeep f v@(MP.Product _ ps)  = f v =<< mapM (subprojectsDeep f) (Non.toList ps)
+subprojectsDeep f v@(MP.Sum _ ps)      = f v =<< mapM (subprojectsDeep f) (Non.toList ps)
+subprojectsDeep f v@(MP.Atomic _ _ _ _ _ )               = f v [] 
 
 
 groupTopLevel tname list =  maybe (Left "No task in period") (resolveReferences False ((\(j,_) -> (projectId j ,j)) <$> list) ["root"] .MP.Product (ProjectProperties (Just tname) Nothing Nothing Nothing Nothing Nothing)  ) (fmap (fmap fst . Non.fromList )$ nonEmpty $ filter (\(j,_) -> not $  S.member  (projectId j) refs) list)
