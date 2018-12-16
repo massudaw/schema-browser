@@ -23,6 +23,7 @@ import Serializer
 import Control.Concurrent.STM
 import Data.Tuple
 import TP.Account
+import TP.Constraint
 import TP.Browser
 import TP.Agenda
 import TP.Chart

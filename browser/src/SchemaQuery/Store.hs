@@ -72,7 +72,7 @@ readIndex dbvar = do
 
 readState
   :: (Show k ,Ord k ,NFData k)
-      => (TBPredicate k Showable, [k])
+      => (TBPredicate k Showable, [Rel k])
       -> DBRef k Showable
       -> STM (TableRep k Showable , TChan [TableModificationU k Showable])
 readState fixed dbvar = do
@@ -87,7 +87,7 @@ readState fixed dbvar = do
 
 cloneDBVar
   :: (NFData k ,Show k,Ord k)
-  => (WherePredicateK k,[k])
+  => (WherePredicateK k,[Rel k])
   -> DBRef k Showable
   -> STM ((IndexMetadata k Showable, TableRep k Showable), DBRef k Showable)
 cloneDBVar pred dbvar@DBRef{..} = do
@@ -153,7 +153,7 @@ childrenRefsUnique  source inf pre (FKInlineTable rel target) = concat $ childre
     targetTable = lookTable rinf $ snd target
 childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
    let
-    sidx = M.lookup (_relOrigin <$> rel) sidxs
+    sidx = M.lookup rel sidxs
     search idxM (BatchPatch ls op) = concat $ (\i -> search idxM (RowPatch (i ,op)) ) <$> ls
     search idxM (RowPatch p@(Idex v,PatchRow pattr))
       = case idxM of
@@ -167,13 +167,13 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
         outputs = filter (isJust . _relOutputs ) rel
         inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         predK = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))])) <$> outputs)
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
         predScanOut = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess (relComp rel) o) ,  [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))] )) <$> outputs)
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
         predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(_relOrigin o,Left (pkIndex (_relOrigin t) ,Flip op))])) <$> inputsOnly )
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
-          concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex (_relOrigin <$> rel) predK idx
+          concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
           catMaybes $  (\i->  (G.getIndex m i,) <$> G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
@@ -239,8 +239,8 @@ eventChan ini = do
 
 newDBRef inf table (iv,v)= do
     let
-      sidx :: M.Map [Key] (SecondaryIndex Key Showable)
-      sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _rawIndexes table )
+      sidx :: M.Map [Rel Key] (SecondaryIndex Key Showable)
+      sidx = M.fromList $ fmap (\un-> (un ,G.fromList' ( fmap (\(i,n,j) -> (uncurry M.singleton (G.getUnique un i,[]),n,j)) $ G.getEntries v))) (L.delete (rawPK table) $ _kvuniques (tableMeta table ))
     mdiff <-  liftIO$ atomically $ newBroadcastTChan
     chanidx <-  liftIO$ atomically $ newBroadcastTChan
     nchanidx <- liftIO$ atomically $ dupTChan chanidx
@@ -274,10 +274,10 @@ createTableRefs inf (Project table (Union l)) = do
             new <- look table
             old <- look t
             return (old,new)
-          tableRel t = M.fromList $ catMaybes $ keyRel t<$> rawAttrs t
+          tableRel t = M.fromList $ catMaybes $ keyRel t <$> rawAttrs t
       res <- mapM (\t -> do
         ((IndexMetadata idx,sdata),ref) <- createTableRefs inf t
-        return ((IndexMetadata $ M.mapKeys (mapPredicate (\k -> fromMaybe k (M.lookup k (tableRel t)))) $ idx, mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata),ref)) l
+        return ((IndexMetadata $ M.mapKeys (mapPredicate (fmap (\k -> fromMaybe k (M.lookup k (tableRel t))))) $ idx, mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata),ref)) l
       let
         (uidx,udata) = foldr mergeDBRef (IndexMetadata M.empty,[]) (fst <$> res)
         udata2 = createUn (tableMeta table) (rawPK table) udata

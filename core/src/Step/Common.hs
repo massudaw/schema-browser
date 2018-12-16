@@ -54,7 +54,7 @@ instance (Binary k) => Binary (Access k)
 instance (NFData k) => NFData (Access k)
 
 
-mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (fmap f ).fmap (fmap (first f))) i)
+mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (f ).fmap (fmap (first f))) i)
 traPredicate f (WherePredicate i ) = WherePredicate <$> (traverse (fmap  swap . traverse ( traverse f ) . swap) i)
 
 data BoolCollection a
@@ -71,7 +71,7 @@ instance Binary a => Binary (BoolCollection a)
 
 
 newtype TBPredicate k a
-  = WherePredicate (BoolCollection (Rel k,[(k,AccessOp a )]))
+  = WherePredicate (BoolCollection (Rel k,[(Rel k,AccessOp a )]))
   deriving (Show,Eq,Ord,Generic)
 
 type AccessOp a = Either (FTB a, BinaryOperator) UnaryOperator
@@ -79,13 +79,13 @@ type AccessOp a = Either (FTB a, BinaryOperator) UnaryOperator
 leftMap f (Left i) = (Left $ f i)
 leftMap f  (Right i)  = Right i
 
-instance Functor (TBPredicate k ) where
+instance Functor (TBPredicate k) where
   fmap f (WherePredicate i ) = WherePredicate ( fmap (fmap (fmap (leftMap (first (fmap f))) ))<$> i  )
 
 instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
-instance Semigroup (TBPredicate k a ) where
+instance Semigroup (TBPredicate k a) where
   (WherePredicate i) <> (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
 instance Monoid (TBPredicate k a) where

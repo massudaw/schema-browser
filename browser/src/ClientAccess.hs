@@ -115,7 +115,7 @@ removeRow idClient now six tix rix
 
 startTime now = Interval.interval (Interval.Finite now,True) (Interval.PosInf,True)
 
-createRow now tdi = ClientRowSelection (startTime now) (uncurry ClientPK . first keyValue <$>  tdi)
+createRow now tdi = ClientRowSelection (startTime now) (uncurry ClientPK . first (keyValue. _relOrigin) <$>  tdi)
 
 instance DecodeTable ClientPK where
   isoTable = iassoc arr  (identity <$$> prim  "key") (identity <$$> prim "val")

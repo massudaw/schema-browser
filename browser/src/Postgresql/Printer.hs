@@ -151,7 +151,7 @@ createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate 
   where
     commands = (renderAttr <$>  rawAttrs r ) <> [renderPK] <> fmap renderFK ( rawFKS r)
     renderAttr k = keyValue k <> " " <> render (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
-    renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
+    renderKeySet pk = T.intercalate "," (fmap (T.pack . renderRel) (S.toList pk ))
     render (Primitive l ty ) = ty <> renderTy l
       where
         renderTy (KOptional :ty) = renderTy ty <> ""
@@ -229,7 +229,7 @@ selectQuery
   -> KVMetadata Key
   -> TBData Key ()
   -> Maybe [FTB Showable]
-  -> [(Key, Order)]
+  -> [(Rel Key, Order)]
   -> WherePredicate
   -> ((Text,Maybe [(PrimType ,FTB Showable)]),NameMap)
 selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
@@ -244,8 +244,8 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
         let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
         let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
         return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
-      customPredicate = atTable m $ printPred inf m t wpred
-      orderBy = atTable m $ mapM (\(i,j) -> do
+      customPredicate = atTable m $ printPred inf m t (traceShowId wpred)
+      orderBy = atTable m $ mapM (\(Inline i,j) -> do
           l <- lkTB (Attr i (TB1 ()))
           return $ l <> " " <> showOrder j ) order
       ordquery =  atTable m $ do
@@ -253,9 +253,9 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
           preds = zip (_kvpk m) <$> koldpre
           orderpreds = (\i -> filter ((`elem` (fmap fst i)).fst) order ) <$> preds
           koldPk :: Maybe [(PrimType,FTB Showable)]
-          koldPk =  fmap (fmap (first keyType )) preds
+          koldPk =  fmap (fmap (first relType )) preds
           pkParam =  koldPk <> (tail .reverse <$> koldPk)
-        oq <- traverse (traverse (\(i,v) ->  do
+        oq <- traverse (traverse (\(Inline i,v) ->  do
           l <- lkTB (Attr i (TB1 ()))
           return $ (l,v))) orderpreds
         return (pure .generateComparison <$> oq,pkParam)
@@ -359,7 +359,11 @@ projectColumn inf t@(IT  k tb  )
      selectRow l <$> projectTree inf nmeta  (restrictTable nonFK $head . F.toList $tb)
 
 
-printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Rel Key ,[(Key,AccessOp Showable )]) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
+printPred :: InformationSchema 
+          -> KVMetadata Key 
+          -> TBData  Key ()
+          -> BoolCollection (Rel Key ,[(Rel Key,AccessOp Showable )]) 
+          -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred inf m t (PrimColl (a,e)) = do
   idx <- indexFieldL inf m e [] a t
   return (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
@@ -377,14 +381,14 @@ instance IsString (Maybe T.Text) where
 indexFieldL
     :: InformationSchema
     -> KVMetadata Key
-    -> [(Key,AccessOp Showable)]
+    -> [(Rel Key,AccessOp Showable)]
     -> [Text]
     -> Rel Key
     -> TBData Key ()
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 indexFieldL inf m e c p@(Inline l) v =
   case findAttr l (restrictTable nonFK v) of
-    Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
+    Just i -> pure . utlabel  (G.getOp p e) c <$> tlabel'  i
     Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess l nt) v =
   case kvLookup l v of
@@ -404,7 +408,7 @@ indexFieldL inf m e c n@(RelAccess l nt) v =
 
 indexFieldL inf m e c p@(Rel l _ _) v =
   case findAttr (_relOrigin l) v of
-      Just i -> pure . utlabel  (G.getOp (_relOrigin l) e) c <$> tlabel'  i
+      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
       Nothing -> error $ "not attr rel " ++ show (l,v)
 indexFieldL inf m e c i v = error (show (i, v))
 
@@ -480,7 +484,7 @@ getFromQuery inf m delayed= do
   tq <- expandBaseTable m delayed
   tquery <- expandQuery' inf m JDNormal delayed
   rq <- projectTree inf m delayed
-  out <- atTable m $ mapM (\i-> do
+  out <- atTable m $ mapM (\(Inline i)-> do
     v <- lkTB (Attr i (TB1 ()))
     return $   v  <>  " = ?") (_kvpk m)
   let whr = T.intercalate " AND " out

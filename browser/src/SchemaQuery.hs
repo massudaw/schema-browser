@@ -29,7 +29,7 @@ import qualified Data.Text as T
 getRow (Idex ix) table =  do
   liftIO . putStrLn $ "Load complete row table : " ++ show (ix,table)
   inf <- askInf
-  let pred = AndColl $ zipWith (\v i -> PrimColl (Inline i ,[(i,Left (v,Equals))])) ix (rawPK table)
+  let pred = AndColl $ zipWith (\v i -> PrimColl (i ,[(i,Left (v,Equals))])) ix (rawPK table)
   (ref,(nidx,rep)) <-  tableLoaderAll table  Nothing (WherePredicate pred) Nothing
   return $safeHead (G.toList $ primary rep)
 

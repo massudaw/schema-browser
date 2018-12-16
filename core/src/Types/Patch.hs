@@ -325,7 +325,7 @@ patchEditor i
 splitMatch (b, pk) p =
   L.any (\i -> G.match
     (mapPredicate
-       (\i -> justError ("no index" ++ show (i, pk)) $ L.elemIndex i pk)
+       (\i -> Inline . justError ("no index" ++ show (i, pk)) $ L.elemIndex i pk)
        b)
     (Right i)) (index p)
 
@@ -340,7 +340,7 @@ checkPatch fixed@(WherePredicate b, pk) d =
     isPK = fmap WherePredicate $ splitIndexPK b pk
 
 indexFilterR ::
-     (Patch a,a ~Index a,G.IndexConstr k a ,Show k, Ord k) => [k] -> TBPredicate k a -> RowPatch k a -> Bool
+     (Patch a,a ~Index a,G.IndexConstr k a ,Show k, Ord k) => [Rel k] -> TBPredicate k a -> RowPatch k a -> Bool
 indexFilterR table j (BatchPatch i l) =  F.any (\ix -> indexFilterR table j (RowPatch (ix ,l) )) i
 
 indexFilterR table j (RowPatch (ix, i)) = case  i of
@@ -348,7 +348,7 @@ indexFilterR table j (RowPatch (ix, i)) = case  i of
   CreateRow i -> G.checkPred i j
   PatchRow i -> indexFilterP j i
   where
-    makePK table (Idex l) = kvlist $ zipWith Attr table l
+    makePK table (Idex l) = kvlist $ zipWith Attr (_relOrigin <$> table ) l
 indexFilterP (WherePredicate p) v = go p
   where
     go (AndColl l) = F.all go l
@@ -357,11 +357,11 @@ indexFilterP (WherePredicate p) v = go p
 
 indexFilterPatch ::
      (Patch a ,a ~ Index a,G.IndexConstr k a ,Show k, Ord k)
-  => (Rel k, [(k, AccessOp a)])
+  => (Rel k, [(Rel k, AccessOp a)])
   -> TBIdx k a
   -> Bool
-indexFilterPatch (Inline l, ops) lo =
-  case L.find ((Inline l ==) . index) lo
+indexFilterPatch (ixl@(Inline _), ops) lo =
+  case L.find ((ixl==) . index) lo
   -- case Map.lookup (Set.singleton (Inline l)) lo of
         of
     Just i ->
@@ -374,7 +374,7 @@ indexFilterPatch (Inline l, ops) lo =
   where
     create' :: (Index a ~ a,Patch a ,Show a,Ord a) => PathFTB (Index a) -> FTB a
     create'  = create
-    matching f = G.match (G.getOp l ops) (Right (create' f))
+    matching f = G.match (G.getOp ixl ops) (Right (create' f))
 
 indexFilterPatch (RelAccess l n, op) lo =
   case L.find ((l ==) . index) lo of
@@ -390,7 +390,7 @@ indexFilterPatch i o = error (show (i, o))
 
 indexFilterPatchU ::
      ( Patch a,a ~ Index a,G.IndexConstr k a,Show k, Ord k)
-  => (Rel k, [(k, AccessOp a )])
+  => (Rel k, [(Rel k, AccessOp a )])
   -> TBIdx k a
   -> Bool
 indexFilterPatchU (n, op) o = indexFilterPatch (n, op) o

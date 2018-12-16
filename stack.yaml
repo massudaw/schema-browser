@@ -21,4 +21,4 @@ extra-deps:
   - pomaps-0.0.1.0
 
 
-resolver: lts-12.20
+resolver: lts-12.22

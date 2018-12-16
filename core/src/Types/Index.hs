@@ -99,10 +99,10 @@ cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
-getUnique :: (NFData a , Show k ,Ord k) => [k] -> TBData k a -> TBIndex  a
+getUnique :: (NFData a , Show k ,Ord k) => [Rel k] -> TBData k a -> TBIndex  a
 getUnique ks = Idex . fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn  (Set.fromList ks) 
 
-getUniqueM :: (NFData a , Show k, Ord k) => [k] -> TBData k a -> Maybe (TBIndex a)
+getUniqueM :: (NFData a , Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
 
 getIndex :: (NFData a , Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
@@ -257,7 +257,7 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go l
       -- go (PrimColl (IProd _ i,op)) | traceShow ("Right",(i,op,(`atMay` i) v),maybe True (match op .Right) $ (`atMay` i) v) False =  undefined
-      go (PrimColl (Inline i,op)) = match (justError ("cant find " ++ show i) $ M.lookup i $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
+      go (PrimColl (ix@(Inline i),op)) = match (justError ("cant find " ++ show i) $ M.lookup ix $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
   match (WherePredicate a)  (Left (TBIndexNode v)) = F.all id $ fst $ go a ([],[] `cinterval`  [])
     where
       -- Index the field and if not found return true to row filtering pass
@@ -268,14 +268,14 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
       access i = error (show i)
 
       go :: BoolCollection
-                (Rel Int, [(Int,Either (FTB v, BinaryOperator) UnaryOperator)])
+                (Rel Int, [(Rel Int,Either (FTB v, BinaryOperator) UnaryOperator)])
               -> ([Bool], Interval [v]) -> ([Bool], Interval [v])
       go (AndColl l) prev = (fmap (all id) bl ,last il)
         where (bl,il) = unzip $ scanl (flip go) prev (L.sortBy (comparing access) l)
       go (OrColl l ) prev = (fmap (any id) bl , foldl Interval.hull  Interval.empty il)
         where (bl,il) = unzip $ flip go prev <$> (L.sortBy (comparing access)l)
-      go (PrimColl (Inline  i,ops)) (b,prev)
-        = case  getOp i ops of
+      go (PrimColl (irel@(Inline  i),ops)) (b,prev)
+        = case  getOp irel ops of
             Left (f,op) ->
                 let
                   efields =  mergeInterval (liftA2 (\i j -> i ++ [j]) ) prev (fmap unTB1 $ pureR f )
@@ -392,23 +392,23 @@ indexFTB f n@(RelAccess nk nt )  r
 indexFTB f a  r
   =  f a r
 
-indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ()) 
+indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(Rel k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ()) 
 indexPredIx  (r,eqs) v
   =  indexFTB (indexInline eqs) r v
 
-indexInline :: (Show k ,ShowableConstr a , Show a,Ord k) => [(k ,(AccessOp a))] -> Rel k -> TBData k a -> Maybe (AttributePath k ())
+indexInline :: (Show k ,ShowableConstr a , Show a,Ord k) => [(Rel k ,(AccessOp a))] -> Rel k -> TBData k a -> Maybe (AttributePath k ())
   {-indexInline eqs key 
   | L.any isRel rels = 
     where rels = relUnComp key-}
-indexInline eqs (Inline key) r = fmap (PathAttr key) . recPred (snd eq)  =<< attrLookup (Inline key ) (tableNonRef r)
+indexInline eqs ik@(Inline key) r = fmap (PathAttr key) . recPred (snd eq)  =<< attrLookup ik (tableNonRef r)
   where
-    Just (k,Left eq) = L.find ((==key).fst) eqs
+    Just (k,Left eq) = L.find ((==ik).fst) eqs
     recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq) i
     recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
     recPred op i = if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
 
 
-indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(k,AccessOp a)]) -> TBData k a-> Bool
+indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(Rel k,AccessOp a)]) -> TBData k a-> Bool
 indexPred (n@(RelAccess k nt ) ,eq) r
   = case refLookup k r of
     Nothing -> False
@@ -424,13 +424,13 @@ indexPred (a@(Inline key),eqs) r =
       match eq (Right rv)
     Nothing -> False
   where
-    eq = getOp key  eqs
+    eq = getOp a eqs
 indexPred i v= error (show (i,v))
 
 
 getOp  key eqs = maybe (error " no op") snd $  L.find ((==key).fst) eqs
 
-queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
+queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[Rel k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck (WherePredicate b ,pk)
   = case (notPK,isPK) of
       (Just i ,Just l ) ->fromList' . filterIndex i . projectIndex pk l
@@ -441,8 +441,8 @@ queryCheck (WherePredicate b ,pk)
    notPK = fmap WherePredicate $ splitIndexPKB b pk
    isPK = fmap WherePredicate $ splitIndexPK b pk
 
-projectIndex :: (Show k,Ord k) => [k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
-projectIndex pk l = G.queryL ( mapPredicate (justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk) l)
+projectIndex :: (Show k,Ord k) => [Rel k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
+projectIndex pk l = G.queryL ( mapPredicate (Inline . justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk) l)
 
 filterIndex l =  L.filter (flip checkPred l . leafValue)
 filterRows l =  L.filter (flip checkPred l )

@@ -166,7 +166,7 @@ fixLeftJoinR (P j k) (P l n) srel index alias
           let
             (origin ,inf) = updateTable preinf (JoinV j l LeftJoin srel alias)
             target = sourceTable preinf l
-            targetPK = keyValue <$> rawPK target
+            targetPK = fmap keyValue <$> rawPK target
             index = indext --liftRel inf (tableName target) indext
             aliask = alias
             joinFK :: TBData Key Showable ->  PathAttr Key Showable
@@ -174,7 +174,7 @@ fixLeftJoinR (P j k) (P l n) srel index alias
               where
                 replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) srel,v)
                 findRef i v = maybe ( Nothing) Just $ patch . mapKey' keyValue <$> G.lookup ( G.getUnique targetRel (kvlist v)) amap
-                  where targetRel = (_relOrigin <$> L.sortOn (\ i -> L.elemIndex (_relOrigin $ _relTarget i) targetPK )  i )
+                  where targetRel = (L.sortOn (\ i -> L.elemIndex (_relTarget i) targetPK )  i )
 
                 indexTarget rel' v = Just . PInline aliask . POpt $  indexContainer (findRef rel ) (checkLength v rel <$> liftOrigin rel (unkvlist (tableNonRef v)))
                   where rel = relUnComp  rel' 

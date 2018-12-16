@@ -126,7 +126,7 @@ taskDef inf
                   (Cost $ float costV)
                   (Trust $ float trustV)
                   (Progress $ float progressV)
-                  (Duration $ float durationV):: Project String,[]))
+                  (Duration $ float durationV) :: Project String,[]))
           float (TB1 (SDouble i)) =  realToFrac i
           proj r = projf r desc (NonS.head efields) child
         returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> (Non.fromList  $ F.toList efields),proj )
@@ -167,8 +167,8 @@ taskWidget (incrementT,resolutionT) sel inf = do
                 els <- traverseUI
                   (\(done,i) -> do
                     let caption =  UI.caption # set text (T.unpack  (tableName table) )
-                        headers =  [-- "Id"
-                                   "Description"
+
+                        headers =  ["Description"
                                    ,L.intercalate "," $ F.toList $ renderShowable <$> fields
                                    ,"Cost"
                                    ,"Trust"
@@ -178,22 +178,26 @@ taskWidget (incrementT,resolutionT) sel inf = do
                         mpProject p = [fromMaybe "No Title" $ MP.title p,maybe "" show $ MP.creation_date p ]
                         computeProp a = [showCost (cost a), showTrust (trust a) , showProgress (progress a),showDuration (duration a)]
                         values a@(MP.Sum p l)
-                          = mpProject p <> ["+"] <> computeProp a
+                          = ("sum", mpProject p <> computeProp a)
                         values a@(MP.Sequence p l)
-                          =  mpProject p <>[">>"] <>computeProp a
+                          =  ("sequence",mpProject p <> computeProp a)
                         values a@(MP.Product p l)
-                          =  mpProject p <>["*"] <> computeProp a
+                          =  ("product",mpProject p <> computeProp a)
                         values (Atomic p (Cost c) (Trust t) (Progress pro) (Duration dur))
-                          =  mpProject p <>["."] <> [  show  c, show  t, show  pro,show dur]
-                        row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) (values v) )
+                          =  ("primitive",mpProject p <> [  show  c, show  t, show  pro,show dur])
+                        row v = UI.tr # set items  (mapM (\i -> UI.td # set text i) l )
+                                      # set UI.class_ t 
+                          where (t,l) = values v
                         list i l= do
-                          let cid = (fromMaybe "root" $  MP.project_id =<< (properties i) )
+                          let cid = fromMaybe "root" $  MP.project_id =<< (properties i)
                           v <- row i 
                               # set (UI.strAttr "data-tt-id") cid
-                              # set UI.style (if isAtomic i then [("background-color","light-grey")] else [("background-color","grey")])
+                              # set UI.style (if isAtomic i then [("background-color","smokewhite")] else [("background-color","lightgrey")])
+                          when (cid == "root" ) $ void $ do
+                            element v # set UI.class_ "expanded"
                           mapM_ (traverse (\e-> element  e  # set (UI.strAttr "data-tt-parent-id") cid)) (safeHead <$> l)
                           return (v:concat l) 
-                        body = either (const (return []) )(subprojectsDeep list ) figure
+                        body = either (const (return [])) (subprojectsDeep list) figure
                         dat =  catMaybes $ fmap proj  $ G.toList (primary i)
                         figure = join $ maybe (Left "No pending tasks") Right  .  filterProject (\ ~(_,_,_,Duration d) -> (if done then d > 0 else True )) <$> groupTopLevel (T.unpack $ tableName table) dat
 
@@ -201,8 +205,8 @@ taskWidget (incrementT,resolutionT) sel inf = do
                     c <- caption 
                     h <- header
                     b <- body
-                    t <- UI.table # set UI.class_ "treetable" # set children (c:h:b)
-                    runFunctionDelayed t (ffi "$(%1).treetable()" t)
+                    t <- UI.table # set UI.class_ "table-condensed treetable" # set children (c:h:b)
+                    runFunctionDelayed t (ffi "$(%1).treetable({expandable: true})" t)
                     svg <- UI.div # sink UI.html (facts $ fmap (fromMaybe "" )$ liftA2 (\w h -> either id  (MP.renderWithSVG (RenderOptions  False w  h allattrs))  figure ) <$> triding width <*> triding height )
                     UI.div # set children [t,svg]
                     ) (liftA2 (,) (triding hideDone) (collectionTid v))

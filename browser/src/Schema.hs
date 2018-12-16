@@ -6,6 +6,7 @@ import Serializer
 import Query
 import System.Environment
 import Data.Either
+import Debug.Trace
 import qualified Data.Aeson as A
 import Postgresql.Sql.Parser
 import Postgresql.Sql.Types
@@ -63,6 +64,12 @@ createType  (isNull,isArray,isRange,isDef,isComp,tysch,tyname,typmod)
       | isComp =  RecordPrim (tysch ,tyname)
       | otherwise = AtomicPrim (tysch ,tyname,fromIntegral <$> typmod)
 
+parseInline  :: Text -> Rel Text
+parseInline i = buildRel $ trimParen <$> T.splitOn "." i
+  where trimParen xs  | T.head xs == '(' = T.init (T.tail xs)
+        trimParen i = i
+        buildRel (i:[]) = Inline i
+        buildRel (i:xs) = RelAccess (Inline i) (buildRel xs)
 
 queryAuthorization :: Connection -> Int -> Int -> IO (Map Int [Text])
 queryAuthorization conn schema user = do
@@ -195,31 +202,41 @@ keyTablesInit schemaRef  (schema,user) authMap = do
           foreignKeys = "SELECT origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks FROM metadata.fks WHERE origin_schema_name = ?"
           functionKeys = "SELECT table_name,column_name,cols,fun FROM metadata.function_keys WHERE schema_name = ?"
           uniqueIndexes = "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ?"
-          indexes = "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ?" 
+          indexes = "SELECT table_name,columns,regexp_split_to_array(index_expr,',') FROM metadata.catalog_indexes WHERE schema_name = ?" 
           convertFK (tp,sc,tc,kp,kc,rel) = (tp, pure (FKJoinTable (zipWith3 Rel (Inline . lookupKey tp <$> V.toList kp) (readBinaryOp <$> V.toList rel) (Inline . lookupFKey sc tc <$> V.toList kc)) (sc,tc)))
           convertFunction (tp,tc,cols,fun) = (tp, pure (FunctionField tc (readFun fun) (indexerRel <$> V.toList cols )))
           convertUnique (c,v) = (c,pure $ fmap (lookupKey c) . V.toList $ v)
-          convertIndexes (c,v) = (c,[V.toList v])
+          convertIndexes (c,v,expr) = (c,[if isJust expr 
+                                             then Right (fmap (parseInline .T.strip)  . V.toList $ fromJust expr) 
+                                             else Left (V.toList v)])
 
        fks <- liftIO $ buildMap convertFK <$> query conn foreignKeys (Only schema)
        functionsRefs <- liftIO $ buildMap convertFunction <$> query conn functionKeys (Only schema) 
        uniqueConstrMap <- liftIO $ buildMap convertUnique <$> query conn uniqueIndexes  (Only schema)
-       indexMap <- liftIO $ buildMap convertIndexes  <$> query conn indexes (Only schema)
+       indexMap <- liftIO $ buildMap convertIndexes <$> query conn indexes (Only schema)
        let
            allKeys :: Map Text [Key]
            allKeys =  buildMap (\((t,_),k) -> (t,pure $ lookupKey t (keyValue k))) $ HM.toList keyMap
            createTable c (un,tableType,desc,translation,pksl,scpv,is_sum) 
-             = (Raw un schema tableType translation is_sum c constraints indexes scp pks (lookupKey c . T.pack <$> desc) inlineFK [] (PluginField <$> filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
+             = (Raw 
+                un schema tableType translation 
+                is_sum c constraints indexes scp pks 
+                (Inline . lookupKey c . T.pack <$> desc) inlineFK [] 
+                (PluginField <$> filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
             where
-              pks = lookupKey c <$> pksl
+              pks = Inline . lookupKey c <$> pksl
               scp = lookupKey c <$> scpv
               isInline (Primitive _ (RecordPrim _)) = True
               isInline _ = False
               inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
               attr = justLook c allKeys
-              constraints = fromMaybe [] $ M.lookup c uniqueConstrMap 
-              indexes = maybe []  (fmap (fmap (justError "no col" . flip M.lookup attrMap ))) $  M.lookup c indexMap
-                where attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
+              constraints = fmap (fmap Inline )$ fromMaybe [] $ M.lookup c uniqueConstrMap 
+              indexes = maybe []  (fmap liftIndex) $  M.lookup c indexMap
+                where 
+                  attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
+                  liftIndex (Left l) = (\v -> Inline $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
+                  liftIndex (Right l) =  liftASch (lookKeyNested tableMapPre) schema c <$>  l 
+
               allfks = maybe [] computeRelReferences $ M.lookup c fks
            tableMap1 = HM.mapWithKey createTable tableMap0 
            tableMapPre = buildTMap  schema tableMap1  rsch
@@ -289,12 +306,12 @@ addRecInit inf t = t & (rawFKSL %~ map path) . (_inlineFKS %~ map path)
 
 
 
-catchPluginException :: InformationSchema -> Int -> Int -> Map Key ( FTB Showable) -> IO a -> IO (Either Int a)
+catchPluginException :: InformationSchema -> Int -> Int -> Map (Rel Key) ( FTB Showable) -> IO a -> IO (Either Int a)
 catchPluginException inf pname tname  idx i =
   (Right <$> i) `catch` (\e  -> do
               t <- getCurrentTime
               print (t,idx,e :: SomeException)
-              id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (usernameId inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (fmap (TBRecord2  ("metadata","key_value"). second (Binary . B.encode) . first keyValue) (M.toList idx)) , t )
+              id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (usernameId inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (fmap (TBRecord2  ("metadata","key_value"). second (Binary . B.encode) . first (keyValue._relOrigin)) (M.toList idx)) , t )
               return (Left ((\(Only i) -> i)$ head $id)))
 
 logUndoModification
@@ -357,7 +374,7 @@ tableOrder inf table orderMap =  maybe (int 0) _tbattr row
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (fst c) f) )) . G.lookup (idex inf (fst c) l) $ snd c
 
-idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
+idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)). Inline .fst)) $ first (lookKey inf t) <$> v
 
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))

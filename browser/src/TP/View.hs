@@ -152,7 +152,7 @@ predicate
     -> Maybe (NonEmpty T.Text)
     -> Maybe (NonEmpty T.Text)
     -> (Maybe ([Double], [Double]), Maybe (UTCTime, String))
-    -> BoolCollection (Rel Key,[(Key,AccessOp Showable)])
+    -> BoolCollection (Rel Key,[(Rel Key,AccessOp Showable)])
 predicate inf tname evfields geofields (i,j) =
     AndColl $
       catMaybes [liftA2 (geoPred inf tname ) geofields i, liftA2 (timePred inf tname) evfields j]
@@ -204,7 +204,7 @@ makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position2D  a  b ), True)
 makePos a i = error (show (a,i))
 
-writePK' :: T.Text -> [(T.Text ,FTB Showable )]-> FTB Showable -> T.Text
+writePK' :: T.Text -> [(Rel T.Text ,FTB Showable )]-> FTB Showable -> T.Text
 writePK'  m r efield =
     (\i ->
           m <> "->" <> i <> "->" <>
@@ -212,12 +212,12 @@ writePK'  m r efield =
     T.intercalate ",," $
     fmap
         (\(i,j) ->
-          i <> "=" <> T.pack (renderShowable j))  r
+          T.pack (renderRel i ) <> "=" <> T.pack (renderShowable j))  r
 
 
 
 writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
-writePK m r efield = writePK' (_kvname m)  (first keyValue <$> M.toList ( getPKM  m r))  efield
+writePK m r efield = writePK' (_kvname m)  (first (fmap keyValue) <$> M.toList ( getPKM  m r))  efield
 
 
 readPK :: InformationSchema -> T.Text -> (Table, TBIndex Showable, Key)
@@ -226,10 +226,10 @@ readPK inf s = (tb, Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.
     [t,pks,f] = T.splitOn "->" s
     pk =
         (\(k,v) ->
-          (k, justError ("cant read" <> show (k,v)) $ readType (keyType k) (T.unpack $ T.drop 1 v))) .
+          (k, justError ("cant read" <> show (k,v)) $ readType (relType k) (T.unpack $ T.drop 1 v))) .
         first
             (\k ->
-              justError ("cant find " <> show (k,pksk)) $ F.find ((k ==) . keyValue) pksk) .
+              justError ("cant find " <> show (k,pksk)) $ F.find ((k ==) . keyValue. _relOrigin) pksk) .
         T.break ('=' ==) <$>
         T.splitOn ",," pks
     tb = lookTable inf t

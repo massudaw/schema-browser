@@ -82,7 +82,7 @@ projunion inf table = res
                 nk = mergeFKRef (keyType. lkKey table . keyValue . _relOrigin <$> rel)
 
 mapIndex :: InformationSchema  -> Table -> IndexMetadata Key Showable -> IndexMetadata Key Showable
-mapIndex inf table (IndexMetadata i)  = IndexMetadata $ M.mapKeys (liftPredicateF lookupKeyName inf (tableName table) . mapPredicate keyValue) . filterPredicate $ i
+mapIndex inf table (IndexMetadata i)  = IndexMetadata $ M.mapKeys (liftPredicateF (lookupKeyName) inf (tableName table) . mapPredicate (fmap keyValue)) . filterPredicate $ i
   where
     filterPredicate  = M.filterWithKey (\k _ -> isJust $ traPredicate  check  $ k)
     check i = if S.member (keyValue i) attrs  then Just i else Nothing
@@ -90,10 +90,10 @@ mapIndex inf table (IndexMetadata i)  = IndexMetadata $ M.mapKeys (liftPredicate
 
 lookIndexMetadata pred (IndexMetadata i ) = M.lookup pred i
 
-mapIndexMetadata f (IndexMetadata v ) = IndexMetadata $ M.mapKeys (mapPredicate f )  v
-mapIndexMetadataPatch f (i,j,k,l) = (mapPredicate f i,j,k,l)
+mapIndexMetadata f (IndexMetadata v ) = IndexMetadata $ M.mapKeys (mapPredicate (fmap f) )  v
+mapIndexMetadataPatch f (i,j,k,l) = (mapPredicate (fmap f) i,j,k,l)
 
-mapDBVar :: InformationSchema -> Table -> DBVar2 Showable -> ([DBRef Key Showable],Tidings (IndexMetadata Key Showable),Tidings (M.Map [Key] (SecondaryIndex Key Showable),TableIndex Key Showable ))
+mapDBVar :: InformationSchema -> Table -> DBVar2 Showable -> ([DBRef Key Showable],Tidings (IndexMetadata Key Showable),Tidings (M.Map [Rel Key] (SecondaryIndex Key Showable),TableIndex Key Showable ))
 mapDBVar inf table (DBVar2 e i l  )
   = ([e], mapIndex inf table <$> i,  (\(TableRep (_,i,j)) -> (i,createUn (tableMeta table)  (rawPK table) . fmap (projunion inf table) . G.toList $ j)) <$> l)
 
@@ -134,7 +134,7 @@ getFrom table allFields b = mdo
   inf <- askInf
   let
     m = tableMeta table
-    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
+    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup i   (tableNonRef b) )<$> _kvpk m
     comp = recComplement inf m allFields pred b
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
@@ -175,7 +175,7 @@ listenFrom table allFields b = mdo
   inf <- askInf
   let
     m = tableMeta table
-    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (Inline i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (Inline i )  (tableNonRef b) )<$> _kvpk m
+    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (i )  (tableNonRef b) )<$> _kvpk m
   (dbref,r) <- getFrom table allFields b
   ref <- liftIO $ prerefTable inf table
   let result = fromMaybe b $ applyIfChange b =<< r
@@ -301,7 +301,7 @@ fkPredicateIx rel set =  refs
     primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes . fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
       i <- unSOptional ._tbattr  =<< lkAttr ori o
-      return $ PrimColl (tar,[(_relOrigin tar,Left (i,Flip op))])
+      return $ PrimColl (tar,[(tar,Left (i,Flip op))])
     lkAttr k v =  kvLookup (k) (tableNonRef v)
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
@@ -311,7 +311,7 @@ fkPredicate i set =  refs
     genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
     primPredicate o k  = do
       i <- unSOptional ._tbattr  =<< lkAttr k o
-      return $ PrimColl (_relTarget k ,[(_relOrigin $ _relTarget k,Left (i,Flip $ _relOperator k))])
+      return $ PrimColl (_relTarget k ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
     lkAttr k v =  kvLookup ((Inline (_relOrigin k))) (tableNonRef v)
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
@@ -331,7 +331,7 @@ getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> mayb
     pluginCheck i tbf  = refLookup (relComp $ pathRelRel i) tbf
     sorted =  sortValues (relComp . pathRelInputs inf (tableName table)) $ rawFKS table <> functionRefs table <> pluginFKS table
 
-rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (keyValue)))  <$> fixed
+rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) ) . fmap (fmap (first (fmap keyValue)))  <$> fixed
 
 mergeToken (pi,TableRef i)  (pj,TableRef j) = (pi <> pj,TableRef $ Interval.hull i  j)
 
@@ -347,8 +347,9 @@ tableLoader (Project table  (Union l)) page fixed  tbf = do
     liftIO . putStrLn $ "start loadTable " <> show (tableName table)
     inf <- askInf
     let
-      dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _rawIndexes table,G.empty )) (mapDBVar inf table <$>i )
-      dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (tableMeta table , i,j) :: TableRep Key Showable) <$> j)
+      m = tableMeta table
+      dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _kvuniques m,G.empty )) (mapDBVar inf table <$>i )
+      dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (m, i,j) :: TableRep Key Showable) <$> j)
     i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
     return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
@@ -376,7 +377,7 @@ tableLoader' table  page fixed tbf = do
           go pred (AndColl l) = AndColl (go pred <$> l)
           go pred (OrColl l) = OrColl (go pred <$> l)
           go pred (PrimColl l) = PrimColl $ pred l
-          predicate (RelAccess i j ,_ ) = (i, maybe [] ((\a -> (a,Right (Not IsNull)))<$>) $ _relInputs i)
+          predicate (RelAccess i j ,_ ) = (i, ((\a -> (a,Right (Not IsNull)))<$>) $ relUnComp i)
           predicate i  = i
     (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
 
@@ -483,7 +484,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
               where
                 match (AndColl l) = product $ match <$> l
                 match (OrColl l) =  sum $ match <$> l
-                match (PrimColl (i,_)) = if L.elem (_relOrigin i) m then 1 else 0
+                match (PrimColl (i,_)) = if L.elem i m then 1 else 0
             complements = catMaybes $ (recComplement inf (tableMeta table) tbf fixed ) <$> G.toList reso
             size = G.size reso
         if fixed /= mempty && isComplete fixed == size && size /= 0
@@ -562,7 +563,7 @@ convertChanStepper0  inf table ini nchan = do
 convertChan
   :: InformationSchema
   -> TableK Key
-     -> (TBPredicate Key Showable, [Key])
+     -> (TBPredicate Key Showable, [Rel Key])
      -> TBData Key ()
      -> DBRef Key Showable
      -> Dynamic
@@ -613,7 +614,7 @@ traceNothing f i = traceShow ("Passed:   ",f) i
 convertChanEvent
   ::
     InformationSchema -> TableK Key
-     -> (TBPredicate Key Showable, [Key])
+     -> (TBPredicate Key Showable, [Rel Key])
      -> TBData Key ()
      -> Behavior (TableRep Key Showable)
      -> TChan [TableModificationU Key Showable]
@@ -649,14 +650,14 @@ convertChanEvent inf table fixed select bres chan = do
 
 
 mapTableRep f (TableRep (m,i,j))= TableRep (f <$> m, mapSecondary f i, mapPrimary f j)
-mapSecondary f = M.mapKeys (fmap f) . fmap (fmap (fmap (fmap (G.mapAttributePath f))))
+mapSecondary f = M.mapKeys (fmap (fmap f)) . fmap (fmap (fmap (fmap (G.mapAttributePath f))))
 mapPrimary  f = fmap (mapKey' f)
 
 
 convertChanTidings0
   :: InformationSchema
   -> TableK Key
-  -> (TBPredicate Key Showable, [Key])
+  -> (TBPredicate Key Showable, [Rel Key])
   -> (TBData Key ())
   -> TableRep Key Showable
   -> TChan [TableModificationU Key Showable]

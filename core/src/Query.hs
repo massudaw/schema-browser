@@ -267,8 +267,8 @@ eitherDescPK kv i
           pk = tbPK kv i
 
 tbDesc, tbPK :: Ord k => KVMetadata k -> TBData  k a ->  TBData  k a
-tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (relOutputSet k) (S.fromList $ _kvdesc kv ) )
-tbPK kv = kvFilter (\k -> S.isSubsetOf (relOutputSet k) (S.fromList $ _kvpk kv ) )
+tbDesc  kv =  kvFilter  (\k -> S.isSubsetOf (relOutputSet k) (S.unions $ relOutputSet <$> _kvdesc kv))
+tbPK kv = kvFilter (\k -> S.isSubsetOf (relOutputSet k) (S.unions $ relOutputSet <$> _kvpk kv ))
 
 -- Combinators
 
@@ -333,9 +333,9 @@ tbpred m un  = G.notOptional . G.getUnique  un
 
 tbpredFK
   ::  ( Show k,Ord k)
-  => M.Map k k
-  -> [k]
-  -> [k]
+  => M.Map (Rel k) (Rel k)
+  -> [Rel k]
+  -> [Rel k]
   -> KV k a1 ->  Maybe (TBIndex a1)
 tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fmap (first projectRel).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
   where
@@ -354,7 +354,7 @@ tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fma
   -> Maybe a-}
 searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) )
   where
-    relTable = M.fromList $ fmap (\(Rel i _ j ) -> (_relOrigin j,_relOrigin i)) rel
+    relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
     lookGist rel un pk  v =  join res
       where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
 
@@ -382,7 +382,7 @@ joinRel2 tb ref table = recurse ref
       | otherwise
         =  TB1 <$> G.lookup idx table
         where
-          idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relOrigin . _relTarget .fst )) ref
+          idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
     isLeft (LeftTB1 i) = True
     isLeft i = False
     isArray (ArrayTB1 i) = True

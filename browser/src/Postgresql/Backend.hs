@@ -89,7 +89,7 @@ deleteIdx inf mk ix@(Idex kold) t = do
     qstr = fromString $ T.unpack del
     qargs = koldPk
     equality k = escapeReserved (attrValueName k) <> "="  <> "?"
-    koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
+    koldPk = uncurry Attr <$> zip (_relOrigin <$> _kvpk m) (F.toList kold)
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
@@ -113,8 +113,8 @@ updateQuery m (pks,skv) = (qstr,qargs,Nothing)
     qstr = fromString $ T.unpack up
     qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat ( fmap koldPk pks)
     equality k = k <> "="  <> "?"
-    koldPk (Idex kold) = zip (fmap textToPrim . keyType <$> _kvpk m) (F.toList kold)
-    pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
+    koldPk (Idex kold) = zip (fmap textToPrim . keyType . _relOrigin <$> _kvpk m) (F.toList kold)
+    pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_relOrigin <$> _kvpk m) (F.toList kold))
     inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
     paren i = "(" <> i <> ")"
@@ -186,7 +186,7 @@ paginate
   :: InformationSchema
   -> KVMetadata Key
   -> TBData Key ()
-  -> [(Key, Order)]
+  -> [(Rel Key, Order)]
   -> Int
   -> Int
   -> Maybe [FTB Showable]
@@ -267,7 +267,7 @@ getRow table  delayed (Idex idx) = do
     check inf delayed = do
          let
              (str,namemap) = codegen (getFromQuery inf m delayed)
-             pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_kvpk m) idx
+             pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_relOrigin <$> _kvpk m) idx
              qstr = (fromString $ T.unpack str)
          liftIO $ logTable inf m . BS.unpack =<< formatQuery (conn inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk
@@ -291,7 +291,7 @@ selectAll
      -> Maybe Int
      -> Maybe PageToken
      -> Maybe Int
-     -> [(Key, Order)]
+     -> [(Rel Key, Order)]
      -> WherePredicate
      -> TransactionM ([KV Key Showable],PageToken,Int)
 selectAll meta m offset i  j k st = do

@@ -495,11 +495,11 @@ data TableK k
         , rawTranslation :: Maybe Text
         , __rawIsSum :: Bool
         , _rawNameL :: Text
-        , uniqueConstraint :: [[k]]
-        , _rawIndexes :: [[k]]
+        , uniqueConstraint :: [[Rel k]]
+        , _rawIndexes :: [[Rel k]]
         , _rawScope :: [k]
-        , _rawPKL :: [k]
-        , _rawDescriptionL :: [k]
+        , _rawPKL :: [Rel k]
+        , _rawDescriptionL :: [Rel k]
         , __inlineFKS :: [SqlOperationK k]
         , __functionRefs :: [SqlOperationK k]
         , _pluginRefs :: [SqlOperationK k]
@@ -641,9 +641,9 @@ data KVMetadata k = KVMetadata
   , _kvschema :: Text
   , _kvIsSum :: Bool
   , _kvscopes :: [k]
-  , _kvpk :: [k]
-  , _kvdesc :: [k]
-  , _kvuniques :: [[k]]
+  , _kvpk :: [Rel k]
+  , _kvdesc :: [Rel k]
+  , _kvuniques :: [[Rel k]]
   , _kvattrs :: [k]
   , _kvjoins :: [SqlOperationK k]
   , _kvrecrels :: [MutRec [[Rel k]]]
@@ -662,7 +662,7 @@ tableMeta t =
     (_rawScope t)
     (rawPK t)
     (rawDescription t)
-    (fmap F.toList $ uniqueConstraint t)
+    (uniqueConstraint t <> _rawIndexes t )
     (rawAttrs t)
     (rawFKS t)
     (paths' <> paths)
@@ -723,7 +723,7 @@ unKOptional (Key a  c m n d (Primitive [] e)) =
   Key a  c m n d (Primitive [] e)
 unKOptional i = i -- error ("unKOptional" <> show i)
 
-
+  {-
 generateUn :: Ord k => KVMetadata k -> [k] -> [Set (Rel k)]
 generateUn m un = inline <> rels
   where
@@ -739,15 +739,15 @@ generateUn m un = inline <> rels
 
 generatePK :: Ord k => KVMetadata k -> [Set (Rel k)]
 generatePK m = generateUn m (_kvpk m)
-
-getPKM :: (Show k, Ord k) => KVMetadata k -> KV k a -> Map k (FTB a)
+-} 
+getPKM :: (Show k, Ord k) => KVMetadata k -> KV k a -> Map (Rel k) (FTB a)
 getPKM m = Map.fromList . getPKL m
 
-getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(k, FTB a)]
+getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(Rel k, FTB a)]
 getPKL m = getUn (S.fromList $ _kvpk m)
 
-getUn :: (Show k, Ord k) => Set k -> KV k a -> [(k, FTB a)]
-getUn un = fmap (\(Attr k v) -> (k,v)) . unkvlist . tableNonRef . tbUn un
+getUn :: (Show k, Ord k) => Set (Rel k) -> KV k a -> [(Rel k, FTB a)]
+getUn un = fmap (\(Attr k v) -> (Inline k,v)) . unkvlist . tableNonRef . tbUn un
 
 inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
 
@@ -961,15 +961,15 @@ lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table
 
 splitIndexPK ::
      Eq k
-  => BoolCollection (Rel k, [(k, AccessOp Showable)])
-  -> [k]
-  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
+  => BoolCollection (Rel k, [(Rel k, AccessOp Showable)])
+  -> [Rel k]
+  -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
 splitIndexPK (OrColl l) pk =
   fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (PrimColl (p@(Inline i), op)) pk =
-  if elem i pk
+  if elem p pk
     then Just (PrimColl (p, op))
     else Nothing
 -- splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --error (show (l,op,pk))
@@ -977,15 +977,15 @@ splitIndexPK i pk = Nothing -- error (show (i,pk))
 
 splitIndexPKB ::
      Eq k
-  => BoolCollection (Rel k, [(k, AccessOp Showable)])
-  -> [k]
-  -> Maybe (BoolCollection (Rel k, [(k, AccessOp Showable)]))
+  => BoolCollection (Rel k, [(Rel k, AccessOp Showable)])
+  -> [Rel k]
+  -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
 splitIndexPKB (OrColl l) pk =
   fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (PrimColl (p@(Inline i), op)) pk =
-  if notElem i pk
+  if notElem p pk
     then Just (PrimColl (p, op))
     else Nothing
 splitIndexPKB i pk = Just i

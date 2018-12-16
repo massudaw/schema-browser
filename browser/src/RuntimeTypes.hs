@@ -279,7 +279,7 @@ applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow elp)) =
 -- TODO: Allow composite types unique indexes with pg_get_expr
 recAttr
   :: (NFData a , Show k, Ord k)
-    => [k]
+    => [Rel k]
     -> TB k a
     -> [(AttributePath k (),TBIndex a)]
 recAttr un (Attr i k) = [(PathAttr i $ TipPath (), Idex [k])]
@@ -313,11 +313,12 @@ applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableR
         attrs = safeHead . unkvlist $ elAttr
         elAttr = kvFilter (\k -> not .
                                  S.null $ (relOutputSet k) `S.intersection`
-                                 (S.fromList un)) el
+                                 (relOutputSets un)) el
     el = fmap create elp
 applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
   where
-    didxs un sidx = maybe sidx (F.foldl' (\sidx  (ref,u)  -> G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx ) sidx. recAttr un ) $  safeHead $ F.toList . unkvlist $ kvFilter (\k -> not . S.null $ (relOutputSet k) `S.intersection` (S.fromList un)) el
+    didxs un sidx = maybe sidx (F.foldl' (\sidx  (ref,u)  -> G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx ) sidx. recAttr un ) .  safeHead . unkvlist  $ row
+      where row =  kvFilter (\k -> not . S.null $ (relOutputSet k) `S.intersection` (relOutputSets un)) el
     el = justError "cant find"$ G.lookup ix l
     eln = apply el elpn
 applySecondary _ _ j = j
@@ -337,7 +338,7 @@ typecheck f a = case f a of
           Pure i -> Right a
           Other (Constant l) ->  Left l
 
-queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k]) -> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
+queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[Rel k]) -> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK  $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g)  <$> mergeSIdxs
@@ -346,7 +347,7 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
         mergeSIdxs = L.foldl1' S.intersection <$> nonEmpty (catMaybes $ fmap (S.unions . fmap (M.keysSet.leafValue)). searchPK b <$> M.toList s)
 
 
-searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
+searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([Rel k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
 searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  splitIndexPK b pk
 
 
@@ -430,7 +431,7 @@ deriving instance (NFData v) => NFData (PageTokenF  v)
 
 newtype IndexMetadata k v =  IndexMetadata {unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (KV k (),PageTokenF v)))} deriving(Show)
 
-newtype TableRep k v = TableRep (KVMetadata k, M.Map [k] (SecondaryIndex k v), TableIndex k v) deriving(Show)
+newtype TableRep k v = TableRep (KVMetadata k, M.Map [Rel k] (SecondaryIndex k v), TableIndex k v) deriving(Show)
 
 newtype PageTokenF v
   = TableRef (Interval (TBIndex v))
@@ -453,7 +454,7 @@ data SchemaEditor
   , insertEd :: KVMetadata Key -> TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
-  , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
+  , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Rel Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
   , getEd :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
   , typeTransform :: PGKey -> CoreKey
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
@@ -618,7 +619,7 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
     rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
-liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first ((fst m ) inf tname)))<$> i
+liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first (fmap ((fst m ) inf tname))))<$> i
   
 liftASchRel :: (Text -> Text -> Maybe Table ) -> Text -> Text -> Text -> Text -> Rel Text  -> Rel Key
 liftASchRel inf s tname st ttarget (Rel l e t) = Rel (lookKey s tname <$> l) e (lookKey st ttarget <$> t)
@@ -707,8 +708,8 @@ liftAccess = liftAccessF lookupKeyName
 
 liftAccessU inf t = fmap (liftAccess inf t )
 
-lookAccess :: InformationSchema -> Text -> (Rel Text , [(Text,AccessOp Showable )]) -> (Rel Key, [(Key,AccessOp Showable )])
-lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (lookKey inf tname) <$> l2 )
+lookAccess :: InformationSchema -> Text -> (Rel Text , [(Rel Text,AccessOp Showable )]) -> (Rel Key, [(Rel Key,AccessOp Showable )])
+lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (fmap (lookKey inf tname)) <$> l2 )
 
 genPredicateFull'
   :: (Ord a,Show a)
@@ -770,20 +771,20 @@ mergeCreate Nothing Nothing = Nothing
 recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key ->  TBData Key () -> WherePredicate -> TBData Key  a -> Maybe (TBData Key ())
 recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
   where
-    attrList  = _relOrigin . fst <$> F.toList i
-    filterAttrs :: [Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
+    attrList  = fst <$> F.toList i
+    filterAttrs :: [Rel Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
     filterAttrs r m e v
       | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) =  (\i -> kvlist . pure <$>  ((\v -> go r m (index i ) i v) =<< kvLookup (index i) v)) =<< L.find (isJust . unLeftItens) (unkvlist e)
       | otherwise = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV $ v
-      where notPKOnly k =   if S.unions (relOutputSet  <$> M.keys k) `S.isSubsetOf` S.fromList (_kvpk m <> r ) then Nothing else Just k
+      where notPKOnly k =   if relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets (_kvpk m <> r ) then Nothing else Just k
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
-      | S.isSubsetOf (S.fromList $ _relOrigin <$> rel) (S.fromList $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | S.isSubsetOf (S.fromList (_relAccess <$> rel)) (S.fromList $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
-        merged = filterAttrs  (_relOrigin . _relTarget <$> rel) m2 <$> tb <*> tb1
+        merged = filterAttrs  (_relTarget <$> rel) m2 <$> tb <*> tb1
         FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         m2 = lookSMeta inf (RecordPrim ref)
     go _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
@@ -791,22 +792,23 @@ recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
         merged = filterAttrs [] ms <$> tb <*> tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go r m _ _ v@(Attr k a) = if L.elem k (_kvpk m <> r) then Just v else Nothing
+    go r m _ _ v@(Attr k a) = if L.elem (Inline k) (_kvpk m <> r) then Just v else Nothing
     go r m _ _ v@(Fun _ _ _) = Nothing
 
+relOutputSets s = S.unions (relOutputSet <$> s )
 
 recPK inf = filterTBData pred inf
   where
     pred = (\m k _ ->
             let
-                pkdesc = S.fromList $ _kvpk m
+                pkdesc = S.unions $ relOutputSet <$>  _kvpk m
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)
 
 recPKDescIndex inf = filterTBData pred inf
   where
     pred = (\m k _ ->
             let
-                pkdesc = S.fromList $ _kvpk m <> _kvdesc m <> concat (_kvuniques m)
+                pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m <> concat (_kvuniques m))
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)
 
 
@@ -815,7 +817,7 @@ recPKDesc inf = filterTBData pred inf
   where
     pred = (\m k _ ->
             let
-                pkdesc = S.fromList $ _kvpk m <> _kvdesc m
+                pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m)
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)
 
 filterTBData :: (KVMetadata Key -> Rel Key -> TB Key a -> Bool) ->  InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
@@ -837,7 +839,7 @@ allKVRecL :: InformationSchema -> KVMetadata Key ->  FTB (KV Key Showable) -> [F
 allKVRecL inf m = concat . F.toList . fmap (allKVRec' inf m)
 
 allKVRec' :: InformationSchema -> KVMetadata Key -> TBData Key  Showable -> [FTB Showable]
-allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (F.toList . relOutputSet $ fst i) ))  . M.toList $ go  <$> unKV (eitherDescPK m e))
+allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (relUnComp $ fst i) ))  . M.toList $ go  <$> unKV (eitherDescPK m e))
   where
     go (FKT l  rel  tb) = allKVRecL  inf m2 tb
       where
@@ -854,7 +856,7 @@ patchRow' m o v =  RowPatch (G.getIndex m v,PatchRow (diff' o v))
 createRow' m v =  RowPatch (G.getIndex m v,CreateRow v)
 dropRow' m v = RowPatch (G.getIndex m v,DropRow )
 
-createUn :: (Show k ,Ord k) => KVMetadata k -> [k] -> [TBData k Showable] -> G.GiST (TBIndex Showable) (TBData k Showable)
+createUn :: (Show k ,Ord k) => KVMetadata k -> [Rel k] -> [TBData k Showable] -> G.GiST (TBIndex Showable) (TBData k Showable)
 createUn m un   =  G.fromList  (justError ("empty"  ++ show un) .transPred) .  L.filter (isJust . transPred)
   where transPred =   G.notOptionalM . G.getUnique  un
 
@@ -879,7 +881,7 @@ lookAttrsM k m = M.lookup (S.fromList k) ta
 
 lookAttrM k =  lookAttrsM [k]
 
-fixrel (Inline  i,op) = (Inline i,[(i,op)])
+fixrel (Inline  i,op) = (Inline i,[(Inline i,op)])
 fixrel (RelAccess i j , op) = (RelAccess i (fst sub),snd sub)
   where sub = fixrel . (,op) $ j
 fixrel (i,op) = (i,[])

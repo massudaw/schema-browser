@@ -104,7 +104,7 @@ mapDef inf
         projfT ::  (Showable , TBData Text Showable) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
         projfT (efield@(SText field),features) = irecord $ proc _ -> do
           i <- convertRel inf tname field  -< ()
-          pkfields <- mapA (\(SText i) -> (i, ) <$> convertRel inf tname i)  pks -<  ()
+          pkfields <- mapA (\(SText i) -> (Inline i, ) <$> convertRel inf tname i)  pks -<  ()
           fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
           returnA -< HM.fromList [("label", A.toJSON (HM.fromList
                                      [("position" :: Text,i)

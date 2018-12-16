@@ -476,7 +476,7 @@ recoverValue (edit,old) = (\i j -> (isKeep j,join $ (applyIfChange i j) <|> (cre
 
 deleteCurrentUn
   :: Foldable f
-  => [Key]
+  => [Rel Key]
   -> f (TBData Key Showable)
   -> G.GiST (TBIndex Showable) a
   -> G.GiST (TBIndex Showable) a
@@ -489,9 +489,10 @@ tableConstraints
      -> Tidings (f (TBData Key Showable)) -> KV Key a -> SelPKConstraint
 tableConstraints (m ,gist) preoldItems ftb = constraints
   where
-    constraintPred :: [Key]
+    constraintPred :: [Rel Key]
                       -> Tidings (G.GiST (TBIndex Showable) a)
                       -> ([Rel Key], Tidings (C.Predicate [TB Key Showable]))
+    constraintPred un gist | traceShow ("Constraints",un) False = undefined
     constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate .  flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
     primaryConstraint = constraintPred (_kvpk m) (primary <$> gist)
     secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un .secondary<$>  gist)
@@ -625,7 +626,7 @@ rowTableDiff inf table constr refs plmods ftb@k ix oldItems= do
     # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
 
   reftb <- ui $ refTables inf table
-  (outI ,_)<- processPanelTable listBody inf reftb  out table oldItems
+  (outI ,_) <- processPanelTable listBody inf reftb  out table oldItems
   element operation #  set children [outI]
   return (listBody , out)
 
@@ -702,12 +703,16 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
-  (panelItems ,e)<- processPanelTable listBody inf reftb tablebdiff table preoldItems
+  (panelItems ,e) <- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   
-  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes","Schema"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
   info <- switchManyLayout (triding navMeta) 
-    (M.fromList [("Status", emptyLayout  $ printErrors e), ("Backend Log", emptyLayout $ logConsole inf table), ("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)])
+    (M.fromList [
+       ("Status", emptyLayout  $ printErrors e)
+      ,("Backend Log", emptyLayout $ logConsole inf table)
+      ,("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)
+      ,("Schema", emptyLayout $ tableSchema table)])
   
   out <- UI.div # set children [listBody,panelItems,getElement navMeta,getElement info]
   return $ LayoutWidget tablebdiff out layout
@@ -722,6 +727,19 @@ openClose open = do
           # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon glyphicon-" <> translate i))
   return nav
 
+
+tableSchema table  = do
+  let displayTable i = 
+        [("name", show $ _kvname i)
+        ,("indexes", "\n" <> unlines (  fmap (prefix . show) $ _kvuniques i))] 
+      render = unlines . fmap (\(i,j ) -> i <> ": " <> j  ) 
+      prefix i = "\t"  <> i 
+  e <- UI.mkElement "textarea" 
+     # set UI.value (render $ displayTable (tableMeta table) )
+     # set UI.style [("max-height","300px"),("width","100%")]
+  element e # method  "textAreaAdjust(%1)"
+  return e 
+    
 dynCrudUITable
    :: InformationSchema
    -> Tidings Bool
@@ -1257,7 +1275,7 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
     where
       prim (Attr k v) =  buildPrim <$> unSOptional v <*> L.find ((==k) . _relOrigin) rel
-      buildPrim o rel = PrimColl (_relTarget rel,[(_relOrigin $ _relTarget rel,Left  (o,Flip $ _relOperator rel))])
+      buildPrim o rel = PrimColl (_relTarget rel,[(_relTarget rel,Left  (o,Flip $ _relOperator rel))])
 
 
 fkUITablePrim ::
@@ -1432,7 +1450,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
 
           LayoutWidget pretdi celem layout <- dynCrudUITable inf (triding nav) staticold ((fmap (fmap (fmap targetPRef)) <$> plmods)) targetTable tdi
           let
-            serialRef = if L.any isSerial (keyType <$> rawPK targetTable) then Just (kvlist []) else Nothing
+            serialRef = if L.any isSerial (relType <$> rawPK targetTable) then Just (kvlist []) else Nothing
           ui $ onEventIO ((,,,,) <$> facts tsource <*> facts oldItems <*> facts tdi <*> facts ttarget <@> rumors pretdi)
             (\(old,init,selt,olde,i) -> do
             -- Only reflect when
@@ -1511,7 +1529,7 @@ metaTable inf metaname env =   do
   displayTable (meta inf) modtable (fixrel .Le.over _1 (liftRel (meta inf) metaname) <$> env)
 
 
-displayTable :: InformationSchema -> Table -> [(Rel Key ,[(Key,AccessOp Showable)] )] -> UI Element
+displayTable :: InformationSchema -> Table -> [(Rel Key ,[(Rel Key,AccessOp Showable)] )] -> UI Element
 displayTable inf table envK = do
   let
     pred = WherePredicate $ AndColl $ PrimColl <$> envK

@@ -280,8 +280,8 @@ kvlist = KV . mapFromTBList
 
 kvlistMerge = KV .mapFromTBListMerge
 
-kvToMap :: Ord k => KV k a -> Map.Map k (FTB a)
-kvToMap = Map.mapKeys _relOrigin . fmap _aprim . Map.fromList .fmap (first originalRel).  Map.toList . _kvvalues
+kvToMap :: Ord k => KV k a -> Map.Map (Rel k) (FTB a)
+kvToMap = fmap _aprim . Map.fromList .fmap (first originalRel).  Map.toList . _kvvalues
 
 kvkeys :: Ord k => KV k a -> [Rel k]
 kvkeys = fmap originalRel . Map.keys . _kvvalues
@@ -958,9 +958,9 @@ kvFilter pred = kvFilterWith (\i _ -> pred i)
 kvFilterWith :: Ord k =>  (Rel k -> TB k a -> Bool) -> KV k a ->  KV k a
 kvFilterWith pred (KV item) = KV $ Map.filterWithKey (\i -> pred (originalRel i) . recoverAttr . (originalRel i,) ) item
 
-tbUn :: Ord k => Set k -> KV k a -> KV k a
+tbUn :: Ord k => Set (Rel k) -> KV k a -> KV k a
 tbUn un = kvFilter pred where
-    pred k = S.isSubsetOf (relOutputSet k) un
+    pred k = S.isSubsetOf (relOutputSet k) (S.unions (relOutputSet <$> S.toList un))
 
 getAtt :: Ord a1 => Set a1 -> KV a1 a2 -> [TB a1 a2]
 getAtt i k  = filter ((`S.isSubsetOf` i) . relOutputSet  . keyattr ) . unkvlist  $ k
