@@ -294,7 +294,6 @@ mapLeft f (Right i ) = (Right i)
 fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
-    -- primPredicate o i | traceShow (i,kvkeys o) False = undefined
     primPredicate o (RelAccess ref tar) =  case refLookup ref o  of
                                              Just i -> join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
                                              Nothing -> Nothing
@@ -464,7 +463,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             fetchPatches (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
           case projection of
             Just remain -> do
-              liftIO . putStrLn $ "Current table is partially complete: " <> show (fixed,sq,G.size reso)
+              liftIO . putStrLn $ "Current table is partially complete: " <> show (sq,G.size reso)
               liftIO . putStrLn $ (ident $ renderTable remain)
               readNew  sq tbf
             Nothing -> do
@@ -472,13 +471,13 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 Nothing ->  if F.any (isJust . recComplement inf (tableMeta table) tbf fixed ) reso
                             then readNew sq tbf
                             else  do
-                              liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso,existingProjection)
+                              liftIO . putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
                               return ((max (G.size reso) sq,idx), (sidx,reso))
                 Just i -> do
-                  liftIO . putStrLn $ "Current table is complete: " <> show (fixed,sq,G.size reso,existingProjection)
+                  liftIO . putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
                   return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
-        liftIO $ putStrLn $ "No index: " <> show (fixed)
+        liftIO $ putStrLn $ "No index: " 
         let m = rawPK table
             isComplete (WherePredicate i) = match i
               where

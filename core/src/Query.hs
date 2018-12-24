@@ -390,6 +390,6 @@ joinRel2 tb ref table = recurse ref
 
 
 
-checkGist t un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM t  un pk)
+checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM   un pk)
 
-tbpredM m un  = G.notOptionalM . G.getUnique  un
+tbpredM un  = G.notOptionalM . G.getUnique  un

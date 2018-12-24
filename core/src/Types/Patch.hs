@@ -24,7 +24,6 @@ module Types.Patch
   , Patch(..)
   -- Patch Data Types and to be moved methods
   , patchSet
-  , groupSplit2
   --,recoverEdit
   , Editor(..)
   , Atom(..)
@@ -699,9 +698,6 @@ compactPatches i =
     expandPSet (PatchSet l) = F.toList l
     expandPSet p = [p]
 
-groupSplit2 :: Ord b => (a -> b) -> (a -> c) -> [a] -> [(b, [c])]
-groupSplit2 f g =
-  fmap (\i -> (f $ justError "cant group" $ safeHead i, g <$> i)) . groupWith f
 
 
 patchTB1 :: PatchConstr k a => TBData k a -> TBIdx k (Index a)
@@ -749,7 +745,7 @@ applyRecordChange v k =
         let edits = filter ((key ==). index) k
         in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (content <$> edits)
     add (v, p) =
-      (foldr (\p v -> maybe v (\i -> addAttr  i v) ({-traceShow (index p , createIfChange p :: Maybe (TB d a)) $-} createIfChange p) ) v $
+      (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
         filter (isNothing . flip kvLookup v . index) k
       , p)
 

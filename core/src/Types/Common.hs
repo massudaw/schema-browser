@@ -20,6 +20,7 @@ module Types.Common
   , mapFValue
   , mapFAttr
   , relComp
+  , relNormalize 
   , relNull
   , relUnComp
   , replaceRecRel
@@ -81,6 +82,7 @@ module Types.Common
   , kvLookup
   , refLookup
   , relAppend
+  , recLookup'
   , recLookup
   , attrLookup
   , unkvlist
@@ -418,6 +420,12 @@ relComp  i
 
 relUnComp (RelComposite l) = l 
 relUnComp i = [i]
+
+relNormalize l 
+  = ((\ (i, j) -> RelAccess i (relComp (relNormalize j)))  <$> groupSplit2 _relAccess relRef (filter isRelAccess l) ) <> filter (not .isRelAccess) l
+    where isRelAccess (RelAccess _ _) = True
+          isRelAccess _ = False
+          relRef (RelAccess _ ref) = ref
 
 _relOrigin (Rel i _ _) = _relOrigin i
 _relOrigin (RelComposite i ) = error "origin needs to be unique" --  _relOrigin <$> i
@@ -820,10 +828,22 @@ findFKAttr l v =
 relAppend  (RelAccess i j ) v  = RelAccess i (relAppend j v )
 relAppend  i j = RelAccess i j  
 
+recLookup' :: Ord k => Rel k -> TBData k v -> [FTB v]
+recLookup' p@(Inline l) v = maybeToList $ _tbattr <$> kvLookup p v
+recLookup' n@(RelAccess l nt) v =
+  join $ fmap join . traverse (recLookup' nt) <$> maybeToList (refLookup l v)
+recLookup' p@(RelComposite i) v = join $ maybeToList $ nonEmpty (join $ traverse (flip recLookup' v ) i)  <|> fmap (explodeAttr) (kvLookup p v)
+  where explodeAttr (Attr i v ) = [v]
+        explodeAttr (FKT i _ _ ) = join $ explodeAttr <$> unkvlist i 
+recLookup' p@(Rel i _ _) v = maybeToList $ _tbattr <$> kvLookup i  v 
+
+
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
 recLookup p@(Inline l) v = _tbattr <$> kvLookup p v
 recLookup n@(RelAccess l nt) v =
   join $ fmap join . traverse (recLookup nt) <$> refLookup l v
+recLookup p@(RelComposite i) v = _tbattr <$> kvLookup p  v 
+recLookup p@(Rel i _ _) v = _tbattr <$> kvLookup i  v 
 
 kvLookup :: Ord k => Rel k -> KV k a -> Maybe (TB k a)
 kvLookup rel (KV i) = recoverAttr . (rel,) <$> Map.lookup (relSort $ rel) i

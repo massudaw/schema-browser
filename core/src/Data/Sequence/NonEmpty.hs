@@ -1,8 +1,9 @@
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveAnyClass #-}
 
 module Data.Sequence.NonEmpty where
 
@@ -18,7 +19,7 @@ import Control.Lens as Le
 
 data NonEmptySeq a
   = a :| S.Seq a 
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic,Monad)
 
 instance Applicative NonEmptySeq  where
    pure i = i :| S.empty

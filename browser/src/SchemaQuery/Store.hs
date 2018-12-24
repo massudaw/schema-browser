@@ -339,7 +339,7 @@ updateReference j var (DBRef {..}) = do
                isPatch _ = False
            ls <- filter isPatch . concat . fmap tableDiffs . concat <$> takeMany var
            when (not $ L.null ls) $ do
-             state <- trace (unlines (label : (show <$> ls ))) $ readTVar collectionState
+             state <- readTVar collectionState
              let patches = compact . concat $ (\f -> f ls state) <$> j
              when (not $ L.null patches) $
                writeTChan patchVar (FetchData dbRefTable <$> patches)))

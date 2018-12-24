@@ -44,7 +44,6 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import Data.Maybe
 import qualified Data.Set as S
-import Data.Set (Set)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time
@@ -288,7 +287,7 @@ paintEditDiff o i e = element e # sink UI.style ( facts $ st <$> (cond <$> o <*>
         st (back,font)= [("background-color",back),("color",font)]
 
 
-filterConstr rel  = filter ((`S.isSubsetOf` S.fromList  rel). S.unions . fmap relOutputSet .fst)
+filterConstr rel  = filter ((`S.isSubsetOf` relOutputSet (relComp rel)). S.unions . fmap relOutputSet .fst)
 
 tbCaseDiff
   :: InformationSchema
@@ -303,14 +302,19 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItems oldItems= do
   let
     nonInj = S.fromList (_relOrigin <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
     nonInjRefs = M.filterWithKey (\k _ -> (\i -> not (S.null i) && S.isSubsetOf i nonInj ) .  relOutputSet $ k) wl
-    restrictConstraint =  filterConstr (fmap _relOrigin rel) constr
+    restrictConstraint =  filterConstr rel constr
     reflectFK' rel box = (\ref -> pure $ FKT ref rel (TB1 box)) <$> reflectFK frel box
       where frel = filter (\(Rel i _ _) -> isJust $ kvLookup i ifk) rel
     convertConstr j =  fmap ((\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel)) j
+    newConstraints = (fmap convertConstr <$>  restrictConstraint) 
+  -- liftIO $ print ("Constraints FKT",rel, fst <$> newConstraints)
   fkUITableGen inf table (fmap convertConstr <$>  restrictConstraint) plugItems nonInjRefs oldItems  i
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
-    let restrictConstraint = filter ((`S.isSubsetOf` S.singleton na ) . S.unions . fmap relOutputSet . fst) constr
-    iUITableDiff inf restrictConstraint plugItems oldItems i
+    let isRelA (RelAccess i _ ) = i == Inline na
+        isRelA _ = False
+    let restrictConstraint = filter (L.any isRelA . fst) constr
+    -- liftIO $ print ("IT Constraint",na,fst <$> restrictConstraint , fst <$> constr)
+    iUITableDiff inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$>restrictConstraint) plugItems oldItems i
 tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
   let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic (keyType i) v)) Just ) preoldItems) ( keyStatic i)
       tdiv = fmap _tbattr <$> oldItems
@@ -492,8 +496,8 @@ tableConstraints (m ,gist) preoldItems ftb = constraints
     constraintPred :: [Rel Key]
                       -> Tidings (G.GiST (TBIndex Showable) a)
                       -> ([Rel Key], Tidings (C.Predicate [TB Key Showable]))
-    constraintPred un gist | traceShow ("Constraints",un) False = undefined
-    constraintPred un gist =  (kvkeys (tbUn (S.fromList un) ftb),  C.Predicate .  flip ( checkGist m un . kvlist) <$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
+    -- constraintPred un gist | traceShow ("Constraints",un) False = undefined
+    constraintPred un gist =  (un,  (\g -> C.Predicate . flip (checkGist un . kvlist) $ g )<$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
     primaryConstraint = constraintPred (_kvpk m) (primary <$> gist)
     secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un .secondary<$>  gist)
     constraints :: SelPKConstraint
@@ -702,6 +706,7 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   preoldItems <-  ui $ loadItems inf table ftb preoldItems2
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
+  -- liftIO $ print ("Table Constraints",fst <$> constraints,_kvuniques (tableMeta table))
   LayoutWidget tablebdiff listBody layout <- eiTableDiff inf  table constraints refs pmods ftb preoldItems
   (panelItems ,e) <- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
@@ -718,6 +723,7 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   return $ LayoutWidget tablebdiff out layout
 
 emptyLayout i = (\i -> LayoutWidget (pure Nothing) i (pure (10,10)))  <$> i 
+
 openClose open = do
   let translate True = "expand"
       translate False = "collapse-up"
@@ -731,7 +737,8 @@ openClose open = do
 tableSchema table  = do
   let displayTable i = 
         [("name", show $ _kvname i)
-        ,("indexes", "\n" <> unlines (  fmap (prefix . show) $ _kvuniques i))] 
+        ,("indexes", "\n" <>  L.intercalate "\n" (  fmap (prefix . L.intercalate "," . fmap renderRel ) $ _kvuniques i))
+        ,("attrs", "\n" <> L.intercalate "\n" (  fmap (prefix . show) $ _kvattrs i))] 
       render = unlines . fmap (\(i,j ) -> i <> ": " <> j  ) 
       prefix i = "\t"  <> i 
   e <- UI.mkElement "textarea" 
@@ -793,7 +800,6 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
       crudEdi i j =  do
-        -- liftIO $print (diff i j)
         transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
@@ -1252,17 +1258,26 @@ inlineTableUI
 inlineTableUI inf constr pmods oldItems (RecordPrim na) = do
     let
       tablefields = allFields inf table
-      convertConstr (_,j) =  (\i -> ([index i], C.contramap (\v -> kvlist (fmap addDefault (L.delete i attrs) ++ v)) <$> j )) <$> attrs
-        where attrs = unkvlist tablefields
+      convertConstr (pk,j) 
+        = (\rel  -> (relUnComp rel , C.contramap (\v -> kvlist (fmap addDefault (L.delete (lkTB (relCurrent rel) ) attrs) ++ v)) <$> j )) 
+         . unRelAccess <$> pk
+        where 
+          lkTB i = justError (show (i,i,tablefields)) $ kvLookup i tablefields 
+          attrs = unkvlist tablefields
+          unRelAccess (RelAccess _ i) = i
       table = lookTable rinf (snd na)
+      relCurrent (RelAccess i _  ) = i
+      relCurrent i = i
       rinf = fromMaybe inf (HM.lookup (fst na) (depschema inf))
-    eiTableDiff rinf table (concat $ convertConstr <$> constr) M.empty pmods tablefields oldItems
-
+      newConstraints = concat $ convertConstr <$> constr
+    -- liftIO $ print ("Constraints",na,fst <$> constr, fst <$> newConstraints)
+    eiTableDiff rinf table  newConstraints M.empty pmods tablefields oldItems
+  
 
 iUITableDiff
   :: InformationSchema
   -- Plugin Modifications
-  -> SelPKConstraint
+  -> SelTBConstraint
   -> PluginRef (Column CoreKey Showable)
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
@@ -1270,7 +1285,7 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$> constr)) (const True) (keyType na) (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf constr) (const True) (keyType na) (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
 
 buildPredicate rel o = WherePredicate . AndColl . catMaybes $ prim <$> o
     where

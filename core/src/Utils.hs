@@ -161,3 +161,9 @@ buildMap f = M.fromListWith mappend . fmap  f
 unFinite :: Interval.Extended a -> Maybe a
 unFinite (Interval.Finite i) = Just i
 unFinite i = Nothing
+
+groupSplit2 :: Ord b => (a -> b) -> (a -> c) -> [a] -> [(b, [c])]
+groupSplit2 f g =
+  fmap (\i -> (f $ justError "cant group" $ safeHead i, g <$> i)) . groupWith f
+
+

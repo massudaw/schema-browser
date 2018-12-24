@@ -747,7 +747,8 @@ getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(Rel k, FTB a)]
 getPKL m = getUn (S.fromList $ _kvpk m)
 
 getUn :: (Show k, Ord k) => Set (Rel k) -> KV k a -> [(Rel k, FTB a)]
-getUn un = fmap (\(Attr k v) -> (Inline k,v)) . unkvlist . tableNonRef . tbUn un
+getUn un tb = fromJust $ nonEmpty (join ( traverse look (F.toList un))) <|> Just (fmap (\(Attr k v) -> (Inline k,v)) . unkvlist . tableNonRef . tbUn un $ tb)
+  where look i = (i,) <$> recLookup' i tb
 
 inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
 

@@ -154,7 +154,7 @@ fixLeftJoinR (P j k) (P l n) srel index alias
 
           let predM = fkPredicateIx mergedRel (mapKey' keyValue <$> G.toList kv )
               mergedRel = cindex 
-          liftIO $ print ("fixLeftPred",ix,cindex,predM)
+          -- liftIO $ print ("fixLeftPred",ix,cindex,predM)
           case predM of 
             Nothing -> return kv 
             Just pred -> do  

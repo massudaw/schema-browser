@@ -21,6 +21,7 @@ module TP.Selector
 
 import Control.Monad.Reader
 import Data.Char
+import Debug.Trace
 import qualified Data.Foldable as F
 import PrimEditor
 import qualified Data.Functor.Contravariant as C
@@ -177,6 +178,20 @@ instance Ord a => Ord (AscDesc a) where
   compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
 
 
+paginateList
+  :: Foldable t =>
+     InformationSchema
+     -> TableK Key
+     -> Element
+     -> Tidings (Maybe (WherePredicateK Key))
+     -> (Tidings (IndexMetadata Key v), Tidings (TableRep Key Showable),
+         c)
+     -> t ([Rel Key],
+           Tidings
+             (C.Predicate (TBData Key Showable)))
+     -> TBData Key ()
+     -> Tidings (Maybe (TBData Key Showable))
+     -> UI (Tidings [TBData Key Showable], Element)
 paginateList inf table itemListEl predicate (vpt,gist,_) constr proj tdi =  do
       filterInp <- filterString
       wheel <- fmap negate <$> UI.mousewheel itemListEl
@@ -191,9 +206,8 @@ paginateList inf table itemListEl predicate (vpt,gist,_) constr proj tdi =  do
       -- Filter and paginate
       (offset,res3)<- do
         let
-          aconstr = liftA2 applyConstr presort constrT
-          constrT =  traverse  snd constr
-          applyConstr m l =  filter (F.foldl' (\l (C.Predicate c) ->  liftA2 (&&) l (not <$> c) ) (pure True)  l) m
+          aconstr = F.foldl' (\c (p,o) -> liftA2 (applyConstr p) c o ) presort constr
+          applyConstr p m (C.Predicate c) =  filter (\f ->   not (c f))  m
         res3 <- ui$ cacheTidings (filtering  <$> triding filterInp <*> aconstr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i) <$>  facts res3 <#> tdi) wheel  (flip lengthPage <$> facts predicate <*> facts vpt)

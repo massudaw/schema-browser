@@ -235,7 +235,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
                 where 
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
                   liftIndex (Left l) = (\v -> Inline $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
-                  liftIndex (Right l) =  liftASch (lookKeyNested tableMapPre) schema c <$>  l 
+                  liftIndex (Right l) =   liftASch (lookKeyNested tableMapPre) schema c <$>  relNormalize l 
 
               allfks = maybe [] computeRelReferences $ M.lookup c fks
            tableMap1 = HM.mapWithKey createTable tableMap0 
