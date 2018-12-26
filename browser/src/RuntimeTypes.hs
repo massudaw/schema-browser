@@ -793,7 +793,7 @@ recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
-      | S.isSubsetOf (S.fromList (_relAccess <$> rel)) (S.fromList $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | S.isSubsetOf (relOutputSets (_relAccess <$> rel)) (relOutputSets $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)

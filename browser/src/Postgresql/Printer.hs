@@ -245,8 +245,8 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
         let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
         return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
       customPredicate = atTable m $ printPred inf m t wpred
-      orderBy = atTable m $ mapM (\(Inline i,j) -> do
-          l <- lkTB (Attr i (TB1 ()))
+      orderBy = atTable m $ mapM (\(i,j) -> do
+          l <- lkTB (Attr (_relOrigin i) (TB1 ()))
           return $ l <> " " <> showOrder j ) order
       ordquery =  atTable m $ do
         let
@@ -484,8 +484,8 @@ getFromQuery inf m delayed= do
   tq <- expandBaseTable m delayed
   tquery <- expandQuery' inf m JDNormal delayed
   rq <- projectTree inf m delayed
-  out <- atTable m $ mapM (\(Inline i)-> do
-    v <- lkTB (Attr i (TB1 ()))
+  out <- atTable m $ mapM (\i-> do
+    v <- lkTB (Attr (_relOrigin i) (TB1 ()))
     return $   v  <>  " = ?") (_kvpk m)
   let whr = T.intercalate " AND " out
   return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow (tquery tq )<> " WHERE " <> whr <> ") as q "

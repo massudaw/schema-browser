@@ -23,6 +23,7 @@ import Debug.Trace
 import Data.Maybe
 import GHC.Stack
 import Data.Word
+import Utils
 
 type PrimType = KType (Prim KPrim (Text,Text))
 
@@ -125,26 +126,27 @@ rewriteOp = M.fromList [
       ((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )),  (Flip Contains) ,Primitive [] (AtomicPrim (PGeom 2 $ PPosition ))) , "&&"),
       ((Primitive [] (AtomicPrim (PGeom 3 $ PBounding )),  (Flip Contains) ,Primitive [] (AtomicPrim (PGeom 3 $ PPosition ))) , "&&")]
 
-postgresPrimTyp :: HM.HashMap Text (Word32 -> KPrim)
+postgresPrimTyp :: HM.HashMap Text (Maybe Word32 -> Maybe KPrim)
 postgresPrimTyp = HM.fromList
-    [("dimensional",decoderDimensional)
+    [("dimensional",decoderDimensional . fromMaybe 0 )
     ,("geometry",decoderGeometry)]
 
 
-decoderGeometry :: Word32 -> KPrim
-decoderGeometry typmod  = PGeom  z $ case ty of
-                                       0 -> undefined -- "Unknown",
-                                       1 -> PPosition
-                                       2 -> PLineString
-                                       3 -> PPolygon
-                                       4 -> MultiGeom   PPosition
-                                       5 -> MultiGeom PLineString
-                                       6 -> MultiGeom PPolygon
+decoderGeometry :: Maybe Word32 -> Maybe KPrim
+decoderGeometry Nothing = Just (PGeom  3 PPosition)
+decoderGeometry (Just typmod) = PGeom  z <$> case ty of
+                                       0 -> Nothing -- error $ "Unknown 0 decoding typmod - " ++ show z 
+                                       1 -> Just PPosition
+                                       2 -> Just PLineString
+                                       3 -> Just PPolygon
+                                       4 -> Just $ MultiGeom PPosition
+                                       5 -> Just $ MultiGeom PLineString
+                                       6 -> Just $ MultiGeom PPolygon
    where z= if (typmod .&. 0x00000002) `shiftR` 1 == 0b1 then 3 else 2
          ty = (typmod .&. 0x000000FC)`shiftR` 2
 
-decoderDimensional :: Word32 -> KPrim
-decoderDimensional i = PDimensional (take 7)  (take 6,take 5 , take 4 ,take 3 ,take 2 ,take 1 ,take 0 )
+decoderDimensional :: Word32 -> Maybe KPrim
+decoderDimensional i = Just $ PDimensional (take 7)  (take 6,take 5 , take 4 ,take 3 ,take 2 ,take 1 ,take 0 )
   where
     take = fromIntegral . flip take4 i
 
@@ -174,6 +176,8 @@ postgresPrim =
   ,("xml",PMime "text/xml")
   ,("jpg",PMime "image/jpg")
   ,("png",PMime "image/png")
+  ,("bmp",PMime "image/bmp")
+  ,("dwg",PMime "application/dwg")
   ,("email",PMime "text/plain")
   ,("html",PMime "text/html")
   ,("dynamic",PDynamic "ftb_showable")
@@ -285,13 +289,9 @@ mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim
 textToPrim :: Prim PGType (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> case tymod of
-               Just ty -> case HM.lookup i postgresPrimTyp of
-                            Just i -> AtomicPrim $ i ty
-                            Nothing -> error $ "no conversion for type " <> (show i)
-               Nothing -> case HM.lookup i postgresPrimTyp of
-                            Just i -> AtomicPrim $ i 1
-                            Nothing -> error $ "no conversion for type " <> (show i)
+  Nothing ->  justError "invalid typmod" $ case HM.lookup i postgresPrimTyp of
+    Just i -> AtomicPrim <$> i tymod
+    Nothing -> error $ "no conversion for type " <> (show i)
 
 textToPrim (RecordPrim i) =  (RecordPrim i)
 

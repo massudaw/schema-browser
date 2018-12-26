@@ -217,35 +217,34 @@ keyTablesInit schemaRef  (schema,user) authMap = do
        let
            allKeys :: Map Text [Key]
            allKeys =  buildMap (\((t,_),k) -> (t,pure $ lookupKey t (keyValue k))) $ HM.toList keyMap
-           createTable c (un,tableType,desc,translation,pksl,scpv,is_sum) 
-             = (Raw 
-                un schema tableType translation 
-                is_sum c constraints indexes scp pks 
-                (Inline . lookupKey c . T.pack <$> desc) inlineFK functionFKS 
-                (PluginField <$> filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
+           createTable c (un,tableType,pdesc,translation,pksl,scpv,is_sum) 
+             = Raw 
+              un schema tableType translation 
+              is_sum c constraints indexes scp pks 
+              desc inlineFK functionFKS 
+              plugin allfks attr
             where
-              pks = Inline . lookupKey c <$> pksl
+              desc = liftRelation schema c (Inline <$> pdesc)
+              pks = liftRelation schema c (Inline <$> pksl)
               scp = lookupKey c <$> scpv
               isInline (Primitive _ (RecordPrim _)) = True
               isInline _ = False
               inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
-              attr = justLook c allKeys
+              attr = fromMaybe [] $ M.lookup c allKeys
               constraints = liftRelation schema c <$> (fmap (fmap (Inline. keyValue) )$ fromMaybe [] $ M.lookup c uniqueConstrMap )
-              liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) schema c   $ relComp (relNormalize l)
-              indexes = maybe []  (fmap liftIndex) $  M.lookup c indexMap
+              liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) s c $ relComp (relNormalize l)
+              indexes = maybe [] (fmap liftIndex) $  M.lookup c indexMap
                 where 
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
                   liftIndex (Left l) = liftRelation  schema c $ (\v -> Inline $ keyValue $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
-                  liftIndex (Right l) =   liftRelation  schema c l 
-              functionFKS = maybe [] (\r ->  P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r) ref
+                  liftIndex (Right l) = liftRelation  schema c l 
+              functionFKS = maybe [] (\r ->  P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r) (M.lookup c functionsRefs)
                  where
-                   ref =  M.lookup tn functionsRefs
-                   liftFun (FunctionField k s a) = FunctionField (lookupFKey ts tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
-                   tn = c 
-                   ts = schema 
+                  liftFun (FunctionField k s a) = FunctionField (lookupFKey schema c k) s (liftASch (lookKeyNested tableMapPre) schema c <$> a)
               allfks = maybe [] computeRelReferences $ M.lookup c fks
+              plugin = PluginField <$> filter ((==c) . _pluginTable . snd) (snd plugs) 
            tableMap1 = HM.mapWithKey createTable tableMap0 
-           tableMapPre = buildTMap  schema tableMap1  rsch
+           tableMapPre = buildTMap schema tableMap1 rsch
            
        ures <- fmap rights $ liftIO $ decodeViews conn schema
        let
@@ -253,7 +252,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
            unionT (s,n ,_ ,SQLRSelect{}) = (n,id)
            unionT (s,n,_,SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _)  (SQLRSelect _ (Just (SQLRReference _ j)) _ ))
              = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup t i3) <$>  [i,j] )))
-           i3u = foldr (uncurry HM.adjust. swap ) i3 (unionT <$> ures)
+           i3u = foldr (uncurry (flip HM.adjust)) i3 (unionT <$> ures)
 
        metaschema <- if schema /= "metadata"
           then Just <$> keyTables  schemaRef ("metadata",user) authMap
