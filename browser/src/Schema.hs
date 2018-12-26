@@ -230,12 +230,13 @@ keyTablesInit schemaRef  (schema,user) authMap = do
               isInline _ = False
               inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
               attr = justLook c allKeys
-              constraints = fmap (fmap Inline )$ fromMaybe [] $ M.lookup c uniqueConstrMap 
+              constraints = liftRelation schema c <$> (fmap (fmap (Inline. keyValue) )$ fromMaybe [] $ M.lookup c uniqueConstrMap )
+              liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) schema c   $ relComp (relNormalize l)
               indexes = maybe []  (fmap liftIndex) $  M.lookup c indexMap
                 where 
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
-                  liftIndex (Left l) = (\v -> Inline $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
-                  liftIndex (Right l) =   liftASch (lookKeyNested tableMapPre) schema c <$>  relNormalize l 
+                  liftIndex (Left l) = liftRelation  schema c $ (\v -> Inline $ keyValue $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
+                  liftIndex (Right l) =   liftRelation  schema c l 
 
               allfks = maybe [] computeRelReferences $ M.lookup c fks
            tableMap1 = HM.mapWithKey createTable tableMap0 

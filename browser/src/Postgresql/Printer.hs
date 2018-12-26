@@ -244,7 +244,7 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
         let pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
         let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
         return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
-      customPredicate = atTable m $ printPred inf m t (traceShowId wpred)
+      customPredicate = atTable m $ printPred inf m t wpred
       orderBy = atTable m $ mapM (\(Inline i,j) -> do
           l <- lkTB (Attr i (TB1 ()))
           return $ l <> " " <> showOrder j ) order

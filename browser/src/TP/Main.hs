@@ -385,9 +385,11 @@ withTable s m w =
     lift $ mapM print (rawFKS table)
     db <- transactionNoLog  inf $ selectFrom m Nothing pred
     i2 <- currentValue (facts $ collectionTid db)
+    liftIO $ mapM print (_rawIndexes table)
+    liftIO $ mapM print (_rawIndexes table)
     let
-      debug i =  (show (rawPK table,G.keys (primary i )) : (show  <$> M.toList (secondary i)))
-    liftIO $ putStrLn (unlines  $ debug i2)
+      debug i =  ( (show  <$> M.toList (secondary i)))
+    -- liftIO $ putStrLn (unlines  $ debug i2)
     return ()
                )
 

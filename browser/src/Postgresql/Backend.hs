@@ -198,7 +198,7 @@ paginate inf meta t order off size koldpre wherepred = do
   liftIO $ logTable inf meta . BS.unpack =<< formatQuery (conn inf ) quec (fromMaybe [] attr)
   v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr) `catch` (\e -> print (t,wherepred ) >> throw (e :: SomeException))
   let estimateSize = maybe 0 (\c-> c - off ) $ join $ safeHead ( fmap snd v :: [Maybe Int])
-  print estimateSize
+  -- print estimateSize
   return (estimateSize, fmap fst v)
   where
     offsetQ = " OFFSET " <> T.pack (show off)

@@ -244,7 +244,7 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
 getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins s t  c)) tbf =  do
-  liftIO . putStrLn $ show (s,t)
+  -- liftIO . putStrLn $ show (s,t)
   let
     -- Only evaluate pure plugins
     evalPlugin (PurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
@@ -262,7 +262,6 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
       rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
       table = lookTable rinf $ snd j
       refs = fkPredicate i set 
-      
       predm = refs <> predicate i predtop
     tb2 <-  case predm of
       Just pred -> do
@@ -294,9 +293,10 @@ mapLeft f (Right i ) = (Right i)
 fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
-    primPredicate o (RelAccess ref tar) =  case refLookup ref o  of
-                                             Just i -> join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
-                                             Nothing -> Nothing
+    primPredicate o (RelAccess ref tar) 
+      =  case refLookup ref o  of
+        Just i -> join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
+        Nothing -> Nothing
     primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes . fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
       i <- unSOptional ._tbattr  =<< lkAttr ori o
@@ -446,13 +446,13 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
-              liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+              --liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
               readNew sq i
             Nothing -> do
-              liftIO . putStrLn $ "Empty complement: " <> show (tableName table)
+              -- liftIO . putStrLn $ "Empty complement: " <> show (tableName table)
               return ((sq,idx), (sidx,reso))
           Nothing -> do
-            liftIO . putStrLn $ "No page: " <> show (pageidx)
+            -- liftIO . putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
           let
@@ -502,7 +502,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                      liftIO $ putStrLn $ "Loading Not unique complement : " <> show (G.size reso)
                      readNew maxBound tbf
            else do
-             liftIO $ putStrLn $ "Loading empty predicate:  " <> show (G.size reso)
+             liftIO $ putStrLn $ "Loading empty predicate:  " 
              readNew maxBound tbf
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
 

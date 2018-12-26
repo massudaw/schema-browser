@@ -662,7 +662,7 @@ tableMeta t =
     (_rawScope t)
     (rawPK t)
     (rawDescription t)
-    (uniqueConstraint t <> _rawIndexes t )
+    (L.nub $ uniqueConstraint t <> _rawIndexes t )
     (rawAttrs t)
     (rawFKS t)
     (paths' <> paths)
