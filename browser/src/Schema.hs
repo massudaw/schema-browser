@@ -221,7 +221,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
              = (Raw 
                 un schema tableType translation 
                 is_sum c constraints indexes scp pks 
-                (Inline . lookupKey c . T.pack <$> desc) inlineFK [] 
+                (Inline . lookupKey c . T.pack <$> desc) inlineFK functionFKS 
                 (PluginField <$> filter ((==c) . _pluginTable.snd ) (snd plugs)) allfks attr)
             where
               pks = Inline . lookupKey c <$> pksl
@@ -237,20 +237,19 @@ keyTablesInit schemaRef  (schema,user) authMap = do
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
                   liftIndex (Left l) = liftRelation  schema c $ (\v -> Inline $ keyValue $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
                   liftIndex (Right l) =   liftRelation  schema c l 
-
+              functionFKS = maybe [] (\r ->  P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r) ref
+                 where
+                   ref =  M.lookup tn functionsRefs
+                   liftFun (FunctionField k s a) = FunctionField (lookupFKey ts tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
+                   tn = c 
+                   ts = schema 
               allfks = maybe [] computeRelReferences $ M.lookup c fks
            tableMap1 = HM.mapWithKey createTable tableMap0 
            tableMapPre = buildTMap  schema tableMap1  rsch
-           addRefs table = maybe table (\r -> Le.over _functionRefs (mappend (P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r)) table) ref
-             where
-               ref =  M.lookup tn functionsRefs
-               liftFun (FunctionField k s a) = FunctionField (lookupFKey ts tn k) s (liftASch (lookKeyNested tableMapPre) ts tn <$> a)
-               tn = tableName table
-               ts = rawSchema table
-           i3l = addRefs <$> tableMap1
+           
        ures <- fmap rights $ liftIO $ decodeViews conn schema
        let
-           i3 =  addRecInit (buildTMap schema i3l rsch) <$>  i3l
+           i3 =  addRecInit (buildTMap schema tableMap1 rsch) <$>  tableMap1 
            unionT (s,n ,_ ,SQLRSelect{}) = (n,id)
            unionT (s,n,_,SQLRUnion (SQLRSelect _ (Just (SQLRReference _ i)) _)  (SQLRSelect _ (Just (SQLRReference _ j)) _ ))
              = (n ,\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup t i3) <$>  [i,j] )))
