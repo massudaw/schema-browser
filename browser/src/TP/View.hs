@@ -204,7 +204,7 @@ makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position2D  a  b ), True)
 makePos a i = error (show (a,i))
 
-writePK' :: T.Text -> [(Rel T.Text ,FTB Showable )]-> FTB Showable -> T.Text
+writePK' :: T.Text -> [(Rel Key ,FTB Showable )]-> FTB Showable -> T.Text
 writePK'  m r efield =
     (\i ->
           m <> "->" <> i <> "->" <>
@@ -212,16 +212,16 @@ writePK'  m r efield =
     T.intercalate ",," $
     fmap
         (\(i,j) ->
-          T.pack (renderRel i ) <> "=" <> T.pack (renderShowable j))  r
+          T.pack $ renderRel i <> "=" <>  renderShowable j)  r
 
 
 
 writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
-writePK m r efield = writePK' (_kvname m)  (first (fmap keyValue) <$> M.toList ( getPKM  m r))  efield
+writePK m r efield = writePK' (_kvname m)  (M.toList (getPKM m r))  efield
 
 
 readPK :: InformationSchema -> T.Text -> (Table, TBIndex Showable, Key)
-readPK inf s = (tb, Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
+readPK inf s = (tb, Idex $ snd <$> L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
   where
     [t,pks,f] = T.splitOn "->" s
     pk =
@@ -229,7 +229,7 @@ readPK inf s = (tb, Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.
           (k, justError ("cant read" <> show (k,v)) $ readType (relType k) (T.unpack $ T.drop 1 v))) .
         first
             (\k ->
-              justError ("cant find " <> show (k,pksk)) $ F.find ((k ==) . keyValue. _relOrigin) pksk) .
+              justError ("cant find " <> show (k,pksk, _relOrigin <$> pksk,pks)) $ F.find ((k ==) . keyValue. _relOrigin) pksk) .
         T.break ('=' ==) <$>
         T.splitOn ",," pks
     tb = lookTable inf t

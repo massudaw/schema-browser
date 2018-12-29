@@ -231,9 +231,9 @@ keyTablesInit schemaRef  (schema,user) authMap = do
               isInline _ = False
               inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
               attr = fromMaybe [] $ M.lookup c allKeys
-              constraints = liftRelation schema c <$> (fmap (fmap (Inline. keyValue) )$ fromMaybe [] $ M.lookup c uniqueConstrMap )
+              constraints = traceShowId $ liftRelation schema c <$> (fmap (fmap (Inline. keyValue) )$ fromMaybe [] $ M.lookup c uniqueConstrMap )
               liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) s c $ relComp (relNormalize l)
-              indexes = maybe [] (fmap liftIndex) $  M.lookup c indexMap
+              indexes = traceShowId $ maybe [] (fmap liftIndex) $  M.lookup c indexMap
                 where 
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr
                   liftIndex (Left l) = liftRelation  schema c $ (\v -> Inline $ keyValue $ justError ("no col: " ++ show v) $  M.lookup v attrMap) <$>  l
@@ -241,7 +241,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
               functionFKS = maybe [] (\r ->  P.sortBy (P.comparing (relSort . relComp . pathRelRel))  $ fmap liftFun r) (M.lookup c functionsRefs)
                  where
                   liftFun (FunctionField k s a) = FunctionField (lookupFKey schema c k) s (liftASch (lookKeyNested tableMapPre) schema c <$> a)
-              allfks = maybe [] computeRelReferences $ M.lookup c fks
+              allfks = traceShowId $ maybe [] computeRelReferences $ M.lookup c fks
               plugin = PluginField <$> filter ((==c) . _pluginTable . snd) (snd plugs) 
            tableMap1 = HM.mapWithKey createTable tableMap0 
            tableMapPre = buildTMap schema tableMap1 rsch
@@ -388,8 +388,3 @@ loadPlugins :: InformationSchema -> R.Dynamic [Plugins]
 loadPlugins inf =  do
   code <- liftIO$ indexSchema  (rootRef inf) "code"
   loadPlugins' code
-
-
-
-
-

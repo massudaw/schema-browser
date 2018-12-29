@@ -425,6 +425,8 @@ indexPred (a@(Inline key),eqs) r =
     Nothing -> False
   where
     eq = getOp a eqs
+indexPred ((Rel key _ _ ),eqs) r = indexPred (key ,eqs) r
+
 indexPred i v= error (show (i,v))
 
 
@@ -635,7 +637,7 @@ instance ( Range v
 
 alterWith f k v
   = case lookup k v of
-      Just i -> G.insert (f (Just i) ,k) indexParam v
+      Just i -> G.insert (f (Just i) ,k) indexParam (G.delete k indexParam v)
       Nothing -> G.insert (f Nothing ,k) indexParam v
 
 -- Higher Level operations

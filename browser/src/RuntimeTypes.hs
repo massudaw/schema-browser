@@ -220,7 +220,7 @@ instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
     where vapply (IndexMetadata m) (v,s,i,p,t) = IndexMetadata $ M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i (p,t) l ))) j  <|> Just (s,M.singleton i (p,t))) v m
 
 instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v) where
-  compact i = foldCompact assoc i
+  compact = foldCompact assoc
     where
       assoc (BatchedAsyncTableModification k l)  d@(AsyncTableModification _ _)
         = case assoc (last l) d of
@@ -241,7 +241,7 @@ instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v)
       assoc i j = Nothing
 
 instance Compact (IndexMetadataPatch k v) where
-  compact i = i
+  compact = id
 
 mapRowPatch f (RowPatch i ) = RowPatch $ Le.bimap (fmap f) (fmap f) i
 
@@ -291,11 +291,11 @@ getIndexWithTrace un row = maybeToList $ do
     isRel (Rel _ _ _ ) = True
     isRel _ = False
     lookupRel l@(RelComposite v ) 
-      | L.any isRel v = [(PathForeign v (TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex . fmap _tbattr . unkvlist . justError ("No rel " ++ show (l,row)) $ _tbref  <$> kvLookup l row )]
+      | L.all isRel v = [(PathForeign v (TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex . fmap _tbattr . unkvlist . justError ("No rel " ++ show (l,row)) $ _tbref  <$> kvLookup l row )]
       | otherwise = concat $ lookupRel <$>  v
     lookupRel r@(Rel (Inline i) j k) = [(PathForeign [r] (TipPath (Many $ pure (PathAttr i (TipPath ())))), Idex . fmap _tbattr . unkvlist .justError ("No rel " ++ show (r,row)) $  _tbref <$> kvLookup r row)]
     lookupRel (RelAccess i j ) = fmap (first (PathInline (_relOrigin i)))   $ ftbToPathIndex $  getIndexWithTrace j <$> justError ("cant find: " ++ show (i,row)) (refLookup  i row)
-    lookupRel i@(Inline k ) = [(PathAttr k $ TipPath (),Idex . pure . justError ("No attribute path "  ++ show ( un,k,row)) $ _tbattr <$> kvLookup i row)]
+    lookupRel i@(Inline k ) = [(PathAttr k $ TipPath (),Idex . pure . justError ("No attribute path "  ++ show ( un,k,row)) $ _tbattr <$> (kvLookup i row)) ]
     unIndex (Idex v ) = v
 
 ftbToPathIndex (ArrayTB1 l) = join $ F.toList $ NonS.imap (\ix v -> first (NestedPath (PIdIdx ix)) <$> ftbToPathIndex  v) l 
@@ -314,22 +314,30 @@ applySecondary (RowPatch (patom,DropRow )) (RowPatch (_,CreateRow v)) (TableRep 
   = TableRep (m,M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = G.delete (fmap create $ G.getUnique  un v) G.indexParam sidx
-applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableRep (m, out ,l)
+applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) = traceSize ix $ TableRep (m, out ,l)
   where
     out = M.mapWithKey didxs sidxs
     didxs un sidx =  alterAttrs el 
       where
-        alterAttrs = F.foldl' reducer sidx .traverseGetIndex . getIndexWithTrace (relComp un)
-        reducer idx (ref ,u) = G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u idx
+        alterAttrs = F.foldl' reducer sidx . traverseGetIndex . getIndexWithTrace (relComp un)
+        reducer idx (ref ,u) 
+          | isJust (G.notOptionalM (G.getUnique un el)) = G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u idx
+          | otherwise = idx
     el = fmap create elp
-applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
+applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  traceSize ix $ TableRep (m, M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = F.foldl' reducer sidx . traverseGetIndex . getIndexWithTrace (relComp un) $ el
       where 
-        reducer sidx  (ref,u)  = G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx
+        reducer sidx  (ref,u)  
+          | isJust (G.notOptionalM (G.getUnique un el)) = G.alterWith (M.insertWith  mappend ix [ref] . fromMaybe M.empty) u $ G.delete (G.getUnique  un eln) G.indexParam sidx
+          | otherwise = sidx
     el = justError "cant find" $ G.lookup ix l
     eln = apply el elpn
 applySecondary _ _ j = j
+
+traceSize i rep@(TableRep (m,n,l)) 
+  | _kvname m == "transactions" = trace (show (i,M.mapKeys (renderRel .relComp )$ fmap G.size n))  rep
+  | otherwise = rep 
 
 applyTableRep
   ::  (NFData k,  PatchConstr k Showable)
@@ -627,7 +635,7 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
     rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
-liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel  inf tname) . fmap (fmap (first (fmap ((fst m ) inf tname))))<$> i
+liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel inf tname) . fmap (fmap (first (fmap ((fst m ) inf tname))))<$> i
   
 liftASchRel 
   :: (Text -> Text -> Maybe Table) 
@@ -645,7 +653,8 @@ liftASchRel  _ i j k l m = error (show (i,j,k,l,m))
 findRelation inf s tname  l = do  
   tb <- inf s tname
   let output l = relOutputSet (relComp l)
-  rel <- L.find (\i ->  output l ==  output  (S.map (fmap keyValue) $ pathRelRel i)) (rawFKS tb)
+      relToKey = S.map (fmap keyValue) . pathRelRel
+  rel <- L.find (\i ->  output l ==  output (relToKey i)) (rawFKS tb)
   case unRecRel rel of
     FKJoinTable l _ -> Just $ relComp l
     i -> Nothing
@@ -653,10 +662,7 @@ findRelation inf s tname  l = do
 liftASch
   :: (T.Text -> T.Text -> Maybe Table)
      -> T.Text -> T.Text -> Rel T.Text -> Rel Key
-liftASch inf s tname (Inline l) = Inline $  lookKey  l
-  where
-    tb = inf s tname
-    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
+-- liftASch inf s tname l | traceShow (s,tname,l) False = undefined
 liftASch inf s tname (RelComposite l) =
   fromMaybe (relComp $ liftASch inf s tname <$> l) $ 
       findRelation inf s tname l
@@ -668,10 +674,11 @@ liftASch inf s tname (RelAccess i c) = RelAccess (relComp $ pathRelRel rel) (lif
     (sch,st) = case unRecRel rel of
           FKJoinTable  _ l -> l
           FKInlineTable  _ l -> l
-liftASch inf s tname l =  maybe (error $ "no match" ++ show l ) id rel
+liftASch inf s tname l =  fromMaybe (lookKey <$> l ) rel
   where
     rel = findRelation inf s tname [l]
-liftASch inf s tname i = error ("No match: " ++ show (s,tname,i))
+    tb = inf s tname
+    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
 lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 
@@ -821,7 +828,10 @@ recPKDescIndex inf = filterTBData pred inf
   where
     pred = (\m k _ ->
             let
-                pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m <> concat (_kvuniques m))
+                pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m <> concat (_kvuniques m) <> concat relAccess )
+                relAccess = fmap (fmap _relAccess ) . L.filter (L.all isRelAccess ) . _kvuniques $ m
+                isRelAccess (RelAccess l i) = True
+                isRelAccess _ = False
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)
 
 

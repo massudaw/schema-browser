@@ -286,8 +286,7 @@ paintEditDiff o i e = element e # sink UI.style ( facts $ st <$> (cond <$> o <*>
         cond Nothing  (Diff i) = ("lightblue","black")
         st (back,font)= [("background-color",back),("color",font)]
 
-
-filterConstr rel  = filter ((`S.isSubsetOf` relOutputSet (relComp rel)). S.unions . fmap relOutputSet .fst)
+filterConstr rel  = filter ((relOutputSet (relComp rel) `S.isSubsetOf`). S.unions . fmap relOutputSet .fst)
 
 tbCaseDiff
   :: InformationSchema
@@ -307,7 +306,7 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItems oldItems= do
       where frel = filter (\(Rel i _ _) -> isJust $ kvLookup i ifk) rel
     convertConstr j =  fmap ((\(C.Predicate constr) ->  C.Predicate $ maybe False constr  .  reflectFK' rel)) j
     newConstraints = (fmap convertConstr <$>  restrictConstraint) 
-  -- liftIO $ print ("Constraints FKT",rel, fst <$> newConstraints)
+  -- liftIO $ print ("Constraints FKT",rel, relOutputSet .relComp . fst <$> constr , fst <$> newConstraints)
   fkUITableGen inf table (fmap convertConstr <$>  restrictConstraint) plugItems nonInjRefs oldItems  i
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let isRelA (RelAccess i _ ) = i == Inline na
@@ -494,12 +493,13 @@ tableConstraints
 tableConstraints (m ,gist) preoldItems ftb = constraints
   where
     constraintPred :: [Rel Key]
-                      -> Tidings (G.GiST (TBIndex Showable) a)
+                      -> Tidings (Maybe (G.GiST (TBIndex Showable) a))
                       -> ([Rel Key], Tidings (C.Predicate [TB Key Showable]))
-    -- constraintPred un gist | traceShow ("Constraints",un) False = undefined
-    constraintPred un gist =  (un,  (\g -> C.Predicate . flip (checkGist un . kvlist) $ g )<$> (deleteCurrentUn  un  <$> preoldItems <*> gist))
-    primaryConstraint = constraintPred (_kvpk m) (primary <$> gist)
-    secondaryConstraints un = constraintPred  un  (justError "no un". M.lookup un .secondary<$>  gist)
+    constraintPred un gist =  (un,  
+          (C.Predicate . maybe (const False) (flip (checkGist un . kvlist)))<$> 
+            ((\i -> fmap (deleteCurrentUn  un i)) <$> preoldItems <*> gist))
+    primaryConstraint = constraintPred (_kvpk m) (Just . primary <$> gist)
+    secondaryConstraints un = constraintPred  un  (M.lookup un . secondary <$>  gist)
     constraints :: SelPKConstraint
     constraints = primaryConstraint : (secondaryConstraints <$> _kvuniques m)
 
@@ -711,12 +711,13 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   (panelItems ,e) <- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   
-  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes","Schema"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes","Schema","Indexes"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
   info <- switchManyLayout (triding navMeta) 
     (M.fromList [
        ("Status", emptyLayout  $ printErrors e)
       ,("Backend Log", emptyLayout $ logConsole inf table)
       ,("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)
+      ,("Indexes", emptyLayout $ tableIndexes reftb table)
       ,("Schema", emptyLayout $ tableSchema table)])
   
   out <- UI.div # set children [listBody,panelItems,getElement navMeta,getElement info]
@@ -733,6 +734,32 @@ openClose open = do
           # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon glyphicon-" <> translate i))
   return nav
 
+tableIndexes reftb@(_,gist,_) table  = do
+  let displayTable  un =
+              UI.mkElement "textarea" # sink0 UI.value (facts $ unlines . zipIx . fmap renderIdex .L.sort . idx un<$>  gist )
+                  # set UI.style [("max-height","300px"),("width","100%")]
+      idx  un gist
+        | un == rawPK table =  G.keys . primary $ gist
+        | otherwise = G.keys . fromMaybe G.empty . M.lookup un  .secondary $ gist
+      uns = _rawIndexes table
+      renderIdex (Idex l ) = L.intercalate "," (renderShowable <$> l) ++ " - " ++ show l
+      zipIx v = zipWith (\i j -> show i ++ (L.replicate (L.length (show (L.length v)) - L.length (show i)) ' '  ) ++ " " ++  j ) [0..] v
+  navMeta  <- buttonDivSet uns (pure (Just $ rawPK table)) 
+    (\i -> UI.button # set UI.text (renderRel $ relComp i) # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+  info <- switchManyLayout (triding navMeta)  (M.fromList $ (\i -> (i,  emptyLayout $ displayTable  i)) <$> uns)
+  element navMeta # set UI.class_ "col-xs-12" 
+  element info # set UI.class_ "col-xs-12"  # adjustArea gist # adjustArea (triding navMeta)
+
+  h <- UI.h6 # sink UI.text (renderRel . relComp <$> facts (triding navMeta)) # set UI.class_ "col-xs-10" 
+  stat <- UI.span # sink UI.text (facts $ (\f -> show $ L.length f) <$> (idx <$> triding navMeta <*> gist )) # set UI.class_ "col-xs-2"
+  UI.div # set UI.class_ "col-xs-12" #  set children [h,stat,getElement navMeta ,getElement info] 
+ 
+adjustArea b e= do
+  v <- e
+  e # method  "textAreaAdjust(%1)"
+  onChanges (facts b) $ \_ -> do 
+    e # method  "textAreaAdjust(%1)"
+  return v 
 
 tableSchema table  = do
   let displayTable i = 

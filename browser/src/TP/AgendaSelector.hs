@@ -150,7 +150,7 @@ agendaDef inf
             projfT efield@(SText field) = irecord $ proc _-> do
               i <- convertRel inf tname field  -< ()
               fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ) . NonS.fromList. explodeTree <$> desc) ) -< ()
-              pkfields <- mapA (\(SText i) -> (Inline i, ) <$> convertRel inf tname i)  pks -<  ()
+              pkfields <- mapA (\(SText i) -> (Inline (lookKey inf tname i), ) <$> convertRel inf tname i)  pks -<  ()
               returnA -< HM.fromList $ fmap (fmap A.toJSON) $
                   [("id" :: Text, txt (writePK' tname pkfields (TB1 efield)))
                   ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> catMaybes (F.toList fields)))

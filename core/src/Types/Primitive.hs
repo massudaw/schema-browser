@@ -747,7 +747,7 @@ getPKL :: (Show k, Ord k) => KVMetadata k -> KV k a -> [(Rel k, FTB a)]
 getPKL m = getUn (S.fromList $ _kvpk m)
 
 getUn :: (Show k, Ord k) => Set (Rel k) -> KV k a -> [(Rel k, FTB a)]
-getUn un tb = fromJust $ nonEmpty (join ( traverse look (F.toList un))) <|> Just (fmap (\(Attr k v) -> (Inline k,v)) . unkvlist . tableNonRef . tbUn un $ tb)
+getUn un tb = fromJust $ nonEmpty (join (traverse look (F.toList un))) <|> Just (fmap (\(Attr k v) -> (Inline k,v)) . unkvlist . tableNonRef . tbUn un $ tb)
   where look i = (i,) <$> recLookup' i tb
 
 inlineName (Primitive _ (RecordPrim (s, i))) = (s, i)
@@ -860,6 +860,9 @@ relType (RelAccess xs n) =
   where
     Primitive ty at = relType n
 relType (Rel i _ _ ) = relType i
+relType (RelComposite l ) 
+  | L.length result == 1 =   relType $ head result
+    where result  = filter (not. S.null .relOutputSet ) l
 relType i = error (show i)
 
 relType' :: Show a => Rel (FKey (KType a)) -> KType [a]

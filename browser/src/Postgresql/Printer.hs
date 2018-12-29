@@ -245,8 +245,9 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
         let orderQ = maybe "" (\i -> " ORDER BY " <> T.intercalate "," i ) $ nonEmpty order
         return  ("SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery tname) <> pred <> orderQ,ordervalue <> predvalue)
       customPredicate = atTable m $ printPred inf m t wpred
+      singleOutput = justError "non unique" . safeHead . F.toList . relOutputSet 
       orderBy = atTable m $ mapM (\(i,j) -> do
-          l <- lkTB (Attr (_relOrigin i) (TB1 ()))
+          l <- lkTB (Attr (singleOutput i) (TB1 ()))
           return $ l <> " " <> showOrder j ) order
       ordquery =  atTable m $ do
         let
@@ -255,8 +256,8 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
           koldPk :: Maybe [(PrimType,FTB Showable)]
           koldPk =  fmap (fmap (first relType )) preds
           pkParam =  koldPk <> (tail .reverse <$> koldPk)
-        oq <- traverse (traverse (\(Inline i,v) ->  do
-          l <- lkTB (Attr i (TB1 ()))
+        oq <- traverse (traverse (\(i,v) ->  do
+          l <- lkTB (Attr (singleOutput i) (TB1 ()))
           return $ (l,v))) orderpreds
         return (pure .generateComparison <$> oq,pkParam)
 

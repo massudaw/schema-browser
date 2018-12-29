@@ -122,6 +122,7 @@ viewerMode
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
   let desc = recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table)
+  liftIO $ print ("Loaded Fields",desc)
   reftb@(_,trep,_) <- ui $ refTablesProj inf table Nothing mempty  desc
   let
     vpt = primary <$> trep
