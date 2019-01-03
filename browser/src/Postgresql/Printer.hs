@@ -411,7 +411,9 @@ indexFieldL inf m e c p@(Rel l _ _) v =
   case findAttr (_relOrigin l) v of
       Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
       Nothing -> error $ "not attr rel " ++ show (l,v)
-indexFieldL inf m e c i v = error (show (i, v))
+indexFieldL inf m e c i v 
+  | F.length (relOutputSet i) == 1  = indexFieldL inf m e c (Inline $ head $ F.toList $ relOutputSet i) v
+  | otherwise = error ("indexFieldL " ++ show (i, v))
 
 indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldL inf m e c) v ) nt
 indexFieldLU inf m e c (ISum nt) v = concat <$> traverse (flip (indexFieldL inf m e c) v ) nt

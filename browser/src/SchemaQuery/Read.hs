@@ -29,6 +29,7 @@ module SchemaQuery.Read
   -- SQL Arrow API
   ) where
 import Control.Arrow
+import Debug.Trace
 import Control.Concurrent
 import SchemaQuery.Store
 import Serializer
@@ -257,7 +258,11 @@ getFKRef inf predtop (me,old) set (RecJoin i j) tbf = getFKRef inf predtop (me,o
 
 getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
-      tar = S.fromList $ fmap _relOrigin i
+      nonRefRel (Rel i _ _ ) = i
+      nonRefRel i@(Inline _ ) = i
+      nonRefRel i = i
+      unComp =  fmap nonRefRel . concat . fmap relUnComp  
+      tar = S.fromList $ fmap _relOrigin (unComp i)
       refl = S.fromList $ fmap _relOrigin $ filterReflexive i
       rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
       table = lookTable rinf $ snd j
@@ -281,7 +286,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
       joined i = do
          fk <- joinFK i
          return $ add fk i
-    return (me >=> joined,old <> refl)
+    return $ (me >=> joined,old <> refl)
 
 traceIfFalse i False = traceShow i  False
 traceIfFalse i True = True
@@ -305,13 +310,17 @@ fkPredicateIx rel set =  refs
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
+-- fkPredicate i j | traceShow ("FKPredicate", i,j) False = undefined
 fkPredicate i set =  refs
   where 
     genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
     primPredicate o k  = do
-      i <- unSOptional ._tbattr  =<< lkAttr k o
+      let a  = justError ("No Attr: " ++ show (k,o)) $ lkAttr k o
+      i <- unSOptional (_tbattr a)
       return $ PrimColl (_relTarget k ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
-    lkAttr k v =  kvLookup ((Inline (_relOrigin k))) (tableNonRef v)
+    lkAttr k v 
+      = kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
+
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 getFKS
@@ -393,7 +402,10 @@ tableLoader' table  page fixed tbf = do
         return (either resFKS Right <$> preresult)
       else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
-      print ("lefts",tableName table ,lefts result)
+      putStrLn . T.unpack $ "Missing references: "  <> tableName table
+      putStrLn $ "Filters: "  <> show fixed
+      -- putStrLn $ "Fields: "  <> show tbf
+      putStrLn $ "Errors: " <>  (unlines $ show <$> lefts result)
     return (rights  result,x,o )) table page fixed tbf
 
 
@@ -463,7 +475,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             fetchPatches (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
           case projection of
             Just remain -> do
-              liftIO . putStrLn $ "Current table is partially complete: " <> show (sq,G.size reso)
+              liftIO . putStrLn $ "Current table is partially complete: " <> show (tableName table, sq,G.size reso)
               liftIO . putStrLn $ (ident $ renderTable remain)
               readNew  sq tbf
             Nothing -> do
@@ -471,10 +483,10 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 Nothing ->  if F.any (isJust . recComplement inf (tableMeta table) tbf fixed ) reso
                             then readNew sq tbf
                             else  do
-                              liftIO . putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
+                              liftIO . putStrLn $ "Current table is complete: " <> show (tableName table, sq, G.size reso)
                               return ((max (G.size reso) sq,idx), (sidx,reso))
                 Just i -> do
-                  liftIO . putStrLn $ "Current table is complete: " <> show (sq,G.size reso)
+                  liftIO . putStrLn $ "Current table is complete: " <> show (tableName table, sq,G.size reso)
                   return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: " 
@@ -490,20 +502,21 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            then
             case L.null complements of
               True -> do
-                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (G.size reso)
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table, G.size reso)
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
                 if L.length  complements  == 1
                    then do
-                     liftIO $ putStrLn $ "Loading complement : " <> show (G.size reso)
+                     liftIO $ putStrLn $ "Loading complement : " <> show (tableName table, G.size reso)
                      readNew maxBound (head complements)
                    -- TODO: Compute the max of complements for now just use all required
                    else do
-                     liftIO $ putStrLn $ "Loading Not unique complement : " <> show (G.size reso)
+                     liftIO $ putStrLn $ "Loading Not unique complement : " <> show (tableName table, G.size reso)
                      readNew maxBound tbf
            else do
              liftIO $ putStrLn $ "Loading empty predicate:  " 
              readNew maxBound tbf
+    liftIO . print $ "pageTable size " <> show (tableName table) <>" : " <> show (G.size ndata)
     return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
 
 

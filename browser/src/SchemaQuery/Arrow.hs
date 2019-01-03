@@ -9,10 +9,12 @@ module SchemaQuery.Arrow
   , leftJoinR
   , fixLeftJoinR
   , projectV
+  , runMetaArrow
   ) where
 
 import Control.Arrow
 import Control.Monad.State
+import Data.Either
 import Control.Monad.IO.Class
 import qualified Control.Lens as Le
 import qualified Data.HashMap.Strict as HM
@@ -36,6 +38,7 @@ import qualified Types.Index as G
 import Types.Patch
 import Utils
 import SchemaQuery.Read
+import SchemaQuery.Store
 
 fromR
   :: T.Text
@@ -82,16 +85,16 @@ sourceTableM (WhereV i j) = sourceTableM i
   
 
 innerJoinR
-  :: DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
+  :: DatabaseM (View T.Text T.Text) (WherePredicateK T.Text) (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text) (WherePredicateK T.Text) (G.GiST (TBIndex Showable) (TBData Key Showable))
   -> [Rel T.Text]
   -> T.Text
-  -> DatabaseM (View T.Text T.Text) a (G.GiST (TBIndex Showable) (TBData Key Showable))
+  -> DatabaseM (View T.Text T.Text)  (WherePredicateK T.Text)  (G.GiST (TBIndex Showable) (TBData Key Showable))
 innerJoinR (P j k) (P l n) srel alias
   = P (JoinV j l InnerJoin srel alias)
     (proc i -> do
       kv <- k -< i
-      nv <- n -< i 
+      nv <- n -< maybe i (<> i) $ traceShowId $ fkPredicate srel (traceShow ("FKPredicate",alias,srel,G.keys kv,i)$ mapKey' keyValue <$> G.toList kv ) 
       Kleisli (\(emap,amap) -> do
         inf <- askInf
         let origin = sourceTable inf (JoinV j l InnerJoin srel alias)
@@ -100,13 +103,19 @@ innerJoinR (P j k) (P l n) srel alias
           rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
           aliask = lkKey origin alias
           tar = S.fromList $ _relOrigin <$> rel
-          joinFK :: TBData Key Showable ->  Maybe (Column Key Showable)
-          joinFK m  = IT aliask <$> (joinRel2 (tableMeta target) (fmap replaceRel $ taratt ) amap)
+          joinFK :: TBData Key Showable ->  Either String (Column Key Showable)
+          joinFK m  = maybe (Left ("Missing reference: " ++ show taratt)) Right $ IT aliask <$> joinRel2 (tableMeta target) (fmap replaceRel $ taratt ) amap
             where
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
           joined i = flip addAttr i <$> joinFK i
-        return (G.fromList' $ catMaybes $ (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap)) -< (kv,nv))
+          result = (\(i,j,k) -> (,j,k) <$> joined i)<$> G.getEntries emap
+        when (L.any isLeft result) . liftIO $do
+           putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel) ++ " - "++ T.unpack alias
+           print (L.length $ rights result)
+           print (G.keys amap)
+           print (lefts result)
+        return (G.fromList' $ rights result ) )-< (kv,nv))
 
 
 leftJoinR
@@ -225,3 +234,4 @@ projectV
 projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P (ProjectV i (foldl mult one k)) (Kleisli $  \_ -> (j mempty)  >>=  (\a -> traverse (evalEnv p . (,mempty) . Atom .  mapKey' keyValue) a))
 
 
+runMetaArrow inf fun = transactionNoLog (meta inf) $ dynPK (fun inf) ()

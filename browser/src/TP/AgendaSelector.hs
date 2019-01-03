@@ -83,7 +83,8 @@ eventWidgetMeta inf =  do
        ["fullcalendar-3.5.0/fullcalendar.min.css"
        ,"fullcalendar-scheduler-1.7.0/scheduler.min.css"
        ]
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (agendaDef inf) ()
+    fmap F.toList $ ui $ runMetaArrow inf agendaDef 
+
 
 data Tree f a 
   = Leaf { unLeaf :: a}
@@ -104,9 +105,10 @@ agendaDef inf
       (fixLeftJoinR
         (innerJoinR
           (fromR "tables" `whereR` schemaPred2)
-          (fromR "event") [Rel "schema" Equals "schema", Rel "oid" Equals "table"]  "event")
+          (fromR "event") [Rel "oid" Equals "table"]  "event")
         (fromR "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
-      (fromR "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+      (fromR "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") 
+      fields
    where
       indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
                             (RelAccess (Inline "col_type")
@@ -129,7 +131,7 @@ agendaDef inf
               ifield "table_name" (ivalue (readV PText))  -< ()
           efields <- iinline "event" 
             (ivalue $ irecord 
-              (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] 
+              (iforeign [Rel "table" Equals "table", Rel "column" Equals "oid"] 
                 (imap . ivalue $ irecord 
                   (ifield "column_name" 
                     (ivalue $ readV PText))))) -< ()

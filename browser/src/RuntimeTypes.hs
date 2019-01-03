@@ -190,7 +190,7 @@ type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KV k (),PageTokenF v
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k ()])
 
-instance (Show k ,Show v) => Patch (InformationSchemaKV  k v )  where
+instance (Show k ,Show v) => Patch (InformationSchemaKV  k v)  where
   type Index (InformationSchemaKV k v) = [TableModificationU k v]
 
 type RefTables = ( R.Tidings (IndexMetadata CoreKey Showable)
@@ -344,7 +344,7 @@ applyTableRep
   => TableRep k Showable
   -> RowPatch k Showable
   -> Either String (TableRep k Showable,RowPatch k Showable)
-applyTableRep rep (BatchPatch rows op) = fmap (head . compact.reverse ) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
+applyTableRep rep (BatchPatch rows op) = fmap (head . compact . reverse) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
 applyTableRep (TableRep (m,sidxs,l)) p = do
   ((m,g),u)<- applyGiSTChange (m,l) p
   return (applySecondary p u (TableRep (m,sidxs, g)), u)
