@@ -116,7 +116,7 @@ withDynamic  f i =  do
   mapM registerDynamic e
   return v
 
-transaction :: Show a=>InformationSchema -> TransactionM a -> Dynamic a
+transaction :: InformationSchema -> TransactionM a -> Dynamic a
 transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ transactionNoLog inf log
 
 

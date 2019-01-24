@@ -41,6 +41,7 @@ import RuntimeTypes
 import Safe
 import Schema
 import SchemaQuery
+import SchemaQuery.Arrow
 import Step.Common
 import TP.View
 import TP.Widgets
@@ -129,7 +130,7 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
     -- Table Description
     lookDescT =  flip (lookDesc inf) . primary <$> collectionTid translation
     -- Authorization
-    autho_pk t = idex (meta inf) "authorization" [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ usernameId inf)]
+    autho_pk t = idex (meta inf) "authorization" [("table",int $ tableUnique t),("grantee",int $ usernameId inf)]
     authorize =  (\autho t -> isJust $ G.lookup (autho_pk t) autho) .primary <$> collectionTid authorization
     -- Text Filter
     filterLabel = (\j d i -> T.isInfixOf (T.toLower (T.pack j)) (T.toLower  $ d i)) <$> triding filterInp <*> lookDescT

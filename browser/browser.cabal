@@ -57,7 +57,6 @@ library
     TP.MapSelector
     TP.Account
     TP.View
-    TP.Constraint
     TP.Extensions
     Text
   default-extensions: TupleSections,OverloadedStrings

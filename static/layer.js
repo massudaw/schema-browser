@@ -1,5 +1,5 @@
-// google.charts.load("current", {packages:["timeline"]});
-// google.charts.load("current", {packages:['corechart']});
+google.charts.load("current", {packages:["timeline"]});
+google.charts.load("current", {packages:['corechart']});
 
 
 function textAreaAdjust(o) {

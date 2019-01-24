@@ -19,6 +19,7 @@ module SchemaQuery.Read
   , tableLoaderAll
   , selectFromTable
   , fromTable
+  , fromTableS
   , fkPredicate
   , fkPredicateIx
   , refTables'
@@ -30,6 +31,7 @@ module SchemaQuery.Read
   ) where
 import Control.Arrow
 import Debug.Trace
+import Reactive.Threepenny.PStream
 import Control.Concurrent
 import SchemaQuery.Store
 import Serializer
@@ -310,17 +312,17 @@ fkPredicateIx rel set =  refs
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
--- fkPredicate i j | traceShow ("FKPredicate", i,j) False = undefined
 fkPredicate i set =  refs
   where 
     genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
     primPredicate o k  = do
       let a  = justError ("No Attr: " ++ show (k,o)) $ lkAttr k o
-      i <- unSOptional (_tbattr a)
-      return $ PrimColl (_relTarget k ,[(_relTarget k,Left (i,Flip $ _relOperator k))])
+      case a of 
+        Attr _ v -> (\i -> PrimColl (_relTarget k ,[(_relTarget k,Left (i,Flip $ _relOperator k))])) <$>  unSOptional v 
+        FKT i _ _ -> primPredicate i k 
+        i -> error ("not a attr " ++ show i)
     lkAttr k v 
       = kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
-
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 getFKS
@@ -362,11 +364,11 @@ tableLoader (Project table  (Union l)) page fixed  tbf = do
     return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
   liftIO . putStrLn $ "start loadTable " <> show (tableName table)
-  ((fixedChan,nchan),(nidx,rep)) <- tableLoader'  table page fixed tbf
+  (ref,(nidx,rep)) <- tableLoader'  table page fixed tbf
 
   inf <- askInf
-  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) tbf rep  nchan
-  idxTds <- lift $ convertChanStepper0 inf table nidx fixedChan
+  vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) tbf rep  (patchVar ref)
+  idxTds <- lift $ convertChanStepper0 inf table nidx (idxChan ref) 
   dbvar <- liftIO $ prerefTable inf table
   return (DBVar2 dbvar idxTds vpt)
 
@@ -375,8 +377,8 @@ tableLoader'
    -> Maybe Int
    -> WherePredicate
    -> TBData Key ()
-   -> TransactionM (TableChannels Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
-tableLoader' table  page fixed tbf = do
+   -> TransactionM (DBRef Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
+tableLoader' = do
   pageTable (\table page token size presort predicate tbf reso -> do
     inf <- askInf
     let
@@ -403,10 +405,10 @@ tableLoader' table  page fixed tbf = do
       else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
       putStrLn . T.unpack $ "Missing references: "  <> tableName table
-      putStrLn $ "Filters: "  <> show fixed
-      -- putStrLn $ "Fields: "  <> show tbf
+      putStrLn $ "Filters: "  <> show predicate
+      putStrLn $ "Fields: "  <> show tbf
       putStrLn $ "Errors: " <>  (unlines $ show <$> lefts result)
-    return (rights  result,x,o )) table page fixed tbf
+    return (rights  result,x,o )) 
 
 
 -- TODO: Could we derive completeness information from bounds
@@ -420,8 +422,6 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
     ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable fixed (tableMeta table)
     let
-      nchan = patchVar dbvar
-      fixedChan = idxChan dbvar
       pageidx =  (fromMaybe 0 page +1) * pagesize
       hasIndex = M.lookup fixed fixedmap
       readNew sq tbf  =  do
@@ -516,8 +516,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            else do
              liftIO $ putStrLn $ "Loading empty predicate:  " 
              readNew maxBound tbf
-    liftIO . print $ "pageTable size " <> show (tableName table) <>" : " <> show (G.size ndata)
-    return ((fixedChan,nchan) ,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
+    return (dbvar,(IndexMetadata (M.insert fixed nidx fixedmap),TableRep (tableMeta table,sidx2, ndata)))
 
 
 
@@ -765,11 +764,28 @@ printException e d = do
   putStrLn   "================================="
   putStrLn $ show (e :: SomeException)
 
-
-fromTable origin whr = do
+fromTableS origin whr = mdo
   inf <- askInf
-  (_,(n,rep )) <- tableLoaderAll (lookTable inf origin) Nothing (liftPredicateF lookupKeyName inf origin whr) Nothing
-  return (origin,inf,primary rep)
+  let table = lookTable inf origin
+  inipred <- currentValue (psvalue whr)
+  (ref,(_,rep)) <- tableLoaderAll table Nothing  (liftPredicateF lookupKeyName inf origin inipred) Nothing
+
+  (e,h) <- lift newEvent 
+  lift $ onChangeDyn (psvalue whr) (\pred -> do
+    ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
+    onEventIO ev (mapM h ))
+  t <- lift $ accumS rep e
+  return (t,ref)
+
+
+fromTable origin whr = mdo
+  inf <- askInf
+  let table = lookTable inf origin
+      pred = liftPredicateF lookupKeyName inf origin whr
+  (ref,(n,rep)) <- tableLoaderAll table Nothing  pred Nothing
+  ev <- lift $ convertChanEvent inf table (pred,rawPK table) (allFields inf table) (psvalue t) (patchVar ref)
+  t <- lift $ accumS rep  (head <$> ev)
+  return (t,ref)
 
 select table  = do
   inf <-askInf

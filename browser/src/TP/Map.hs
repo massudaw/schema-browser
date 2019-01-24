@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module TP.Map (mapWidget,mapWidgetMeta) where
+module TP.Map (mapDef,mapWidget,mapWidgetMeta) where
 
 
 import Step.Host

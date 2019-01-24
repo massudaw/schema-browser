@@ -1,11 +1,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE Arrows #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef) where
+module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef,agendaDefS,testAgendaDef) where
 
 import GHC.Stack
 import Environment
@@ -22,7 +23,7 @@ import Utils
 import Data.Functor.Identity
 import Types.Patch
 import Control.Arrow
-import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
+import Control.Lens ((^.), view,_1, mapped,_2, _3,_4,_5)
 import Data.Either
 import Data.Interval (Interval(..))
 import Data.Time.ISO8601
@@ -97,6 +98,29 @@ instance (Foldable f, Show a) => Show (Tree f a ) where
 explodeTree (Tree i f ) = concat $ zipWith (\(SText i) j -> RelAccess (Inline  i) <$> j ) (F.toList i) (fmap explodeTree (F.toList f))
 explodeTree (Leaf i ) = ((\(SText t) -> Inline t ) <$> F.toList i) 
 
+agendaDefS inf 
+  = projectS 
+    (innerJoinS
+      (fixLeftJoinS
+        (innerJoinS
+          (fromS "tables" `whereS` schemaPred)
+          (fromS "event") [Rel "oid" Equals "table"]  "event") 
+        (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
+      (fromS "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") 
+    (agendaDefProjection inf)
+  where schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+        indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
+                            (RelAccess (Inline "col_type")
+                                (RelAccess (Inline "composite")
+                                    (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
+
+
+testAgendaDef inf =runDynamic $  do
+   v <-  runMetaArrow inf agendaDefS
+   ! m <- currentValue (facts v)
+   ! b <- runMetaArrow inf agendaDef
+   liftIO $ print (view _1 <$> F.toList m)
+   liftIO $ print (view _1 <$> F.toList b)
 
 
 agendaDef inf
@@ -104,17 +128,19 @@ agendaDef inf
     (innerJoinR 
       (fixLeftJoinR
         (innerJoinR
-          (fromR "tables" `whereR` schemaPred2)
+          (fromR "tables" `whereR` schemaPred)
           (fromR "event") [Rel "oid" Equals "table"]  "event")
         (fromR "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
       (fromR "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") 
-      fields
+      (agendaDefProjection inf) 
    where
       indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
                             (RelAccess (Inline "col_type")
                                 (RelAccess (Inline "composite")
                                     (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
-      schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+      schemaPred =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+agendaDefProjection inf =  fields
+  where
       eitherDescription = isum [nestedDescription , directDescription] 
       directDescription = fmap (fmap Leaf) $ iinline "description" (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
       nestedDescription = fmap (join .fmap (\(i,j) -> Tree i <$> NonS.pruneSequence j)) . iinline "description" . iopt . ivalue $ irecord 
@@ -165,7 +191,7 @@ agendaDef inf
                 pred = WherePredicate . AndColl $ [timePred inf table (fieldKey . TB1 <$> efields ) time] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
-          returnA -< (txt $ T.pack $ scolor ,table,wherePred ,proj )
+          returnA -< (traceShow (tname,efields,desc,pks) $ txt $ T.pack $ scolor ,table,wherePred ,proj )
 
 
 calendarView

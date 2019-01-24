@@ -55,23 +55,20 @@ chartDef inf
             (leftJoinR
               (innerJoinR
                 (fromR "tables" `whereR` schemaPred)
-                (fromR "metrics" `whereR` schemaPred) schemaI "metric")
-              (fromR "geo" `whereR` schemaPred ) schemaI "geo")
-            (fromR "event" `whereR` schemaPred) schemaI "event")
-          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+                (fromR "metrics" ) schemaI "metric")
+              (fromR "geo" ) schemaI "geo")
+            (fromR "event" ) schemaI "event")
+          (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
+        (fromR "pks" ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
   where
-    schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-    schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
-    schemaI = [Rel "schema" Equals "schema", Rel "oid" Equals "table"]
-    schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+    schemaI = [Rel "oid" Equals "table"]
     fields =  irecord $ proc t -> do
       SText tname <-
           ifield "table_name" (ivalue (readV PText))  -< ()
       mfields <- iinline "metric" (ivalue $ irecord $ ifield "metrics" (imap $ ivalue $  readV PText)) -< ()
       gfields <- iinline "geo" (iopt $ ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
-      evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [Rel "schema" Equals "schema" , Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+      evfields <- iinline "event" (iopt $ ivalue $ irecord (iforeign [ Rel "table" Equals "table", Rel "column" Equals "oid"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
       pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       color <- iinline "metric" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()

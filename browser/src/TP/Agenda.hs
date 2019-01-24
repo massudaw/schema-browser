@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda (agendaDef,eventWidget,eventWidgetMeta) where
+module TP.Agenda (agendaDef,eventWidget,agendaDefS,eventWidgetMeta) where
 
 import GHC.Stack
 import Step.Host
@@ -53,8 +53,10 @@ import qualified Data.Set as S
 
 
 eventWidget (incrementT,resolutionT) sel inf cliZone = do
-    dashes <- eventWidgetMeta inf
+    dashes <-  fmap F.toList $ ui $ runMetaArrow inf agendaDef
+    -- dashes <- fmap F.toList $ currentValue (facts v)
     let
+      
       legendStyle lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
         in traverse (\k@(c,tname,_,_) -> do

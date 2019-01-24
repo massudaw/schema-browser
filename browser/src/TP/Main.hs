@@ -23,7 +23,6 @@ import Serializer
 import Control.Concurrent.STM
 import Data.Tuple
 import TP.Account
-import TP.Constraint
 import TP.Browser
 import TP.Agenda
 import TP.Chart
@@ -90,13 +89,13 @@ setup smvar bstate plugList w = void $ do
     metadataNav <- sequenceA $  M.fromList
                [("Map",fmap (^._2) <$>mapWidgetMeta inf)
                ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf)
-               ,("Plan",fmap (^._2) <$> taskWidgetMeta inf)
+               ,("Task",fmap (^._2) <$> taskWidgetMeta inf)
                ,("Account",fmap (^._2) <$> accountWidgetMeta inf)
                ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf )]
     let checkNav i =  maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav
     element menu # set UI.class_ "col-xs-1"
     element reset # set UI.class_ "col-xs-1"
-    nav  <- buttonDivSet  (filter checkNav ["Browser","Map","Account","Plan", "Agenda","Chart","Metadata"] ) (pure  Nothing) (\i ->
+    nav  <- buttonDivSet  (filter checkNav ["Browser","Map","Account","Task", "Agenda","Chart","Metadata"] ) (pure  Nothing) (\i ->
         UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" )
     element nav # set UI.class_ "col-xs-5 pull-right"
     chooserDiv <- UI.div
@@ -134,7 +133,7 @@ setup smvar bstate plugList w = void $ do
       ui $ accumDiffCounterIni (maybe 0 (length .table_selection)  iniCliTable) (\ix table->  trackTable (meta inf) (wId w) table six ix) (triding bset)
       tfilter <-  switchManyUI  (triding nav) (M.fromList
           [("Map",do
-            (m,widget) <-  configExtension inf agendaDef (mapWidget calendarT posSel (triding bset) inf)
+            (m,widget) <-  configExtension inf mapDef (mapWidget calendarT posSel (triding bset) inf)
             st <- once (fmap (flip elem . fmap (^._2)) m)
             return $ TrivialWidget  st widget),
           ("Agenda" ,do
@@ -151,7 +150,7 @@ setup smvar bstate plugList w = void $ do
             (m,widget) <-  configExtension inf accountDef (accountWidget calendarT (triding bset) inf)
             st <- once (fmap (flip elem . fmap (^._2)) m)
             return $ TrivialWidget st widget),
-          ("Plan" ,do
+          ("Task" ,do
             (m,widget) <-  configExtension inf taskDef (taskWidget calendarT (triding bset) inf)
             st <- once (fmap (flip elem . fmap (^._2)) m)
             return $ TrivialWidget st widget),
@@ -378,7 +377,7 @@ createVar = do
 
 
 withTable s m w =
-  withInf [] s (\inf -> runDynamic $ do
+  withInf  s (\inf -> runDynamic $ do
     now <- liftIO getCurrentTime
     let pred = (WherePredicate $ lookAccess inf m <$> w)
         table = lookTable inf m
@@ -395,7 +394,7 @@ withTable s m w =
 
 
 testPartialLoading s t = do
-  withInf [] s (\inf -> runDynamic $ do
+  withInf  s (\inf -> runDynamic $ do
     let desc = recPKDescIndex inf (tableMeta table)  all
         pk = recPK inf (tableMeta table)  all
         all = allRec' (tableMap inf) table
@@ -410,10 +409,10 @@ testPartialLoading s t = do
     transactionNoLog  inf $ selectFromProj t Nothing mempty pk
                )
 
-testCreate = withInf [] "metadata"
+testCreate = withInf  "metadata"
  (\inf -> liftIO $ createFresh "tables" inf "geo" (Primitive [KOptional] (RecordPrim ("metadata","geo"))))
 
-withInf plugs s v  = do
+withInf s v  = do
   args <- getArgs
   let db = argsToState args
   smvar <- createVar

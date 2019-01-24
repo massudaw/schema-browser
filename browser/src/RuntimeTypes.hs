@@ -214,6 +214,12 @@ instance (NFData k,  PatchConstr k Showable) => Patch (TableRep k Showable) wher
   type Index (TableRep k Showable) = RowPatch k Showable
   applyUndo = applyTableRep
 
+newtype PrimaryRep k v = PrimaryRep  {getPrimaryRep :: (KVMetadata k,G.GiST (TBIndex v) (TBData k v))}
+
+instance (NFData k,  PatchConstr k Showable) => Patch (PrimaryRep k Showable) where
+  type Index (PrimaryRep k Showable ) = RowPatch k Showable
+  applyUndo (PrimaryRep i) l = first PrimaryRep <$> applyGiSTChange i l
+
 instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
   type Index (IndexMetadata k v) =  [IndexMetadataPatch k v]
   applyUndo i =Right . (,[]). F.foldl' vapply i
@@ -252,7 +258,7 @@ applyGiSTChange ::
   -> Either String ((KVMetadata k,G.GiST (TBIndex a) (TBData k a)),RowPatch k (Index a))
 applyGiSTChange (m,l) (RowPatch (patom,DropRow))=
   maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
-    ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch . createRow' m <$> G.lookup (create <$> patom) l
+    ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch .  RowPatch . (create <$> patom ,) . CreateRow <$> G.lookup (create <$> patom) l
 applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
   first (m,) <$>case  flip G.lookup l =<< (G.notOptionalM i)  of
     Just v -> do
@@ -882,6 +888,7 @@ dropRow' m v = RowPatch (G.getIndex m v,DropRow )
 createUn :: (Show k ,Ord k) => KVMetadata k -> [Rel k] -> [TBData k Showable] -> G.GiST (TBIndex Showable) (TBData k Showable)
 createUn m un = G.fromList  (justError ("empty: " ++ show un) . transPred) . L.filter (isJust . transPred)
   where transPred = G.notOptionalM . G.getUnique un
+
 
 tablePredicate inf t p = (WherePredicate . AndColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
 tablePredicate' p = (WherePredicate . AndColl $ PrimColl .fixrel <$> p)

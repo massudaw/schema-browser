@@ -97,20 +97,20 @@ chooserTable six inf bset cliTid cli = do
     let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
     body <-
       if L.null (rawUnion table)
-         then
-          viewer table
-         else do
-           unions <- buttonDivSet
-              (rawUnion table)
-              (pure Nothing)
-              (\i ->UI.button
-                  # set UI.class_ "buttonSel btn"
-                  # set text (T.unpack $ tableName i))
-           els <- traverseUI (\t -> do
-             b <- viewer t
-             element b # set UI.class_ "col-xs-12") (triding unions)
-           body <- UI.div # sink root (facts els)
-           UI.div # set children [getElement unions, body]
+       then
+        viewer table
+       else do
+         unions <- buttonDivSet
+            (rawUnion table)
+            (pure Nothing)
+            (\i ->UI.button
+                # set UI.class_ "buttonSel btn"
+                # set text (T.unpack $ tableName i))
+         els <- traverseUI (\t -> do
+           b <- viewer t
+           element b # set UI.class_ "col-xs-12") (triding unions)
+         body <- UI.div # sink root (facts els)
+         UI.div # set children [getElement unions, body]
     UI.div
       # set children [header,body]
       # set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]))

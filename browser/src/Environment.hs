@@ -56,6 +56,8 @@ buildRel =  convert
       where
         tyi = _keyFunc $ mergeFKRef  (keyType . _relOrigin <$> relUnComp i)
     convert (Inline i) = fmap Just $ ifield (keyValue i) (iany (readV PText ))
+    convert (Rel i op v) =  convert i  
+    convert i = error $ "rel " ++ show i
     recFTB KArray = id 
     recFTB KOptional = fmap join . iopt
     recFTBs l = F.foldl' (flip (.)) (fmap Just . ivalue) (recFTB <$> l)
@@ -362,7 +364,13 @@ projectFields inf t s l = kvlistMerge . catMaybes $ pattr l <$> (F.toList =<< s 
               ki  = (lookKey inf (tableName t) i)
               nt = lookSTable inf nst 
 
+    pattr v (G.PathForeign i n ) 
+      = pfun (\n -> Le.over ifkttable (fmap (projectFields inf nt [n]))) n  <$> kvLookup (relComp $ liftRelation $ i) v
+        where 
+              nst = findRefTableKey t (liftRelation i )
+              nt = lookSTable inf nst 
     pattr i j = error (show j )
+    liftRelation  l = relUnComp $ liftASch (lookKeyNested $tableMap inf ) (schemaName inf ) (tableName t)  $ relComp (relNormalize l)
     pfun f (G.TipPath n ) = f n
     pfun f (G.NestedPath _ n ) = pfun f n
  
