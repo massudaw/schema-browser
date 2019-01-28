@@ -26,6 +26,7 @@ import Reactive.Threepenny.PStream
 import Control.Monad.IO.Class
 import qualified Control.Lens as Le
 import qualified Data.HashMap.Strict as HM
+import Text
 import qualified Data.List as L
 import Debug.Trace
 import qualified NonEmpty as Non
@@ -265,10 +266,16 @@ fixLeftJoinR (P j k) (P l n) srel index alias
           let predM = fkPredicateIx mergedRel (mapKey' keyValue <$> G.toList kv )
               mergedRel = cindex 
           case predM of 
-            Nothing -> return kv 
+            Nothing -> do
+              liftIO $ 
+                putStrLn $  "## Fix " <> show l <> renderRel cindex <> show ix <> " " <> show (G.keys kv) 
+              return kv 
             Just pred -> do  
               inf <- askInf 
+              liftIO $ putStrLn $  "## Fix " <> show l <> renderPredicateWhere pred
               out <- (runKleisli n) pred 
+              liftIO $ 
+                putStrLn $  "## Fix " <> show l <> renderRel cindex <> show ix <> " " <> show (G.keys out) 
               let joined = joinRelation inf join cindex out
               go (relAppend (maybe (Inline alias) (relAppend (Inline alias)) index ) cindex ) (ix+1) ((\i -> apply i (joined i)) <$> kv) 
 
@@ -281,8 +288,10 @@ joinRelation preinf join@(JoinV j l LeftJoin srel alias) index amap =  do
       joinFK m  = liftPatchAttr inf (tableName origin) $ justError ("cant index: "  ++ show  (srel , m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
         where
           replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) srel,v)
-          findRef i v = maybe Nothing Just $ patch . mapKey' keyValue <$> G.lookup (G.getUnique targetRel (kvlist v)) amap
+          findRef i v = maybe (traceShow (pk ,rawPK target , G.keys amap) Nothing) Just $ patch . mapKey' keyValue <$> G.lookup pk  amap
+
             where targetRel = (L.sortOn (\ i -> L.elemIndex (_relTarget i) targetPK )  i )
+                  pk = (G.getUnique targetRel (kvlist v))
 
           indexTarget rel' v = Just . PInline alias . POpt $  indexContainer (findRef rel ) (checkLength v rel <$> liftOrigin rel (unkvlist (tableNonRef v)))
             where rel = relUnComp  rel' 
@@ -309,17 +318,18 @@ indexRelation
   -> Rel k 
   -> TBData k a 
   -> Maybe (PathAttr k v) 
--- indexrelation i j k | traceShow j False = undefined
+-- indexRelation i j k | traceShow ("indexRelation",j) False = undefined
 indexRelation f (RelAccess (Inline key ) nt) r
  = do 
-   i <- refLookup (Inline key) r
+   let i = justError ("ref error" <> show key ) $ refLookup (Inline key) r
    PInline key . fmap pure <$> indexContainer (indexRelation f nt) i
 indexRelation f n@(RelAccess nk nt )  r
  = do
-    i <- relLookup nk r 
-    PFK (relUnComp nk) [] . fmap pure <$> indexContainer allRefs i
+   let i = justError ("rel error" <> show nk) $ relLookup nk r 
+   PFK (relUnComp nk) [] . fmap pure <$> indexContainer allRefs i
   where
     allRefs (TBRef (i,v))=  indexRelation f nt v
+-- indexRelation f n@(RelComposite l) = filter (S.null . relOutputSet )
 indexRelation f a  r
   =  f a r
 

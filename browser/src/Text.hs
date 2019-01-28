@@ -73,6 +73,10 @@ renderPatch (PInline k v ) = [(0,show k ++ " {")] ++ offset 1 (renderFTBPatch re
 renderPatch (PFun k j v ) = [(0,renderRel (RelFun (Inline k) (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch render v))]
 
 
+renderPredicateWhere (WherePredicate i) = renderPredicate i
+renderPredicate (AndColl l  ) = "(" <> L.intercalate " AND "  (renderPredicate <$> l ) <> ")"
+renderPredicate (OrColl l )= "(" <> L.intercalate " \n\tOR\n "  (renderPredicate <$> l ) <> ")"
+renderPredicate (PrimColl (_,l) )= L.intercalate " AND " $ fmap (\(i,j)-> renderRel i <> either (\(s,o) -> renderBinary o <> renderShowable s  ) renderUnary  j ) l  
 
 renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
 renderAttr (FKT k rel v )

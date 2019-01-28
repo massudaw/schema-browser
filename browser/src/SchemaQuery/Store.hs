@@ -81,7 +81,7 @@ readState fixed dbvar = do
   patches <- tryTakeMany chan
   let
     filterPred = filter (checkPatch  fixed)
-    fv = filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
+    fv = traceShow (G.keys v , fst fixed ) $ filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
     result= either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
   return (result,chan)
 
@@ -350,7 +350,7 @@ tableDiffs i = [tableDiff i]
 
 updateIndex :: (Ord k, Show k, Show v) => DBRef k v -> IO ()
 updateIndex (DBRef {..}) = do
-  putStrLn ("Update index: " ++ T.unpack (tableName dbRefTable ) )
+  -- putStrLn ("Update index: " ++ T.unpack (tableName dbRefTable ) )
   catchJust
     notException
     (do atomically

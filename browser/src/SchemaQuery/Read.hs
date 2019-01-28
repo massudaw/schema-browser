@@ -137,15 +137,20 @@ getFrom table allFields b = mdo
   inf <- askInf
   let
     m = tableMeta table
-    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup i   (tableNonRef b) )<$> _kvpk m
+    pred = WherePredicate . AndColl $ 
+        (\i -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ justError ("no attribute" <> show (i,_kvpk m,b))$ (kvLookup (simplifyRel i)   (tableNonRef b)) )<$> _kvpk m
     comp = recComplement inf m allFields pred b
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
-  r <- join <$> traverse (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
+  r <- maybe (do
+    liftIO . putStrLn $  "getFrom: row is complete " <> show (G.getIndex m b) 
+    return Nothing) (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     let n = recComplement inf m  allFields pred  =<< new
         new = G.lookup (G.getIndex m b) reso
         delta = diff b =<< new
-    (maybe (return delta )  (\comp -> do
+    (maybe (do
+      liftIO . putStrLn $ "getFrom: row is loaded from global storage"  <> show (pred,G.getIndex m b, new ,G.keys reso )
+      return delta )  (\comp -> do
       liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
       let newRow = apply (apply b (fromMaybe [] delta)) v
@@ -180,7 +185,6 @@ listenFrom table allFields b = mdo
     m = tableMeta table
     pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (i )  (tableNonRef b) )<$> _kvpk m
   (dbref,r) <- getFrom table allFields b
-  ref <- liftIO $ prerefTable inf table
   let result = fromMaybe b $ applyIfChange b =<< r
   e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure (apply (TableRep (m,M.empty,G.empty)) (createRow' m  result)))  (patchVar dbref)
   lift $ accumT (Just result) ((\e i -> either error fst . foldUndo i . fmap expandPatch  $  e  )  <$> e)
@@ -277,7 +281,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
       inj = S.difference refl old
       joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (traceShow (tableName table,attinj,inj) $ kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
         where
           replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           nonRef = tableNonRef m
@@ -297,18 +301,20 @@ mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
 
+-- fkPredicateIx rel l | traceShow ("fkPredicateIx" , renderRel rel,head l) False = undefined
 fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
     primPredicate o (RelAccess ref tar) 
-      =  case refLookup ref o  of
-        Just i -> join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
-        Nothing -> Nothing
-    primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes . fmap (primPredicate o ) $ l
+      =  join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
+      where i = justError ("no ref " <> show ref ) $ refLookup ref o  
+    primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes .  fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
-      i <- unSOptional ._tbattr  =<< lkAttr ori o
+      let attr = lkAttr ori o
+      i <- unSOptional ._tbattr $ attr 
       return $ PrimColl (tar,[(tar,Left (i,Flip op))])
-    lkAttr k v =  kvLookup (k) (tableNonRef v)
+    primPredicate _ i = error (show i)
+    lkAttr k v =  justError ("noAttr " <> show k )$ kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
@@ -354,23 +360,21 @@ tableLoader
     -> TBData Key ()
     -> TransactionM DBVar
 tableLoader (Project table  (Union l)) page fixed  tbf = do
-    liftIO . putStrLn $ "start loadTable " <> show (tableName table)
-    inf <- askInf
-    let
-      m = tableMeta table
-      dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _kvuniques m,G.empty )) (mapDBVar inf table <$>i )
-      dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (m, i,j) :: TableRep Key Showable) <$> j)
-    i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
-    return $ dbvar (dbvarMerge i)
+  liftIO . putStrLn $ "start loadTable " <> show (tableName table)
+  inf <- askInf
+  let
+    m = tableMeta table
+    dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _kvuniques m,G.empty )) (mapDBVar inf table <$>i )
+    dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (m, i,j) :: TableRep Key Showable) <$> j)
+  i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
+  return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
   liftIO . putStrLn $ "start loadTable " <> show (tableName table)
-  (ref,(nidx,rep)) <- tableLoader'  table page fixed tbf
-
+  (ref,(nidx,rep)) <- tableLoader' table page fixed tbf
   inf <- askInf
   vpt <- lift $ convertChanTidings0 inf table (fixed ,rawPK table) tbf rep  (patchVar ref)
   idxTds <- lift $ convertChanStepper0 inf table nidx (idxChan ref) 
-  dbvar <- liftIO $ prerefTable inf table
-  return (DBVar2 dbvar idxTds vpt)
+  return (DBVar2 ref idxTds vpt)
 
 tableLoader'
   :: Table
@@ -405,9 +409,12 @@ tableLoader' = do
       else return (either (error  "") Right <$> preresult)
     liftIO $ when (not $ null (lefts result)) $ do
       putStrLn . T.unpack $ "Missing references: "  <> tableName table
-      putStrLn $ "Filters: "  <> show predicate
-      putStrLn $ "Fields: "  <> show tbf
-      putStrLn $ "Errors: " <>  (unlines $ show <$> lefts result)
+      putStrLn $ "Filters: \n"  <> renderPredicateWhere predicate
+      putStrLn $ "Fields: \n"  <> show tbf
+      putStrLn $ "Errors: \n" <>  (unlines $ show . fmap (fmap renderRel) <$> lefts result)
+      putStrLn $ "PreResult: \n" <>  show preresult
+      putStrLn $ "Result: \n" <>  show res 
+    liftIO $ putStrLn $ "Size "  <> show (tableName table) <> " " <> show (L.length (rights result))
     return (rights  result,x,o )) 
 
 
@@ -432,7 +439,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
          (resOut,token ,s ) <- method table  pageStart (fmap (snd.snd) pagetoken) (Just pagesize) sortList fixed tbf reso
          let
              -- # postFilter fetched results
-             resK = if predNull fixed then resOut else G.filterRows fixed resOut
+             resK = if predNull fixed then resOut else resOut -- G.filterRows fixed resOut
              -- # removeAlready fetched results
              diffNew i
                 -- FIXME: When we have a partially loaded filter this code
@@ -447,24 +454,33 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
          -- Only trigger the channel with new entries
          fetchPatches (tableMeta table) [(fixed, estLength page pagesize s, pageidx, tbf,token)]  newRes
          let nidx = maybe (estLength page pagesize s,M.singleton pageidx (tbf,token) ) (\(s0,v) -> (estLength page pagesize  s, M.insert pageidx (tbf,token) v)) hasIndex
+             final = either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) ) newRes
          if L.null newRes
             then do
-              liftIO . putStrLn $ "No new fields";
-              return (nidx,(sidx,reso))
-            else return (nidx,either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) )newRes)
+              liftIO . putStrLn $ "No new fields " <> show (tableName table) <> show (G.keys (snd final)) <> show (G.getIndex m <$> resK )
+              return (nidx,final)
+            else do
+              liftIO . putStrLn $ "New fields " <> show (tableName table) <> " --------  "<> show (_kvpk m) <> " -----  "<> show (G.keys (snd final)) 
+              return (nidx,final)
     (nidx,(sidx2,ndata)) <- case hasIndex of
       Just (sq,idx) ->
         if (sq > G.size reso)
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
-              --liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+              liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
               readNew sq i
             Nothing -> do
-              -- liftIO . putStrLn $ "Empty complement: " <> show (tableName table)
-              return ((sq,idx), (sidx,reso))
+              if (sq  ==  G.size reso)
+                then do
+                  liftIO . putStrLn $ "Empty complement: " <> show (tableName table)  <> show (sq,G.keys reso) 
+                  return ((sq,idx), (sidx,reso))
+                else do
+                  -- BUG: DEBUG why this is happening
+                  liftIO . putStrLn $ "Load missing filter: " <> (ident . renderTable $ tbf)
+                  readNew sq tbf 
           Nothing -> do
-            -- liftIO . putStrLn $ "No page: " <> show (pageidx)
+            liftIO . putStrLn $ "No page: " <> show (pageidx)
             readNew sq tbf
         else  do
           let
@@ -489,7 +505,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                   liftIO . putStrLn $ "Current table is complete: " <> show (tableName table, sq,G.size reso)
                   return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
-        liftIO $ putStrLn $ "No index: " 
+        liftIO $ putStrLn $ "No index: "  <> T.unpack (tableName table)
         let m = rawPK table
             isComplete (WherePredicate i) = match i
               where
@@ -502,7 +518,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            then
             case L.null complements of
               True -> do
-                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table, G.size reso)
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table,  reso)
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
                 if L.length  complements  == 1

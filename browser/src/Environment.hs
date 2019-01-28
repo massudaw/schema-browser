@@ -223,7 +223,7 @@ ifield s (P (tidxi ,tidxo) (Kleisli op) )
           (withReaderT4 
             (\ v -> [PAttr s <$> v]) 
             (concat . fmap (catMaybes .fmap pvalue) ) 
-            (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $ indexField (IProd Nothing s) v))) . op ))
+            (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $ traceShow (s ,tableNonRef v, indexField (IProd Nothing s) (tableNonRef v)) $ indexField (IProd Nothing s) (tableNonRef v)))) . op ))
   where pvalue (PAttr k v) | k == s = Just v
         pvalue i = Nothing
         value (Attr k v) = v
@@ -262,11 +262,11 @@ itotal :: Functor m => PluginM (Union (AttributePath k p)) (Atom (TBData k s))  
        -> PluginM (Union (AttributePath k p))  (Atom (TBData k s))  m  i a
 itotal i = justError "no value " <$> i
 
-isum :: (Monad m ,Show s,Show (Index s))
+isum :: (Monad m ,Show a,Show s,Show (Index s))
   => [PluginM c (Atom s) m i (Maybe a)]
   -> PluginM c  (Atom s)  m  i (Maybe a)
 isum ls = P (concat $ fmap (fst .staticP) ls, concat $ fmap (snd.staticP) ls) 
-    (Kleisli (\i ->  F.foldl' (liftA2 (<|>)) (return Nothing) $ (($i) . runKleisli . dynP <$> ls)))
+    (Kleisli (\i ->  F.foldl' (liftA2 (<|>)) (return Nothing) $ ( ($i) . runKleisli . dynP <$> ls)))
 
 arow
   :: (Show (Index s)

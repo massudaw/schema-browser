@@ -162,6 +162,7 @@ agendaDefProjection inf =  fields
                   (ifield "column_name" 
                     (ivalue $ readV PText))))) -< ()
           desc <-  eitherDescription -< ()
+          dir <- directDescription -< ()
           pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
           color <- iinline "event" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
@@ -179,7 +180,7 @@ agendaDefProjection inf =  fields
               i <- convertRel inf tname field  -< ()
               fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ) . NonS.fromList. explodeTree <$> desc) ) -< ()
               pkfields <- mapA (\(SText i) -> (Inline (lookKey inf tname i), ) <$> convertRel inf tname i)  pks -<  ()
-              returnA -< HM.fromList $ fmap (fmap A.toJSON) $
+              returnA -< HM.fromList $ fmap (fmap A.toJSON) $ -- traceShow ("row agenda", desc ,pks,fields)$
                   [("id" :: Text, txt (writePK' tname pkfields (TB1 efield)))
                   ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> catMaybes (F.toList fields)))
                   ,("table",txt tname)
@@ -191,7 +192,7 @@ agendaDefProjection inf =  fields
                 pred = WherePredicate . AndColl $ [timePred inf table (fieldKey . TB1 <$> efields ) time] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
-          returnA -< (traceShow (tname,efields,desc,pks) $ txt $ T.pack $ scolor ,table,wherePred ,proj )
+          returnA -< ( txt $ T.pack $ scolor ,table,wherePred ,proj )
 
 
 calendarView
@@ -217,7 +218,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
     traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
-      traverse (\(_,t,pred ,proj)-> do
+      traverse (\(_,t,pred,proj)-> do
         let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
         reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
         let output  = reftb ^. _2

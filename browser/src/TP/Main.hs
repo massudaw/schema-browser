@@ -388,7 +388,7 @@ withTable s m w =
     liftIO $ mapM print (_rawIndexes table)
     let
       debug i =  ( (show  <$> M.toList (secondary i)))
-    -- liftIO $ putStrLn (unlines  $ debug i2)
+    liftIO $ putStrLn (unlines  $ fmap show $ (F.toList $ primary i2))
     return ()
                )
 

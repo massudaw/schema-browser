@@ -19,7 +19,9 @@ module Types.Common
   , ifkttable
   , mapFValue
   , mapFAttr
+  , simplifyRel
   , relComp
+  , relCompS
   , relNormalize 
   , relNull
   , relUnComp
@@ -192,6 +194,11 @@ sortRels
   :: (Show k,Ord k) =>
   [Rel k]  -> [Rel k]
 sortRels = fmap relComp . fst .topSortRels . fmap (S.fromList . relUnComp) -- fmap (originalRel) .P.sortBy (P.comparing id) . fmap relSort
+
+simplifyRel (RelAccess i l ) = simplifyRel l
+simplifyRel (RelComposite l ) = relComp $ fmap simplifyRel $ filter (not . S.null . relOutputSet ) l
+simplifyRel (Rel i _ j ) = i
+simplifyRel i = i 
 
 
 sortedFields
@@ -412,6 +419,12 @@ _relTarget i = error (show i)
 
 relNull (RelComposite []) = True
 relNull i = False
+
+relCompS :: Ord a => Foldable f => f (Rel a) -> Rel a
+relCompS  i 
+  | F.length i > 1 = RelComposite $ F.toList  i
+  | otherwise = fromMaybe (RelComposite []) $ safeHead (F.toList i )
+
 
 relComp :: Ord a => Foldable f => f (Rel a) -> Rel a
 relComp  i 

@@ -378,11 +378,15 @@ joinRel2 tb ref table = recurse ref
         = let
             arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
             arrayTB1 =  fmap (ArrayTB1 .  NonS.fromList ).nonEmpty
-         in join . fmap arrayTB1 . Tra.sequenceA   $ fmap (recurse . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) [0..(NonS.length (unArray $ snd arr)   - 1)])
+         in  join . fmap arrayTB1 . Tra.sequenceA   $ fmap (recurse . (:L.filter (not .isArray .snd) ref)) 
+              (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) 
+              [0..(NonS.length (unArray $ snd arr)   - 1)])
       | otherwise
         =  TB1 <$> G.lookup idx table
         where
-          idx = Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
+          debug = (_kvname tb ,renderRel .simplifyRel <$> _kvpk tb ,  _relTarget .fst <$> ref, (flip L.elemIndex (simplifyRel <$> _kvpk tb). _relTarget .fst ) <$> ref ,idx)
+          idx = Idex $ fmap snd $ L.sortBy (comparing (justError (show debug).flip  L.elemIndex (simplifyRel <$> _kvpk tb). _relTarget .fst )) ref
+
     isLeft (LeftTB1 i) = True
     isLeft i = False
     isArray (ArrayTB1 i) = True

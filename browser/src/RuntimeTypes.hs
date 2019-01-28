@@ -342,7 +342,7 @@ applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  
 applySecondary _ _ j = j
 
 traceSize i rep@(TableRep (m,n,l)) 
-  | _kvname m == "transactions" = trace (show (i,M.mapKeys (renderRel .relComp )$ fmap G.size n))  rep
+  | _kvname m == "transactions" = trace (show (i,M.mapKeys (renderRel .relCompS )$ fmap G.size n))  rep
   | otherwise = rep 
 
 applyTableRep
@@ -370,7 +370,7 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
 
 
 searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([Rel k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
-searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  splitIndexPK b pk
+searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  traceShowId (splitIndexPK b pk)
 
 
 type DBVar = DBVar2 Showable
@@ -662,7 +662,7 @@ findRelation inf s tname  l = do
       relToKey = S.map (fmap keyValue) . pathRelRel
   rel <- L.find (\i ->  output l ==  output (relToKey i)) (rawFKS tb)
   case unRecRel rel of
-    FKJoinTable l _ -> Just $ relComp l
+    FKJoinTable l _ -> Just $ relCompS l
     i -> Nothing
 
 liftASch
@@ -670,7 +670,7 @@ liftASch
      -> T.Text -> T.Text -> Rel T.Text -> Rel Key
 -- liftASch inf s tname l | traceShow (s,tname,l) False = undefined
 liftASch inf s tname (RelComposite l) =
-  fromMaybe (relComp $ liftASch inf s tname <$> l) $ 
+  fromMaybe (relCompS $ liftASch inf s tname <$> l) $ 
       findRelation inf s tname l
 liftASch inf s tname (RelAccess i c) = RelAccess (relComp $ pathRelRel rel) (liftASch inf sch st c)
   where

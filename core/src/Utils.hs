@@ -22,10 +22,10 @@ import qualified Data.Map as M
 debugTime t f = do
   un <- liftIO $ newUnique
   t0 <- liftIO $ getCurrentTime
-  liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un)
+ -- liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un)
   v <- f
   tf <- liftIO $ getCurrentTime
-  liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un) <> " - " <> show (diffUTCTime tf t0)
+  -- liftIO $ putStrLn $ "## (" <> t  <>") " <> show (hashUnique un) <> " - " <> show (diffUTCTime tf t0)
   return v
 
 

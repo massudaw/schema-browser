@@ -324,7 +324,7 @@ patchEditor i
 splitMatch (b, pk) p =
   L.any (\i -> G.match
     (mapPredicate
-       (\i -> Inline . justError ("no index" ++ show (i, pk)) $ L.elemIndex i pk)
+       (\i -> Inline . justError ("no index" ++ show (i, pk)) $ L.elemIndex i pk <|> L.elemIndex (simplifyRel i ) (simplifyRel <$> pk))
        b)
     (Right i)) (index p)
 

@@ -964,7 +964,7 @@ newKey table =
 lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
 
 splitIndexPK ::
-     Eq k
+     Ord k
   => BoolCollection (Rel k, [(Rel k, AccessOp Showable)])
   -> [Rel k]
   -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
@@ -972,8 +972,8 @@ splitIndexPK (OrColl l) pk =
   fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
-splitIndexPK (PrimColl (p@(Inline i), op)) pk =
-  if elem p pk
+splitIndexPK (PrimColl (p, op)) pk =
+  if elem p pk || elem (simplifyRel p ) (simplifyRel <$> pk)
     then Just (PrimColl (p, op))
     else Nothing
 -- splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --error (show (l,op,pk))

@@ -675,7 +675,7 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
 
 
 loadItems
-  :: Traversable t =>
+  :: (Show (t (KV Key Showable)) , Traversable t) =>
      InformationSchema
      -> Table
      -> TBData CoreKey ()
@@ -685,8 +685,8 @@ loadItems inf table tbf preoldItems
   = joinT =<< mapTidingsDyn
     (fmap sequenceA . traverse
       (\i -> do
-        fmap (fromMaybe i )<$>  (transactionNoLog inf . getItem $ i)
-        ))
+        fmap (justError ("failed getFrom " <> show (tableName table,i))) <$>  (transactionNoLog inf . getItem $ traceShow (tableName table,i) i)
+        ) )
     preoldItems
   where
     getItem v = listenFrom table tbf v
