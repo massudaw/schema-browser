@@ -75,14 +75,14 @@ data JoinType
 
 data View i k
   = FromV i
-  | JoinV (View i k ) (View i k) JoinType [Rel k] k
+  | JoinV (View i k ) (View i k) JoinType [Rel k] 
   | WhereV (View i k) [(Rel k,AccessOp Showable)]
   | ProjectV (View i k) (Union (AttributePath k MutationTy))
   deriving(Eq,Show,Ord)
 
 
 tablesV (FromV i) = [(i,[])]
-tablesV (JoinV i j  _ _ _ ) = tablesV i <> tablesV j
+tablesV (JoinV i j  _ _  ) = tablesV i <> tablesV j
 tablesV (WhereV i r ) = fmap (\(i,j)-> (i,j++ r)) $ tablesV i
 tablesV (ProjectV i _ ) = tablesV i
 
@@ -223,7 +223,7 @@ ifield s (P (tidxi ,tidxo) (Kleisli op) )
           (withReaderT4 
             (\ v -> [PAttr s <$> v]) 
             (concat . fmap (catMaybes .fmap pvalue) ) 
-            (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $ traceShow (s ,tableNonRef v, indexField (IProd Nothing s) (tableNonRef v)) $ indexField (IProd Nothing s) (tableNonRef v)))) . op ))
+            (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $  indexField (IProd Nothing s) (tableNonRef v)))) . op ))
   where pvalue (PAttr k v) | k == s = Just v
         pvalue i = Nothing
         value (Attr k v) = v
@@ -250,7 +250,7 @@ iforeign ::
   -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
 iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) 
-  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested(Non.fromList s) (Many [])) $ i )). op ))
+  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested (Non.fromList s) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 

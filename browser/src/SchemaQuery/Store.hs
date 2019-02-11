@@ -8,6 +8,7 @@ module SchemaQuery.Store
   -- Read current state
   , readIndex
   , readState
+  , joinPatch
   , cloneDBVar
   -- Get table pointer 
   , prerefTable
@@ -76,14 +77,14 @@ readState
       -> DBRef k Showable
       -> STM (TableRep k Showable , TChan [TableModificationU k Showable])
 readState fixed dbvar = do
-  TableRep (m,s,v) <-readTVar (collectionState dbvar)
+  rep <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- tryTakeMany chan
   let
-    filterPred = filter (checkPatch  fixed)
-    fv = traceShow (G.keys v , fst fixed ) $ filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
-    result= either (error "no apply readState") fst $ foldUndo (TableRep (m,s,fv)) (filterPred  $ fmap tableDiff $ concat patches)
-  return (result,chan)
+    TableRep (m,s,v) = either (error "no apply readState") fst $ foldUndo rep filterPred
+    filterPred = {-filter (checkPatch  fixed) -} (fmap tableDiff $ concat patches)
+    fv =  filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
+  return (TableRep (m,s,fv),chan)
 
 cloneDBVar
   :: (NFData k ,Show k,Ord k)
@@ -151,9 +152,23 @@ childrenRefsUnique  source inf pre (FKInlineTable rel target) = concat $ childre
     fks = rawFKS targetTable
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     targetTable = lookTable rinf $ snd target
-childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),(\evs (TableRep (m,sidxs,base)) ->
+childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),joinPatch rel targetTable pre )]
+  where
+    rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
+    targetTable = lookTable rinf $ snd target
+
+joinPatch
+  :: (Functor t, Foldable t) =>
+     [Rel Key]
+     -> TableK Key
+     -> (Rel Key -> Rel Key)
+     -> t (RowPatch Key Showable)
+     -> TableRep Key Showable
+     -> [RowPatch Key Showable]
+joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
    let
     sidx = M.lookup rel sidxs
+    pkTable = rawPK targetTable
     search idxM (BatchPatch ls op) = concat $ (\i -> search idxM (RowPatch (i ,op)) ) <$> ls
     search idxM (RowPatch p@(Idex v,PatchRow pattr))
       = case idxM of
@@ -161,17 +176,18 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
           Nothing -> concat $ convertPatch <$> resScan base
       where
         pkIndex t = justError "no ref" $ do
-            idx <- t `L.elemIndex` pkTable
+            idx <- simplifyRel t `L.elemIndex` (simplifyRel <$> pkTable)
             field <- atMay v idx
             unSOptional (create <$> field)
         outputs = filter (isJust . _relOutputs ) rel
-        inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         predK = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
         predScanOut = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
-        predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (pre o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
+          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
+        -- TODO: Is the logic for inputs only necessary  for functions?
+        -- inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
+        -- predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
+          -- WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
@@ -179,11 +195,7 @@ childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTa
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
         
     result = search sidx <$>  evs
-   in  concat $ result))]
-  where
-    rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
-    targetTable = lookTable rinf $ snd target
-    pkTable = rawPK targetTable
+   in  concat result
 
 joinPathFTB :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
 joinPathFTB i p =  go i

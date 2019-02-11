@@ -53,11 +53,11 @@ import qualified Data.Set as S
 
 
 eventWidget (incrementT,resolutionT) sel inf cliZone = do
-    dashes <-  fmap F.toList $ ui $ runMetaArrow inf agendaDef
-    -- dashes <- fmap F.toList $ currentValue (facts v)
+    v <-  fmap F.toList <$> ui ( runMetaArrow inf agendaDefS)
+    dashes <- currentValue (facts v)
     let
       
-      legendStyle lookDesc table b =
+      legendStyle dashes lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
         in traverse (\k@(c,tname,_,_) -> do
           element  b # set UI.class_"col-xs-1"
@@ -81,6 +81,6 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
         calendar <- UI.div # sink UI.children (facts $ fmap fst out )
         return [getElement agenda,calendar,selector]
 
-    return  (legendStyle , dashes ,chooser )
+    return  (legendStyle <$> v,  v ,chooser )
 
 

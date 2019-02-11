@@ -124,7 +124,7 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
       where
         field =  lookAttr' "usage" <$> G.lookup pk orderMap
         pk = ordPK pkset
-    ordPK pkset = idex (meta inf) "ordering" [("table",int $ tableUnique pkset),("schema",int $ schemaId inf)]
+    ordPK pkset = idex (meta inf) "ordering" [("table",int $ tableUnique pkset)]
   filterInp <- filterString
   let
     -- Table Description

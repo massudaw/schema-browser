@@ -80,16 +80,15 @@ mapDef inf
           (leftJoinR
             (innerJoinR
               (fromR "tables" `whereR` schemaPred)
-              (fromR "geo") schemaI "geo")
-            (fromR "event") schemaI "event")
-          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+              (fromR "geo") (schemaI "geo"))
+            (fromR "event") (schemaI "event"))
+          (fromR "table_description" `whereR` schemaNamePred ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] )
+        (fromR "pks" `whereR` schemaNamePred2 ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  ) fields
   where
     schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
     schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
-    schemaI = [Rel "oid" Equals "table"]
-    schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+    schemaI t = [Rel "oid" Equals (NInline t "table")]
     fields =  irecord $ proc t -> do
       SText tname <-
           ifield "table_name" (ivalue (readV PText))  -< ()

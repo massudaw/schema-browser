@@ -329,7 +329,7 @@ splitMatch (b, pk) p =
     (Right i)) (index p)
 
 checkPatch fixed@(WherePredicate b, pk) d =
-  case (notPK, isPK) of
+  case traceShowId (notPK, isPK) of
     (Just i, Just l) -> indexFilterR pk i d && splitMatch (l, pk) d
     (Just i, Nothing) -> indexFilterR pk i d
     (Nothing, Just l) -> splitMatch (l, pk) d

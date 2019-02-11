@@ -373,7 +373,8 @@ tableOrder inf table orderMap =  maybe (int 0) _tbattr row
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (fst c) f) )) . G.lookup (idex inf (fst c) l) $ snd c
 
-idex inf t v = Idex $ fmap snd $ L.sortOn (((`L.elemIndex` (rawPK $ lookTable inf t)). Inline .fst)) $ first (lookKey inf t) <$> v
+idex inf t v = Idex $ fmap snd $ L.sortOn (justError ("missing index: " ++ (show (v,pk ))) . (`L.elemIndex` pk ). Inline .fst) $ first (lookKey inf t) <$> v
+  where pk = simplifyRel <$> (rawPK $ lookTable inf t)
 
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))

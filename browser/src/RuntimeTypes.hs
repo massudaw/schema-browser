@@ -320,7 +320,7 @@ applySecondary (RowPatch (patom,DropRow )) (RowPatch (_,CreateRow v)) (TableRep 
   = TableRep (m,M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = G.delete (fmap create $ G.getUnique  un v) G.indexParam sidx
-applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) = traceSize ix $ TableRep (m, out ,l)
+applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) =  TableRep (m, out ,l)
   where
     out = M.mapWithKey didxs sidxs
     didxs un sidx =  alterAttrs el 
@@ -330,7 +330,7 @@ applySecondary (RowPatch (ix,CreateRow elp)) _  (TableRep (m,sidxs,l)) = traceSi
           | isJust (G.notOptionalM (G.getUnique un el)) = G.alterWith (M.insertWith  mappend ix [ref].fromMaybe M.empty) u idx
           | otherwise = idx
     el = fmap create elp
-applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  traceSize ix $ TableRep (m, M.mapWithKey didxs sidxs,l)
+applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  (TableRep (m,sidxs,l)) =  TableRep (m, M.mapWithKey didxs sidxs,l)
   where
     didxs un sidx = F.foldl' reducer sidx . traverseGetIndex . getIndexWithTrace (relComp un) $ el
       where 
@@ -341,9 +341,6 @@ applySecondary n@(RowPatch (ix,PatchRow elp)) d@(RowPatch (ixn,PatchRow elpn))  
     eln = apply el elpn
 applySecondary _ _ j = j
 
-traceSize i rep@(TableRep (m,n,l)) 
-  | _kvname m == "transactions" = trace (show (i,M.mapKeys (renderRel .relCompS )$ fmap G.size n))  rep
-  | otherwise = rep 
 
 applyTableRep
   ::  (NFData k,  PatchConstr k Showable)
@@ -364,13 +361,13 @@ queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[Rel k]) -> TableRep k
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK  $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g)  <$> mergeSIdxs
-        notPK = WherePredicate <$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
+        notPK =  WherePredicate <$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
         mergeSIdxs = L.foldl1' S.intersection <$> nonEmpty (catMaybes $ fmap (S.unions . fmap (M.keysSet.leafValue)). searchPK b <$> M.toList s)
 
 
 searchPK ::  (Show k,Ord k) => WherePredicateK k -> ([Rel k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
-searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  traceShowId (splitIndexPK b pk)
+searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate p) g) <$>  (splitIndexPK b pk)
 
 
 type DBVar = DBVar2 Showable
@@ -624,24 +621,26 @@ liftPatchRow inf t (k,PatchRow i) = (k,PatchRow $ liftPatch inf t i)
 liftPatchRow inf t (ix,CreateRow i) = (ix,CreateRow $ liftTable' inf t i)
 liftPatchRow inf t (ix,DropRow ) = (ix,DropRow   )
 
-liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
+liftPatch :: (Show a , a ~ Index a )=> InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
 liftPatch inf t  p =  fmap (liftPatchAttr inf t) p
 
 
-liftPatchAttr :: a ~ Index a => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
+liftPatchAttr :: (Show a ,a ~ Index a) => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
 liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
 liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (liftPatch inf tname2 <$>  e)
   where
-    FKInlineTable _ (_,tname2) = justError"cannot lift patch" $ unRecRel <$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
+    FKInlineTable _ (_,tname2) = justError ("cannot lift patch: "  ++ show (tname,p )) $ unRecRel <$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
     ta = lookTable inf tname
 liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
   where
-    FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show ("liftPatchAttr",rel2 ,rawFKS ta)) $ L.find (\r->  S.map (keyValue ._relOrigin ) (pathRelRel r) == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+    FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show ("liftPatchAttr",rel2 ,tname,rawFKS ta)) $ L.find (\r->  S.map (keyValue ._relOrigin ) (pathRelRel r) == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
     ta = lookTable inf tname
     rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
-liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel inf tname) . fmap (fmap (first (fmap ((fst m ) inf tname))))<$> i
+liftPredicateF m inf tname (WherePredicate i) = WherePredicate $ first (liftRel inf tname) . fmap (fmap (first (fixInline . fmap ((fst m ) inf tname))))<$> i
+  where fixInline (NInline _ i )= Inline i 
+        fixInline i = i
   
 liftASchRel 
   :: (Text -> Text -> Maybe Table) 
@@ -651,9 +650,9 @@ liftASchRel
   -> Text 
   -> Rel Text  
   -> Rel Key
-liftASchRel inf s tname st ttarget (Rel l e t) = Rel (lookKey s tname <$> l) e (lookKey st ttarget <$> t)
+liftASchRel inf s tname st ttarget r@(Rel l e t) = Rel (lookKey s tname <$> l) e (lookKey st ttarget <$> t)
   where
-    lookKey s tname c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$> (inf s tname))
+    lookKey s tname c = justError ("no attr: " ++ show (c,tname,s,r,tname,ttarget)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$> (inf s tname))
 liftASchRel  _ i j k l m = error (show (i,j,k,l,m))
 
 findRelation inf s tname  l = do  
@@ -668,7 +667,7 @@ findRelation inf s tname  l = do
 liftASch
   :: (T.Text -> T.Text -> Maybe Table)
      -> T.Text -> T.Text -> Rel T.Text -> Rel Key
--- liftASch inf s tname l | traceShow (s,tname,l) False = undefined
+liftASch inf s tname l | traceShow (s,tname,l) False = undefined
 liftASch inf s tname (RelComposite l) =
   fromMaybe (relCompS $ liftASch inf s tname <$> l) $ 
       findRelation inf s tname l
@@ -684,7 +683,7 @@ liftASch inf s tname l =  fromMaybe (lookKey <$> l ) rel
   where
     rel = findRelation inf s tname [l]
     tb = inf s tname
-    lookKey c = justError ("no attr: " ++ show (c,tname,s)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
+    lookKey c = justError ("no attr: " ++ show (c,tname,s,l,rel)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
 lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 

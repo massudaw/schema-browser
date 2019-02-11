@@ -400,6 +400,9 @@ instance NFData BinaryOperator
 
 data Rel k
   = Inline { _relOri :: k }
+  | NInline 
+          { _relTable :: String 
+          , _relOri :: k }
   | Output { _relAccess :: Rel k }
   | Rel { _relAccess :: Rel k
         , _relOperator :: BinaryOperator
@@ -466,6 +469,7 @@ _relOutputs (Rel i Equals _) =  _relOutputs i
 _relOutputs (Rel i (Flip Equals) _) = _relOutputs i
 _relOutputs (Rel _ _ _) = Nothing
 _relOutputs (Inline i) = Just [i]
+_relOutputs (NInline _ i) = Just [i]
 _relOutputs (Output i) = _relOutputs i
 _relOutputs (RelAccess i _) = Nothing -- Just [i]
 _relOutputs (RelFun i _ _) = _relOutputs i
@@ -731,8 +735,18 @@ recoverFK ori rel i
     rel
     (fmap (snd .unTBRef ) i)
 
-instance IsString i => IsString (Rel i ) where
-  fromString i = Inline (fromString i)
+instance IsString (Rel Text) where
+  fromString i = 
+    case T.break (=='.') (T.pack i) of
+      (i,l) | T.null l ->  Inline i
+      (t,v) -> NInline  (T.unpack t) (fromString $ T.unpack $ T.tail v)
+
+
+instance IsString (Rel String ) where
+  fromString i = 
+    case L.break (=='.') i of
+      (i,[]) ->  Inline i
+      (t,_:v) -> NInline  t v
 
 
 restrictTable :: Ord k => (TB k a  -> [TB k a]) -> KV k a -> KV k a
@@ -906,8 +920,11 @@ indexerRel field =
   where
     vec = T.splitOn "," <$> T.splitOn ":" field
 
+onTable = NInline 
+
 renderRel :: Show k => Rel k -> String
 renderRel (Inline k) = show k
+renderRel (NInline t k) = show t <> "." <> show k
 renderRel (Output k) = renderRel k ++ "="
 renderRel (RelFun k expr rel) = renderRel k ++ " = " ++ renderFun expr rel
   where

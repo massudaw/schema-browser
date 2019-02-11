@@ -1,6 +1,6 @@
 {-# LANGUAGE
     OverloadedStrings
-   , BangPatterns
+   ,BangPatterns
    ,ScopedTypeVariables
    ,TypeFamilies
    ,FlexibleContexts
@@ -685,7 +685,7 @@ loadItems inf table tbf preoldItems
   = joinT =<< mapTidingsDyn
     (fmap sequenceA . traverse
       (\i -> do
-        fmap (justError ("failed getFrom " <> show (tableName table,i))) <$>  (transactionNoLog inf . getItem $ traceShow (tableName table,i) i)
+        fmap (justError ("failed getFrom " <> show (tableName table,i))) <$>  (transactionNoLog inf . getItem $ i)
         ) )
     preoldItems
   where
@@ -919,7 +919,7 @@ processPanelTable lbox inf reftb@(_,trep,_) inscrudp table oldItemsi = do
     m = tableMeta table
     authPred =  [(keyRef "grantee",Left ( int $ usernameId inf ,Equals)),(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   auth <- ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing authPred)
-  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ usernameId inf)])). primary   <$> collectionTid auth
+  let authorize =  ((fmap unArray . unSOptional . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("table",int $ tableUnique table),("grantee",int $ usernameId inf)])). primary   <$> collectionTid auth
 
   let gist = primary <$>  trep
   (diffInsert,insertB) <- insertCommand lbox inf table inscrudp inscrud authorize gist

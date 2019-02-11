@@ -97,9 +97,9 @@ chooserTable six inf bset cliTid cli = do
     let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
     body <-
       if L.null (rawUnion table)
-       then
+      then
         viewer table
-       else do
+      else do
          unions <- buttonDivSet
             (rawUnion table)
             (pure Nothing)

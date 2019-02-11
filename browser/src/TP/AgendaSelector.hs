@@ -104,9 +104,9 @@ agendaDefS inf
       (fixLeftJoinS
         (innerJoinS
           (fromS "tables" `whereS` schemaPred)
-          (fromS "event") [Rel "oid" Equals "table"]  "event") 
-        (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
-      (fromS "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") 
+          (fromS "event") [Rel "oid" Equals "table" ] ) 
+        (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) )
+      (fromS "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  ) 
     (agendaDefProjection inf)
   where schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals) )]
         indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
@@ -129,33 +129,42 @@ agendaDef inf
       (fixLeftJoinR
         (innerJoinR
           (fromR "tables" `whereR` schemaPred)
-          (fromR "event") [Rel "oid" Equals "table"]  "event")
-        (fromR "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) "description")
-      (fromR "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") 
+          (fromR "event") eventjoin )
+        (fromR "table_description") descjoin   (Just indexDescription ) )
+      (fromR "pks") pkjoin ) 
       (agendaDefProjection inf) 
    where
+      pkjoin = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
+      eventjoin = [Rel "oid" Equals "table"]
+      descjoin= [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+      compdescjoin = [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
       indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
                             (RelAccess (Inline "col_type")
                                 (RelAccess (Inline "composite")
-                                    (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
+                                    (RelComposite compdescjoin )))  
       schemaPred =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+
 agendaDefProjection inf =  fields
   where
-      eitherDescription = isum [nestedDescription , directDescription] 
-      directDescription = fmap (fmap Leaf) $ iinline "description" (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
-      nestedDescription = fmap (join .fmap (\(i,j) -> Tree i <$> NonS.pruneSequence j)) . iinline "description" . iopt . ivalue $ irecord 
+      pkjoin = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
+      eventjoin = [Rel "oid" Equals "table"]
+      descjoin= [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+      compdescjoin = [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
+      eitherDescription = isum [nestedDescription, directDescription] 
+      directDescription = fmap (fmap Leaf) $ iforeign descjoin (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
+      nestedDescription = fmap (join .fmap (\(i,j) -> Tree i <$> NonS.pruneSequence j)) . iforeign descjoin  . iopt . ivalue $ irecord 
               (liftA2 (,) 
                 (ifield "description" (imap . ivalue $  readV PText))
                 (iforeign (relUnComp $ fmap keyValue $ liftRel (meta inf ) "table_description" $ relComp $ [Rel "description" Equals "column_name"] )
                 (imap . ivalue . irecord $ (iinline "col_type" 
                   (ivalue . irecord . iinline "composite" . fmap join . iopt . ivalue $ irecord 
-                    (iforeign [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
+                    (iforeign compdescjoin 
                        . ivalue . irecord $ eitherDescription 
                         ))))))
       fields =  irecord $ proc t -> do
           SText tname <-
               ifield "table_name" (ivalue (readV PText))  -< ()
-          efields <- iinline "event" 
+          efields <- iforeign eventjoin 
             (ivalue $ irecord 
               (iforeign [Rel "table" Equals "table", Rel "column" Equals "oid"] 
                 (imap . ivalue $ irecord 
@@ -163,8 +172,8 @@ agendaDefProjection inf =  fields
                     (ivalue $ readV PText))))) -< ()
           desc <-  eitherDescription -< ()
           dir <- directDescription -< ()
-          pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-          color <- iinline "event" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
+          pks <- iforeign pkjoin (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          color <- iforeign eventjoin (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
             table = lookTable inf tname
             toLocalTime = fmap to

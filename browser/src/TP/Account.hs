@@ -67,25 +67,26 @@ accountDef inf
           (innerJoinR
             (innerJoinR
               (fromR "tables" `whereR` schemaPred)
-              (fromR "accounts" ) schemaI "account")
-            (fromR "event" ) schemaI "event")
-          (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") (irecord fields)
+              (fromR "accounts" ) (schemaI "account"))
+            (fromR "event" ) (schemaI "event"))
+          (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] )
+        (fromR "pks" )  pkrel ) (irecord fields)
 
   where
+      pkrel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
+      descrel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] 
       schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
       schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
       schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
-      schemaI = [ Rel "oid" Equals "table"]
-      schemaN = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+      schemaI t = [Rel "oid" Equals (NInline t "table")]
       fields =  proc t -> do
         SText tname <-
             ifield "table_name" (ivalue (readV PText))  -< ()
-        afields <- iinline "account" (ivalue $ irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
-        desc <- iinline "description" (iopt . ivalue $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pks <- iinline "pks" (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        efields <- iinline "event" (ivalue $ irecord (iforeign [ Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        color <- iinline "account" (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
+        afields <- iforeign (schemaI "account")(ivalue $ irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
+        desc <- iforeign descrel (iopt . ivalue $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+        pks <- iforeign pkrel (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        efields <- iforeign (schemaI "event") (ivalue $ irecord (iforeign [ Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        color <- iforeign (schemaI "account") (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
         let
           toLocalTime = fmap to
             where

@@ -341,7 +341,7 @@ tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fma
   where
     projectRel k = justError (show k) $ M.lookup k (flipTable  rel )
     flipTable = M.fromList . fmap swap .M.toList
-    tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
+    tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` (simplifyRel <$> pk2)). simplifyRel.fst)))
 
 {-searchGist ::
   (Functor t,  Ord a1,Ord (G.Tangent a1),G.Predicates a1,Show a ,Show a1,Ord k,  Show k,

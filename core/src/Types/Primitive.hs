@@ -961,7 +961,7 @@ newKey' mode tun max name ty =
 newKey table =
   newKey' [FRead,FWrite] (tableUnique table)  (maximum (keyPosition <$> rawAttrs table))
 
-lkKey table key = justError "no key" $ L.find ((key==).keyValue) (rawAttrs table)
+lkKey table key = justError ("no key: " <> show (tableName table) <> " - "<> show key) $ L.find ((key==).keyValue) (rawAttrs table)
 
 splitIndexPK ::
      Ord k
@@ -980,7 +980,7 @@ splitIndexPK (PrimColl (p, op)) pk =
 splitIndexPK i pk = Nothing -- error (show (i,pk))
 
 splitIndexPKB ::
-     Eq k
+     Ord k
   => BoolCollection (Rel k, [(Rel k, AccessOp Showable)])
   -> [Rel k]
   -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
@@ -988,8 +988,8 @@ splitIndexPKB (OrColl l) pk =
   fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (AndColl l) pk =
   fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
-splitIndexPKB (PrimColl (p@(Inline i), op)) pk =
-  if notElem p pk
+splitIndexPKB (PrimColl (p, op)) pk =
+  if notElem p pk && notElem (simplifyRel p ) (simplifyRel <$> pk)
     then Just (PrimColl (p, op))
     else Nothing
 splitIndexPKB i pk = Just i

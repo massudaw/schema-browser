@@ -26,7 +26,7 @@ import TP.Account
 import TP.Browser
 import TP.Agenda
 import TP.Chart
-import Control.Lens (_1,_2,(^.))
+import Control.Lens (view,_1,_2,(^.))
 import TP.Map
 import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
@@ -138,9 +138,9 @@ setup smvar bstate plugList w = void $ do
             return $ TrivialWidget  st widget),
           ("Agenda" ,do
             cliZone <- jsTimeZone
-            (m,widget) <-  configExtension inf agendaDef (eventWidget calendarT (triding bset) inf cliZone)
-            st <- once (fmap (flip elem . fmap (^._2)) m)
-            return $ TrivialWidget st widget),
+            ((l,t),widget) <-  configExtension inf agendaDef (eventWidget calendarT (triding bset) inf cliZone)
+            let st = (flip elem . fmap (^._2)) <$>  t
+            return $ TrivialWidget (liftA2 (,) l st) widget),
           ("Chart" ,do
             cliZone <- jsTimeZone
             (m,widget) <-  configExtension inf chartDef (chartWidget calendarT posSel (triding bset) inf cliZone)
@@ -439,6 +439,12 @@ postgresUser = unsafePerformIO $ do
     rnd <- randomIO
     now <-getCurrentTime
     return $ AuthCookie (User 10 "postgres")  rnd now
+
+testMain = withInf "personal" (\inf->  do
+  o <- fmap (fmap (view _1) . F.toList . view _1) ( runDynamic $ runMetaArrow inf agendaDef)
+  -- i <- fmap (fmap (view _1) . F.toList . view _1) ( runDynamic $ runMetaArrow inf )
+  print  o-- ,i,zipWith (==) i o )
+                              )
 
 testCalls = testWidget (do
   setCallBufferMode BufferAll

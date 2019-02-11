@@ -52,25 +52,27 @@ taskDef inf
           (innerJoinR
             (innerJoinR
               (fromR "tables" `whereR` schemaPred)
-              (fromR "planner" ) schemaI "task")
-            (fromR "event" ) schemaI "event")
-          (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] "description")
-        (fromR "pks" ) [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  "pks") fields
+              (fromR "planner" ) (schemaI "planner"))
+            (fromR "event" ) (schemaI "event"))
+          (fromR "table_description" ) descRel  )
+        (fromR "pks" ) pkRel  ) fields
 
   where
       schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-      schemaI = [Rel "oid" Equals "table"]
+      schemaI t = [Rel "oid" Equals (NInline t "table")]
+      pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
+      descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
       fields =  irecord $ proc t -> do
         SText tname <-
             ifield "table_name" (ivalue (readV PText))  -< ()
-        desc <- iinline "description" (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pks <- iinline "pks" (ivalue $ irecord 
+        desc <- iforeign descRel (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
+        pks <- iforeign pkRel (ivalue $ irecord 
           (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        efields <- iinline "event" (ivalue $ irecord 
+        efields <- iforeign (schemaI "event") (ivalue $ irecord 
             (iforeign [Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        (color,child) <- iinline "task"  (
+        (color,child) <- iforeign (schemaI "planner")  (
            (,)<$> ivalue ( irecord (ifield "color" (ivalue $  readV PText)))
               <*> columnName "task") -< ()
         let

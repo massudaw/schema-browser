@@ -257,7 +257,6 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go l
-      -- go (PrimColl (IProd _ i,op)) | traceShow ("Right",(i,op,(`atMay` i) v),maybe True (match op .Right) $ (`atMay` i) v) False =  undefined
       go (PrimColl (ix@(Inline i),op)) = match (justError ("cant find " ++ show i) $ M.lookup ix $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
   match (WherePredicate a)  (Left (TBIndexNode v)) = F.all id $ fst $ go a ([],[] `cinterval`  [])
     where
@@ -419,6 +418,8 @@ indexPred (n@(RelAccess k nt ) ,eq) r
     recPred (LeftTB1 i) = maybe False recPred i
     recPred (ArrayTB1 i) = any recPred i
     recPred i = error (show ("RecPred",i))
+indexPred ((Rel key _ _ ),eqs) r = indexPred (key ,eqs) r
+indexPred (RelComposite l , eqs) r = L.all (\i -> indexPred  (i,eqs) r) l 
 indexPred (a@(Inline key),eqs) r =
   case attrLookup a (tableNonRef r) of
     Just rv ->
@@ -426,13 +427,10 @@ indexPred (a@(Inline key),eqs) r =
     Nothing -> False
   where
     eq = getOp a eqs
-indexPred ((Rel key _ _ ),eqs) r = indexPred (key ,eqs) r
-indexPred (RelComposite l , eqs) r = L.all (\i -> indexPred  (i,eqs) r) l 
-
 indexPred i v= error (show (i,v))
 
 
-getOp  key eqs = maybe (error " no op") snd $  L.find ((==key).fst) eqs
+getOp  key eqs = maybe (error (" no op" ++ show (key,eqs)) ) snd $  L.find ((==key).fst) eqs
 
 queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[Rel k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck (WherePredicate b ,pk)
@@ -446,8 +444,9 @@ queryCheck (WherePredicate b ,pk)
    isPK = fmap WherePredicate $ splitIndexPK b pk
 
 projectIndex :: (Show k,Ord k) => [Rel k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
-projectIndex pk l = G.queryL ( mapPredicate (Inline . justError ("no predicate: " ++ (show (pk,l))) . pkIndexM (simplifyRel <$> pk)) (simplifyPred l))
+projectIndex pk l g =  G.queryL pred g
   where simplifyPred (WherePredicate l ) = WherePredicate $ fmap (first simplifyRel) l
+        pred = mapPredicate (Inline . justError ("no predicate: " ++ (show (pk,l))) . pkIndexM (simplifyRel <$> pk) .simplifyRel ) (simplifyPred l)
 
 filterIndex l =  L.filter (flip checkPred l . leafValue)
 filterRows l =  L.filter (flip checkPred l )

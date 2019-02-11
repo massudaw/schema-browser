@@ -281,7 +281,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
       inj = S.difference refl old
       joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (traceShow (tableName table,attinj,inj) $ kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
         where
           replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           nonRef = tableNonRef m
@@ -301,31 +301,32 @@ mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
 
--- fkPredicateIx rel l | traceShow ("fkPredicateIx" , renderRel rel,head l) False = undefined
+fkPredicateIx rel l | traceShow ("fkPredicateIx" , renderRel rel,head l) False = undefined
 fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
     primPredicate o (RelAccess ref tar) 
       =  join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
-      where i = justError ("no ref " <> show ref ) $ refLookup ref o  
+      where i = justError ("no ref: " <> show (ref ,o,rel)) $ refLookup ref o  
     primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes .  fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
       let attr = lkAttr ori o
       i <- unSOptional ._tbattr $ attr 
       return $ PrimColl (tar,[(tar,Left (i,Flip op))])
     primPredicate _ i = error (show i)
-    lkAttr k v =  justError ("noAttr " <> show k )$ kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
+    lkAttr k v =  justError ("noAttr " <> show (k,v,rel) )$ kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
+fkPredicateIx rel l | traceShow ("fkPredicate" , renderRel rel,head l) False = undefined
 fkPredicate i set =  refs
   where 
     genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
     primPredicate o k  = do
-      let a  = justError ("No Attr: " ++ show (k,o)) $ lkAttr k o
+      let a  = justError ("No Attr: " ++ show (k,o,i)) $ lkAttr k o
       case a of 
         Attr _ v -> (\i -> PrimColl (_relTarget k ,[(_relTarget k,Left (i,Flip $ _relOperator k))])) <$>  unSOptional v 
-        FKT i _ _ -> primPredicate i k 
+        FKT i l _ -> primPredicate (mappend i (kvlist $ catMaybes $ flip kvLookup o . _relAccess<$> l))  k 
         i -> error ("not a attr " ++ show i)
     lkAttr k v 
       = kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
@@ -784,13 +785,16 @@ fromTableS origin whr = mdo
   inf <- askInf
   let table = lookTable inf origin
   inipred <- currentValue (psvalue whr)
+  liftIO . putStrLn $ "Load fromTableS:  " <> show origin
   (ref,(_,rep)) <- tableLoaderAll table Nothing  (liftPredicateF lookupKeyName inf origin inipred) Nothing
-
   (e,h) <- lift newEvent 
+  ev <- lift $ convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
+  lift $ onEventIO ev (mapM (h.trace "first onEvent fromS " ) )
   lift $ onChangeDyn (psvalue whr) (\pred -> do
+    liftIO . putStrLn $ "Listen fromTableS:  " <> show origin
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
-    onEventIO ev (mapM h ))
-  t <- lift $ accumS rep e
+    onEventIO ev (mapM (h.trace "onChange onEvent fromS " ) ))
+  t <- lift $ accumS rep (trace "fromTableS event" <$> e)
   return (t,ref)
 
 
@@ -798,6 +802,7 @@ fromTable origin whr = mdo
   inf <- askInf
   let table = lookTable inf origin
       pred = liftPredicateF lookupKeyName inf origin whr
+  liftIO $ putStrLn (show (whr,pred))
   (ref,(n,rep)) <- tableLoaderAll table Nothing  pred Nothing
   ev <- lift $ convertChanEvent inf table (pred,rawPK table) (allFields inf table) (psvalue t) (patchVar ref)
   t <- lift $ accumS rep  (head <$> ev)
