@@ -224,6 +224,11 @@ codegen l =
   case runRWS l [] ((0,M.empty),(0,M.empty)) of
     (q,s,_) -> (q,s)
 
+extendTable :: [Rel Key ] -> TBData Key () -> TBData Key () 
+extendTable rel  f = kvlist (flip Attr (TB1 ()) <$> F.toList (S.difference n p) ) <> f 
+  where p = S.unions $ relOutputSet . keyattr <$> unkvlist f
+        n = S.unions $ relOutputSet <$> rel
+
 selectQuery
   :: InformationSchema
   -> KVMetadata Key
@@ -235,8 +240,9 @@ selectQuery
 selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
     where
       tableQuery = do
-        tname <- expandBaseTable m t
-        tquery <- expandQuery' inf m JDNormal t
+        let extended = extendTable (fst <$> order ) t
+        tname <- expandBaseTable m extended  
+        tquery <- expandQuery' inf m JDNormal extended
         rec <- projectTree inf m t
         order <- orderBy
         (predquery,predvalue) <- customPredicate

@@ -301,7 +301,7 @@ mapLeft f (Left i ) = Left (f i)
 mapLeft f (Right i ) = (Right i)
 
 
-fkPredicateIx rel l | traceShow ("fkPredicateIx" , renderRel rel,head l) False = undefined
+-- fkPredicateIx rel l | traceShow ("fkPredicateIx" , renderRel rel,head l) False = undefined
 fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 

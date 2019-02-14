@@ -171,7 +171,7 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
     pkTable = rawPK targetTable
     search idxM (BatchPatch ls op) = concat $ (\i -> search idxM (RowPatch (i ,op)) ) <$> ls
     search idxM (RowPatch p@(Idex v,PatchRow pattr))
-      = case idxM of
+      = case traceShowId idxM of
           Just idx -> concat $ convertPatch <$> resIndex idx
           Nothing -> concat $ convertPatch <$> resScan base
       where
@@ -191,7 +191,7 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
         resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
-          catMaybes $  (\i->  (G.getIndex m i,) <$> G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
+          catMaybes $  (\i->  (G.getIndex m i,) <$> traceShow (G.checkPredId i predScanOut,kvLookup (relComp rel) i , predScanOut) ( G.checkPredId i predScanOut))  <$> {-G.filterRows predScanIn -}(G.toList idx)
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
         
     result = search sidx <$>  evs

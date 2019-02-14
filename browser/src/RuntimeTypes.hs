@@ -235,12 +235,12 @@ instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v)
             Nothing -> Just $ BatchedAsyncTableModification k (l <> [d])
       assoc a@(AsyncTableModification o d ) b@(AsyncTableModification o2 d2 )
           = if L.length new  == 1
-            then Just (head new)
+            then safeHead new
             else Just (BatchedAsyncTableModification  o [a,b])
         where new = AsyncTableModification o <$> compact [d ,d2]
       assoc (FetchData o d ) (FetchData o2 d2)
           = if L.length new  == 1
-            then Just (head new)
+            then safeHead new
             else Nothing
         where new = FetchData o <$> compact [d ,d2]
       assoc (AsyncTableModification o d ) j  = Nothing
@@ -347,7 +347,7 @@ applyTableRep
   => TableRep k Showable
   -> RowPatch k Showable
   -> Either String (TableRep k Showable,RowPatch k Showable)
-applyTableRep rep (BatchPatch rows op) = fmap (head . compact . reverse) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
+applyTableRep rep (BatchPatch rows op) = fmap (justError "empty undo list" . safeHead . compact . reverse) <$> F.foldl' (\i j -> (\(v,l) -> fmap (fmap (:l)) $  applyTableRep v j) =<< i ) (Right (rep,[]))  (RowPatch . (,op)  <$>rows)
 applyTableRep (TableRep (m,sidxs,l)) p = do
   ((m,g),u)<- applyGiSTChange (m,l) p
   return (applySecondary p u (TableRep (m,sidxs, g)), u)
