@@ -496,7 +496,7 @@ tableConstraints (m ,gist) preoldItems ftb = constraints
                       -> Tidings (Maybe (G.GiST (TBIndex Showable) a))
                       -> ([Rel Key], Tidings (C.Predicate [TB Key Showable]))
     constraintPred un gist =  (un,  
-          (C.Predicate . maybe (const False) (flip (checkGist un . kvlist)))<$> 
+          (C.Predicate . maybe (const False) (flip (checkGist un .  kvlist)))<$> 
             ((\i -> fmap (deleteCurrentUn  un i)) <$> preoldItems <*> gist))
     primaryConstraint = constraintPred (_kvpk m) (Just . primary <$> gist)
     secondaryConstraints un = constraintPred  un  (M.lookup un . secondary <$>  gist)

@@ -297,7 +297,7 @@ getIndexWithTrace un row = maybeToList $ do
     isRel (Rel _ _ _ ) = True
     isRel _ = False
     lookupRel l@(RelComposite v ) 
-      | L.all isRel v = [(PathForeign v (TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex . fmap _tbattr . unkvlist . justError ("No rel " ++ show (l,row)) $ _tbref  <$> kvLookup l row )]
+      | L.all isRel v = [(PathForeign v (TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex . fmap _tbattr . unkvlist . justError ("No rel comp " ++ show (l,kvkeys row)) $ _tbref  <$> kvLookup (relComp v) row )]
       | otherwise = concat $ lookupRel <$>  v
     lookupRel r@(Rel (Inline i) j k) = [(PathForeign [r] (TipPath (Many $ pure (PathAttr i (TipPath ())))), Idex . fmap _tbattr . unkvlist .justError ("No rel " ++ show (r,row)) $  _tbref <$> kvLookup r row)]
     lookupRel (RelAccess i j ) = fmap (first (PathInline (_relOrigin i)))   $ ftbToPathIndex $  getIndexWithTrace j <$> justError ("cant find: " ++ show (i,row)) (refLookup  i row)
@@ -657,7 +657,7 @@ liftASchRel  _ i j k l m = error (show (i,j,k,l,m))
 
 findRelation inf s tname  l = do  
   tb <- inf s tname
-  let output l = relOutputSet (relComp l)
+  let output l = relOutputSet (relCompS l)
       relToKey = S.map (fmap keyValue) . pathRelRel
   rel <- L.find (\i ->  output l ==  output (relToKey i)) (rawFKS tb)
   case unRecRel rel of
@@ -667,7 +667,7 @@ findRelation inf s tname  l = do
 liftASch
   :: (T.Text -> T.Text -> Maybe Table)
      -> T.Text -> T.Text -> Rel T.Text -> Rel Key
-liftASch inf s tname l | traceShow (s,tname,l) False = undefined
+-- liftASch inf s tname l | traceShow (s,tname,l) False = undefined
 liftASch inf s tname (RelComposite l) =
   fromMaybe (relCompS $ liftASch inf s tname <$> l) $ 
       findRelation inf s tname l

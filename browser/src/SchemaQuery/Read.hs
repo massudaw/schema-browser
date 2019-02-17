@@ -251,9 +251,7 @@ getFKRef inf predtop (me,old) v f@(FunctionField a b c) tbf
     return (me >=> evalFun ,old <> S.singleton a )
   | otherwise = return (me,old)
 getFKRef  inf predtop (me,old) v f@(PluginField (ix,FPlugins s t  c)) tbf =  do
-  -- liftIO . putStrLn $ show (s,t)
   let
-    -- Only evaluate pure plugins
     evalPlugin (PurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v)  (diff v =<<  (liftTable' inf t <$> (dynPure a $ mapKey' keyValue v)))) else Right v
     evalPlugin (DiffPurePlugin a) v = if isJust (checkPredFull inf t (fst $ staticP a) v) then Right (maybe v (apply v) (liftPatch inf t <$> (dynPure a $ mapKey' keyValue v))) else Right v
     evalPlugin (StatefullPlugin j) v = F.foldl' (\i j -> evalPlugin j =<< i) (Right v) (snd <$> j)
@@ -318,7 +316,7 @@ fkPredicateIx rel set =  refs
     refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
-fkPredicateIx rel l | traceShow ("fkPredicate" , renderRel rel,head l) False = undefined
+-- fkPredicateIx rel l | traceShow ("fkPredicate" , renderRel rel,head l) False = undefined
 fkPredicate i set =  refs
   where 
     genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
@@ -469,19 +467,20 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
-              liftIO . putStrLn $ "Load complement: " <> (ident . renderTable $ i)
+              liftIO . putStrLn $ "Load complement from existing page " <> show pageidx <> ": " <> (ident . renderTable $ i)
               readNew sq i
             Nothing -> do
-              if (sq  ==  G.size reso)
+              -- Check if interval is inside the current interval in case is not complete
+              if (sq  ==  G.size reso || G.size reso >= pageidx )
                 then do
-                  liftIO . putStrLn $ "Empty complement: " <> show (tableName table)  <> show (sq,G.keys reso) 
+                  liftIO . putStrLn $ "Empty complement: " <> show (tableName table,G.size reso, pageidx,sq) 
                   return ((sq,idx), (sidx,reso))
                 else do
                   -- BUG: DEBUG why this is happening
-                  liftIO . putStrLn $ "Load missing filter: " <> (ident . renderTable $ tbf)
+                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (sq, G.size reso,pageidx) <> (ident . renderTable $ tbf)
                   readNew sq tbf 
           Nothing -> do
-            liftIO . putStrLn $ "No page: " <> show (pageidx)
+            liftIO . putStrLn $ "New page requested: " <> show pageidx
             readNew sq tbf
         else  do
           let
@@ -628,7 +627,7 @@ restrictRow v = kvNonEmpty . mapKVMaybe (\i -> flip restrictAttr i =<< (kvLookup
 restrictOp :: TBData Key () -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
 restrictOp tbf v = case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
-    PatchRow j -> {-traceNothing (j,tbf) $-} PatchRow <$> restrictPatch tbf j
+    PatchRow j -> PatchRow <$> restrictPatch tbf j
     i-> Just i  
 
 restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
@@ -789,12 +788,12 @@ fromTableS origin whr = mdo
   (ref,(_,rep)) <- tableLoaderAll table Nothing  (liftPredicateF lookupKeyName inf origin inipred) Nothing
   (e,h) <- lift newEvent 
   ev <- lift $ convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
-  lift $ onEventIO ev (mapM (h.trace "first onEvent fromS " ) )
+  lift $ onEventIO ev (mapM h)
   lift $ onChangeDyn (psvalue whr) (\pred -> do
     liftIO . putStrLn $ "Listen fromTableS:  " <> show origin
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
-    onEventIO ev (mapM (h.trace "onChange onEvent fromS " ) ))
-  t <- lift $ accumS rep (trace "fromTableS event" <$> e)
+    onEventIO ev (mapM h))
+  t <- lift $ accumS rep e
   return (t,ref)
 
 

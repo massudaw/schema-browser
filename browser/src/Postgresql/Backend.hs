@@ -299,7 +299,7 @@ selectAll meta m offset i  j k st = do
   let
       unIndex (Idex i) = i
       unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
-  (l,i) <- liftIO$ paginate inf meta (filterReadable m) k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
+  (l,i) <- liftIO $ paginate inf meta (filterReadable m) k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
   return (i,(TableRef $ G.getBounds meta i) ,l)
 
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )

@@ -101,7 +101,7 @@ uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
 getUnique :: (NFData a , Show k ,Ord k) => [Rel k] -> TBData k a -> TBIndex  a
-getUnique ks = Idex . fmap snd . L.sortBy (comparing ((pkIndexM  ks).fst)) .  getUn  (Set.fromList ks) 
+getUnique ks = Idex . fmap snd . L.sortBy (comparing ((pkIndexM  ks).simplifyRel . fst)) .  getUn  (Set.fromList ks) 
 
 getUniqueM :: (NFData a , Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
@@ -394,10 +394,10 @@ indexFTB f a  r
 
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(Rel k ,(AccessOp a))]) -> TBData k a-> Maybe (AttributePath k ()) 
 indexPredIx  (r,eqs) v
-  =  traceShow (r,eqs) $indexFTB (indexInline eqs) r v
+  =  indexFTB (indexInline eqs) r v
 
 indexInline :: forall a k .(Show k ,ShowableConstr a , Show a,Ord k) => [(Rel k ,(AccessOp a))] -> Rel k -> TBData k a -> Maybe (AttributePath k ())
-indexInline i j k | traceShow (i,j) False = undefined
+-- indexInline i j k | traceShow (i,j) False = undefined
   {-indexInline eqs key 
   | L.any isRel rels = 
     where rels = relUnComp key-}
@@ -463,7 +463,7 @@ queryCheck (WherePredicate b ,pk)
 projectIndex :: (Show k,Ord k) => [Rel k ] -> WherePredicateK k -> G.GiST (TBIndex Showable) a ->  [(a, Node (TBIndex Showable), TBIndex Showable)]
 projectIndex pk l g =  G.queryL pred g
   where simplifyPred (WherePredicate l ) = WherePredicate $ fmap (first simplifyRel) l
-        pred = mapPredicate (Inline . justError ("no predicate: " ++ (show (pk,l))) . pkIndexM (simplifyRel <$> pk) .simplifyRel ) (simplifyPred l)
+        pred = mapPredicate (Inline . justError ("no predicate: " ++ (show (pk,l))) . pkIndexM pk .simplifyRel ) (simplifyPred l)
 
 filterIndex l =  L.filter (flip checkPred l . leafValue)
 filterRows l =  L.filter (flip checkPred l )

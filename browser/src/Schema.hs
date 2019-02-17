@@ -232,7 +232,7 @@ keyTablesInit schemaRef  (schema,user) authMap = do
               inlineFK = (\k -> (FKInlineTable k . inlineName ) $ keyType k ) <$>  filter (isInline .keyType ) attr
               attr = fromMaybe [] $ M.lookup c allKeys
               constraints = liftRelation schema c <$> (fmap (fmap (Inline. keyValue) )$ fromMaybe [] $ M.lookup c uniqueConstrMap )
-              liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) s c $ relCompS (relNormalize l)
+              liftRelation s c l = relUnComp $ liftASch (lookKeyNested tableMapPre) s c  $ relCompS (relNormalize l)
               indexes = maybe [] (fmap liftIndex) $  M.lookup c indexMap
                 where 
                   attrMap = M.fromList $ (\i -> (keyPosition i,i)) <$> attr

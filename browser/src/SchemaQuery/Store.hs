@@ -171,7 +171,7 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
     pkTable = rawPK targetTable
     search idxM (BatchPatch ls op) = concat $ (\i -> search idxM (RowPatch (i ,op)) ) <$> ls
     search idxM (RowPatch p@(Idex v,PatchRow pattr))
-      = case traceShowId idxM of
+      = case idxM of
           Just idx -> concat $ convertPatch <$> resIndex idx
           Nothing -> concat $ convertPatch <$> resScan base
       where
