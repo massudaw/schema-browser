@@ -188,10 +188,10 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
         -- inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         -- predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
           -- WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
-        resIndex idx = -- traceShow ("resIndex",G.projectIndex (_relOrigin <$> rel) predKey idx ,predKey ,G.keys idx,G.toList idx) $
+        resIndex idx = -- traceShow ("resIndex",predK , rel) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predK idx
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
-          catMaybes $  (\i->  (G.getIndex m i,) <$> traceShow (G.checkPredId i predScanOut,kvLookup (relComp rel) i , predScanOut) ( G.checkPredId i predScanOut))  <$> {-G.filterRows predScanIn -}(G.toList idx)
+          catMaybes $  (\i->  (G.getIndex m i,) <$>  ( G.checkPredId i predScanOut))  <$> {-G.filterRows predScanIn -}(G.toList idx)
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
         
     result = search sidx <$>  evs
@@ -343,6 +343,7 @@ updateReference ::
   -> IO ()
 updateReference j var (DBRef {..}) = do
   let label = "Update Reference: " ++ T.unpack (tableName dbRefTable )
+  putStrLn label
   catchJust
     notException
     (atomically
@@ -362,7 +363,7 @@ tableDiffs i = [tableDiff i]
 
 updateIndex :: (Ord k, Show k, Show v) => DBRef k v -> IO ()
 updateIndex (DBRef {..}) = do
-  -- putStrLn ("Update index: " ++ T.unpack (tableName dbRefTable ) )
+  putStrLn ("Update Index: " ++ T.unpack (tableName dbRefTable ) )
   catchJust
     notException
     (do atomically

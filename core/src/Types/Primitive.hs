@@ -147,18 +147,25 @@ data FPlugAction
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-instance Eq FPlugins where
 
-instance Show FPlugins where
+staticP (P i _ ) = i
+pluginStatic' (IOPlugin  a) = staticP a
+pluginStatic' (DiffIOPlugin a) = staticP a
+pluginStatic' (DiffPurePlugin a) = staticP a
+pluginStatic' (PurePlugin  a) = staticP a
+pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
 
-instance Ord FPlugins where
 
+pluginStatic = pluginStatic' . _plugAction
 
 instance Eq FPlugAction  where
+  i == j = pluginStatic' i == pluginStatic' j 
 
 instance Show FPlugAction where
+  show i = show (pluginStatic' i)
 
 instance Ord FPlugAction  where
+  compare i j = compare (pluginStatic' i ) (pluginStatic' j )
 
 type ArrowReader  = ArrowReaderM IO
 
@@ -181,7 +188,7 @@ data FPlugins =
       { _pluginName  :: Text
       , _pluginTable :: Text
       , _plugAction :: FPlugAction
-      }
+      }deriving(Eq,Ord,Show)
 
 
 instance KeyString Key where
@@ -531,6 +538,8 @@ rawFKS  = tableProp  _rawFKSL  <> tableProp __inlineFKS
 
 rawPK = tableProp _rawPKL
 
+tableUniqueConstraints = tableProp uniqueConstraint
+
 rawDescription  = tableProp _rawDescriptionL
 
 rawName  = tableProp _rawNameL
@@ -543,8 +552,8 @@ tableUnique  = tableProp tableUniqueR
 
 tableName = rawName
 
+tableProp f i@(Raw _ _ _ _ _ _ _ _ _ _  _ _  _ _  _ _) = f i
 tableProp f (Project i _ ) = f i
-tableProp f i = f i
 
 inlineFKS = tableProp __inlineFKS
 

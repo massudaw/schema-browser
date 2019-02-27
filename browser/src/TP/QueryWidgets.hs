@@ -1269,6 +1269,8 @@ oneInput fm i tdi = do
       onCE <- UI.onChangeE inputUI
       let pke = unionWith const  (decode <$> onCE) (Right <$> rumors tdi)
           decode v = maybe (if v == "" then Right Nothing else Left v) (Right . Just) .  readPrim i $ v
+
+
       pkt <- ui $ stepperT (Right v) pke
       element inputUI # sink UI.style ((\i -> [("border", either (const "solid red 1.5px") (const "") i)]) <$> facts pkt)
       cpkt <- ui $ calmDiff (either (const Nothing) id <$> pkt)

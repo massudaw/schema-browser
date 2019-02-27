@@ -379,13 +379,10 @@ createVar = do
 withTable s m w =
   withInf  s (\inf -> runDynamic $ do
     now <- liftIO getCurrentTime
-    let pred = (WherePredicate $ lookAccess inf m <$> w)
+    let pred = WherePredicate $ lookAccess inf m <$> w
         table = lookTable inf m
-    lift $ mapM print (rawFKS table)
     db <- transactionNoLog  inf $ selectFrom m Nothing pred
     i2 <- currentValue (facts $ collectionTid db)
-    liftIO $ mapM print (_rawIndexes table)
-    liftIO $ mapM print (_rawIndexes table)
     let
       debug i =  ( (show  <$> M.toList (secondary i)))
     liftIO $ putStrLn (unlines  $ fmap show $ (F.toList $ primary i2))

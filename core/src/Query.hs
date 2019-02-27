@@ -394,6 +394,6 @@ joinRel2 tb ref table = recurse ref
 
 
 
-checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (traceShow (un ,kvkeys pk) $ traceShowId $ tbpredM un pk)
+checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
 
 tbpredM un  = G.notOptionalM . G.getUnique  un

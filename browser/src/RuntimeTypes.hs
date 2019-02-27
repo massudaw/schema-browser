@@ -373,7 +373,6 @@ searchPK (WherePredicate b) (pk, g)= (\p ->  G.projectIndex pk  (WherePredicate 
 type DBVar = DBVar2 Showable
 type Collection k v = (IndexMetadata k v ,GiST (TBIndex v ) (TBData k v))
 
-pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
 
 pluginActionDiff :: FPlugins -> TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
@@ -408,13 +407,6 @@ dynPure url inp = runIdentity $
 dynP ~(P s d) = d
 
 dynPK =  runKleisli . dynP
-
-staticP (P i _ ) = i
-pluginStatic' (IOPlugin  a) = staticP a
-pluginStatic' (DiffIOPlugin a) = staticP a
-pluginStatic' (DiffPurePlugin a) = staticP a
-pluginStatic' (PurePlugin  a) = staticP a
-pluginStatic' (StatefullPlugin [(_,a)]) = pluginStatic' a
 
 
 pathRelInputs inf table (PluginField (_,FPlugins _ _ a)) 
@@ -675,7 +667,7 @@ liftASch inf s tname (RelAccess i c) = RelAccess (relComp $ pathRelRel rel) (lif
   where
     ref = liftASch inf s tname i
     tb = inf s tname
-    rel  = justError ("no fk" ++ show i) $ L.find (\i -> relOutputSet ref == relOutputSet (relComp (pathRelRel i)) ) =<< ( rawFKS <$> tb)
+    rel  = justError ("no fk" ++ show (tableName <$> tb,i,rawFKS <$> tb)) $ L.find (\i -> relOutputSet ref == relOutputSet (relComp (pathRelRel i)) ) =<< ( rawFKS <$> tb)
     (sch,st) = case unRecRel rel of
           FKJoinTable  _ l -> l
           FKInlineTable  _ l -> l
@@ -686,6 +678,9 @@ liftASch inf s tname l =  fromMaybe (lookKey <$> l ) rel
     lookKey c = justError ("no attr: " ++ show (c,tname,s,l,rel)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
 lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
+lookKeyNestedDef tb inf s tname 
+  | tname == _rawNameL tb = Just tb 
+  | otherwise = HM.lookup tname =<<  HM.lookup s inf
 
 
 recLookupInf inf tname rel = recLookup (liftRel inf tname rel)

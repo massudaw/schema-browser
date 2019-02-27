@@ -90,7 +90,7 @@ textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of
 textToPrim (RecordPrim i) =  (RecordPrim i)
 textToPrim i = error ("textToPrim : " ++ show i)
 
-code smvar  = indexSchema smvar "code"
+codeSchema smvar  = indexSchema smvar "code"
 
 list' :: Union a -> Maybe (NonS.NonEmptySeq a)
 list' (Many inp) = NonS.fromList  <$> nonEmpty inp
@@ -100,12 +100,12 @@ list :: Union a -> NonS.NonEmptySeq a
 list = justError "empty union list " . list'
 
 addPlugins iniPlugList smvar = do
-  metaschema <- liftIO $ code smvar
+  code <- liftIO $ codeSchema smvar
   let plugins = "plugin_code"
-  (_,(_,TableRep(_,_,plug)))<- transactionNoLog (meta metaschema) $ tableLoaderAll (lookTable (meta metaschema) "plugins") Nothing mempty Nothing
-  dbstats <- transactionNoLog metaschema $ selectFrom plugins Nothing mempty
+  (_,(_,TableRep(_,_,plug)))<- transactionNoLog (meta code) $ tableLoaderAll (lookTable (meta code) "plugins") Nothing mempty Nothing
+  dbstats <- transactionNoLog code $ selectFrom plugins Nothing mempty
   (event,handle) <- R.newEvent
-  let mk = tableMeta $ lookTable (meta metaschema) "plugins"
+  let mk = tableMeta $ lookTable (meta code) "plugins"
       m = fmap keyValue mk
   let
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
@@ -130,12 +130,12 @@ addPlugins iniPlugList smvar = do
       putStrLn ("### Modified Plugin: "  ++ show (i,j))
       plugList <- plugListM
       let patchR m i = RowPatch (G.getIndex m i,PatchRow $ patch i)
-      mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
+      mapM (traverse (handle . patchR mk . liftTable' code "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()
   watch <- liftIO$ addWatch inotify  [CloseWrite] "./plugins/src/Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
-  liftIO $ mapM (traverse (handle . createRow' (lookMeta metaschema "plugin_code").liftTable' metaschema "plugin_code") . row)  iniPlugList
+  liftIO $ mapM (traverse (handle . traceShowId . createRow' (lookMeta code "plugin_code").liftTable' code "plugin_code") . row)  iniPlugList
   return  iniPlugList
 
 

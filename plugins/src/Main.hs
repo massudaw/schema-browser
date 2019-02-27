@@ -42,6 +42,8 @@ main = do
       addPlugins plugList smvar
   print "Register Plugins"
   regplugs <- plugs smvar amap db plugListLoad
+  mapM print regplugs
+
   -- print "Load Polling Process"
   -- poller smvar amap db regplugs False
   --cp <- lookupEnv "SYNC_SERVER_PORT"
