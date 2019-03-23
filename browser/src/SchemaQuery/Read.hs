@@ -279,7 +279,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
       inj = S.difference refl old
       joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-      joinFK m  = maybe (Left (atttar,i)) Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+      joinFK m  = maybe (Left (atttar,i)) ( Right) $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
         where
           replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           nonRef = tableNonRef m

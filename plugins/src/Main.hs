@@ -22,7 +22,6 @@ import Graphics.UI.Threepenny.Core
 import RuntimeTypes
 
 import qualified Data.Map as M
-import qualified Data.Text as T
 
 
 main :: IO ()

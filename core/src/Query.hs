@@ -229,7 +229,7 @@ recBuild p =
     effect KOptional = LeftTB1 . pure
     effect KArray = ArrayTB1 .pure
 
-lkSTable invSchema (s,t) = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (HM.lookup t =<< HM.lookup s invSchema)
+lkSTable invSchema (s,t) = justError ("recursepath lookIT: "  <> show (s,t) <> " " <> show (HM.keys invSchema, HM.lookup s invSchema)) (HM.lookup t =<< HM.lookup s invSchema)
 
 recurseTB :: TableMap -> RecState Key  -> Table ->  TBData Key ()
 recurseTB invSchema isRec table =
@@ -372,7 +372,7 @@ joinRel2
 joinRel2 tb ref table = recurse ref
   where
     recurse ref 
-      | L.any (isLeft.snd) ref
+      | L.any (isLeft.snd) ref -- || L.any (isKOptional .keyType ._relOrigin .fst )  ref
         = Just $ LeftTB1  $ join $ fmap recurse  (Tra.traverse (traverse unSOptional) ref )
       | L.any (isArray.snd) ref
         = let

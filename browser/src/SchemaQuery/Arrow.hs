@@ -114,12 +114,12 @@ pmap f fp (PStream b e ) = PStream (trace "total pmap".f <$> b) (filterJust $ tr
 pconst  b  = PStream (pure b) never 
 
 
-pmerge :: (Patch c, Patch a , Patch b) => (a -> b -> TransactionM c ) -> (a -> c -> Index b -> TransactionM (Index c)) ->  (b -> c -> Index a -> TransactionM (Index c)) -> (PStream a , PStream b) -> TransactionM (PStream c)
+pmerge :: (Patch c, Patch a , Patch b) => (a -> b -> TransactionM c ) -> (a -> c -> Index b -> TransactionM (Maybe (Index c))) ->  (b -> c -> Index a -> TransactionM (Maybe (Index c))) -> (PStream a , PStream b) -> TransactionM (PStream c)
 pmerge fun fr fl (PStream br er, PStream bl el) = mdo
   inf <- askInf
   fre <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge right" ) (fr <$> br <*> psvalue res <@> el )
   fle <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge left" ) ( fl <$> bl <*> psvalue res<@> er )
-  let ev = unionWith const  fre fle
+  let ev = filterJust $ unionWith const  fre fle
   bri <- currentValue  br
   bli <- currentValue  bl
   ini <- (fun . trace "pmerge total" ) bri bli 
@@ -142,7 +142,7 @@ innerJoinS (P j k) (P l n) srel =
             let origin = sourceTable inf (JoinV j l InnerJoin srel )
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $ justError ("no joinPatch: "  ++ show i) . safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return i) ) -< (kv ,nv))
+            return $  safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
 
 mapPatch f (RowPatch (ix,PatchRow i) ) = RowPatch (ix, PatchRow $ f i )
 
@@ -198,7 +198,7 @@ leftJoinS (P j k) (P l n) srel
             let origin = sourceTable inf joinS 
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $ justError ("no joinPatch: "  ++ show i) . safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return i) ) -< (kv ,nv))
+            return $ safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
     where joinS = JoinV j l LeftJoin srel
 
 
@@ -279,7 +279,7 @@ fixLeftJoinS (P j k) (P l n) srel index
               result <- pmerge (\i j ->  do
                 let joined = joinRelation inf join cindex (primary i )
                 return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $ 
-                    (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) (\ _ _ i -> return i ) (\ _ _ i -> return i )  (out, kv)
+                    (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) (\ _ _ i -> return (Just i) ) (\ _ _ i -> return (Just i) )  (out, kv)
               go (relAppend cindex consIndex) (ix+1)  result 
                                          ) predS
 

@@ -23,9 +23,7 @@ import qualified Data.Aeson as A
 import Control.Lens ( _1, _2)
 import PrimEditor
 import qualified Control.Lens as Le
-import Environment
 import qualified Control.Category as Cat
-import Serializer (decodeT)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.Writer hiding ((<>))
@@ -70,7 +68,7 @@ import qualified Types.Index as G
 import Types.Patch
 import Utils
 
-type ColumnTidings = Map (Rel CoreKey ) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
+type ColumnTidings = Map (Rel CoreKey) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
 
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
 genAttr inf k =
@@ -312,7 +310,6 @@ tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let isRelA (RelAccess i _ ) = i == Inline na
         isRelA _ = False
     let restrictConstraint = filter (L.any isRelA . fst) constr
-    -- liftIO $ print ("IT Constraint",na,fst <$> restrictConstraint , fst <$> constr)
     iUITableDiff inf (fmap (fmap (C.contramap (pure . IT na .TB1 ))) <$>restrictConstraint) plugItems oldItems i
 tbCaseDiff inf table _ a@(Attr i _ ) wl plugItems preoldItems = do
   let oldItems = maybe preoldItems (\v-> fmap (maybe (Attr i <$> (evaluateKeyStatic (keyType i) v)) Just ) preoldItems) ( keyStatic i)
@@ -1603,16 +1600,18 @@ indexPatchSet ix v = error (show (ix, v))
 
 instance ToJS Showable where
   render = render . A.toJSON 
-instance FromJS Showable where
+
+-- instance FromJS Showable where
 
 instance (A.ToJSON a) => ToJS (FTB a ) where
   render = render . A.toJSON 
-instance FromJS a => FromJS (FTB a ) where
+
+-- instance FromJS a => FromJS (FTB a ) where
 
 instance (A.ToJSON a) => ToJS (PathFTB a ) where
   render = render . A.toJSON 
 
-instance FromJS a => FromJS (PathFTB a ) where
+-- instance FromJS a => FromJS (PathFTB a ) where
 
 testPStream = do 
   (e,h) <- ui newEvent 

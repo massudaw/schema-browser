@@ -408,7 +408,7 @@ indexInline eqs ik@(Inline key) r = fmap (PathAttr key) . recPred (snd eq)  =<< 
     recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
     recPred op i = if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
 indexInline eqs rel r 
-  | L.all isRel (relUnComp rel) = fmap (PathForeign (relUnComp rel)) . recPred gop =<< relLookup rel r 
+  | L.all isRel (relUnComp rel) = fmap (PathForeign (relUnComp rel)) . recPred gop . traceShowId =<< relLookup rel r 
   | otherwise = Nothing
   where
     gop = foldl1 mergeOp (_relOperator <$> relUnComp rel)

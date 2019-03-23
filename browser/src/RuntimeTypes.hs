@@ -296,9 +296,15 @@ getIndexWithTrace un row = maybeToList $ do
     merge (Idex i) (Idex j )=  Idex (i <> j)
     isRel (Rel _ _ _ ) = True
     isRel _ = False
+    isLeft (LeftTB1 i ) = True
+    isLeft _ = False
+    isOpt rel 
+      | L.any isLeft rel = NestedPath PIdOpt 
+      | otherwise = id
     lookupRel l@(RelComposite v ) 
-      | L.all isRel v = [(PathForeign v (TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex . fmap _tbattr . unkvlist . justError ("No rel comp " ++ show (l,kvkeys row)) $ _tbref  <$> kvLookup (relComp v) row )]
+      | L.all isRel v = [(PathForeign v (isOpt attrs $ TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex attrs )]
       | otherwise = concat $ lookupRel <$>  v
+      where attrs = fmap _tbattr . unkvlist . justError ("No rel comp " ++ show (l,kvkeys row)) $ _tbref  <$> kvLookup (relComp v) row 
     lookupRel r@(Rel (Inline i) j k) = [(PathForeign [r] (TipPath (Many $ pure (PathAttr i (TipPath ())))), Idex . fmap _tbattr . unkvlist .justError ("No rel " ++ show (r,row)) $  _tbref <$> kvLookup r row)]
     lookupRel (RelAccess i j ) = fmap (first (PathInline (_relOrigin i)))   $ ftbToPathIndex $  getIndexWithTrace j <$> justError ("cant find: " ++ show (i,row)) (refLookup  i row)
     lookupRel i@(Inline k ) = [(PathAttr k $ TipPath (),Idex . pure . justError ("No attribute path "  ++ show ( un,k,row)) $ _tbattr <$> (kvLookup i row)) ]
@@ -499,7 +505,7 @@ lookTableM :: InformationSchema -> Text -> Maybe Table
 lookTableM inf t =  HM.lookup t (_tableMapL inf)
 
 lookSTable :: InformationSchema -> (Text,Text) -> Table
-lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
+lookSTable inf (s,t) = justError ("no table: " <> show (s,t)) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)

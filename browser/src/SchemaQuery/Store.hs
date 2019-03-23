@@ -193,6 +193,8 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
         resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
           catMaybes $  (\i->  (G.getIndex m i,) <$>  ( G.checkPredId i predScanOut))  <$> {-G.filterRows predScanIn -}(G.toList idx)
         convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
+    search idxM (RowPatch (Idex v, CreateRow _ )) = [] 
+    search idxM (RowPatch (Idex v, DropRow )) = [] 
         
     result = search sidx <$>  evs
    in  concat result
@@ -206,10 +208,12 @@ joinPathFTB i p =  go i
     matcher (PIdIdx ix )  = PIdx ix . Just
     matcher PIdOpt   = POpt . Just
 
-joinPathRelation :: [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
+joinPathRelation :: Show a => [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
 joinPathRelation prel (G.PathForeign rel i) p 
-  | prel == rel = PFK prel [] (joinPathFTB i (const p)) 
-  | otherwise   = PFK rel  [] (joinPathFTB i nested)
+  | prel == rel =
+      PFK prel [] (joinPathFTB i (const p)) 
+  | otherwise   = 
+      PFK rel  [] (joinPathFTB i nested)
   where
     nested  (Many i) =  flip (joinPathRelation prel) p <$> i
 joinPathRelation rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
@@ -217,7 +221,7 @@ joinPathRelation rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
     nested  (Many i) =  flip (joinPathRelation rel) p <$> i
 joinPathRelation rel (G.PathAttr i _) p   = PFK rel [] (ref p)
   where 
-    ref = F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( keyType i)) 
+    ref = F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( relType $ relComp rel)) 
     ty KOptional = POpt . Just 
 
 dynFork a = do

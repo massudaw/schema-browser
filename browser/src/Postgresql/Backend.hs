@@ -111,9 +111,9 @@ updateQuery
 updateQuery m (pks,skv) = (qstr,qargs,Nothing)
   where
     qstr = fromString $ T.unpack up
-    qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat ( fmap koldPk pks)
+    qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat (koldPk <$> pks)
     equality k = k <> "="  <> "?"
-    koldPk (Idex kold) = zip (fmap textToPrim . keyType . _relOrigin <$> _kvpk m) (F.toList kold)
+    koldPk (Idex kold) = zip (fmap textToPrim . keyType . L.head . F.toList . relOutputSet <$> _kvpk m) (F.toList kold)
     pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_relOrigin <$> _kvpk m) (F.toList kold))
     inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)

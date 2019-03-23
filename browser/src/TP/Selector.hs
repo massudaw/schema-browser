@@ -21,7 +21,6 @@ module TP.Selector
 
 import Control.Monad.Reader
 import Data.Char
-import Debug.Trace
 import qualified Data.Foldable as F
 import PrimEditor
 import qualified Data.Functor.Contravariant as C
@@ -41,8 +40,6 @@ import RuntimeTypes
 import Safe
 import Schema
 import SchemaQuery
-import SchemaQuery.Arrow
-import Step.Common
 import TP.View
 import TP.Widgets
 import Text
