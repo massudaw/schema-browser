@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda (agendaDef,eventWidget,agendaDefS,eventWidgetMeta) where
+module TP.Agenda (agendaDef,eventWidget,agendaDefS,eventWidgetMeta,testAgendaDef) where
 
 import GHC.Stack
 import Step.Host
@@ -72,7 +72,7 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
             ) item
       chooser = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i -> UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
-        out <- traverseUI id $ calendarView inf Nothing cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
+        out <- traverseUI id $ (\i -> calendarView inf Nothing cliZone i sel) <$>  v <*> triding agenda <*> resolutionT <*> incrementT
         out2 <- traverseUI (traverseUI (traverse (\(t,tdi) -> do
           reftb <- ui $ refTables inf t
           crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) t) (pure (Just tdi)))))  (fmap snd out)

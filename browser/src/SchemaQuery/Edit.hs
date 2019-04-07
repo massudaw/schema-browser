@@ -21,10 +21,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
-import Data.Time
-import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
-import Debug.Trace
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -98,9 +95,9 @@ createRow (RowPatch (_,PatchRow i)) = create i
 fullInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (RowPatch Key Showable)
 fullInsert k1 v1 = createRow' k1 <$> recInsert k1 v1
 
-fullEdit ::  KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (RowPatch Key Showable)
+fullEdit :: KVMetadata Key -> TBData Key Showable -> TBIdx Key Showable -> TransactionM (RowPatch Key Showable)
 fullEdit k1 old v2 =
-  patchRow' k1 old <$> fullDiffEdit k1 old v2
+  patchRow k1 old <$> fullDiffEdit k1 old v2
 
 
 
@@ -123,46 +120,57 @@ recInsert k1  v1 = do
 
 
 itRefFun :: RelOperations (KV Key Showable)
-itRefFun = (id,id,noEdit,noInsert)
+itRefFun = (id,id,id,id,noEdit,noInsert)
 
-noInsert k1 v1   = do
-  traverseKV (tbInsertEdit k1)  v1
-noEdit k1 v1 v2  = do
-  trazipWithKV (tbDiffEditInsert k1) v1 v2
 
-fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM (TBData Key Showable)
+noInsert :: KVMetadata Key  -> KV Key Showable -> TransactionM (KV Key Showable)
+noInsert k1 = traverseKV (tbInsertEdit k1)
+
+noEdit :: KVMetadata Key  -> KV Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
+noEdit k1 = trazipWithKVP (tbEdit k1) 
+
+trazipWithKVP ::  (Column Key Showable -> Index (Column Key Showable) -> TransactionM (Index (Column Key Showable)) )
+              -> KV Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
+trazipWithKVP f v j = concat <$> traverse editAValue (unkvlist v)
+  where
+    editAValue vi =
+        let edits = L.find ((key ==). index) j 
+            key = index vi
+        in maybe (return []) (fmap pure <$> f vi ) edits
+
+
+fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
 fullDiffEdit k1 old v2 = do
    edn <-  noEdit k1 old v2
-   when (isJust $ diff (tableNonRef old) (tableNonRef edn)) . void $do
-     traverse (updateFrom k1 old (G.getIndex k1 edn))  (diff old edn)
+   when (not $ L.null $ patchNoRef edn) . void $do
+     updateFrom k1 old (G.getIndex k1 old) edn 
    return edn
 
-tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
-tbDiffEditInsert k1 i j
-  | isJust (diff i  j) = tbEdit k1 i j
-  | otherwise =  return j
 
-
-tbEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
-tbEdit m (Fun _ _ _ ) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
-tbEdit m (Attr _ _ ) (Attr k1 k2)= return $ (Attr k1 k2)
-tbEdit m (IT a1 a2) (IT k2 t2) = do
+tbEdit :: KVMetadata Key -> Column Key Showable -> Index (Column Key Showable) -> TransactionM (Index (Column Key Showable))
+tbEdit m (Fun _ _ _ ) (PFun k1 rel k2)= return $ (PFun k1 rel k2)
+tbEdit m (Attr _ _ ) (PAttr k1 k2)= return $ (PAttr k1 k2)
+tbEdit m (IT a1 a2) (PInline k2 t2) = do
   inf <- askInf
   let r = _keyAtom $ keyType k2
       m2 = lookSMeta inf r
-  IT k2 <$> tbEditRef itRefFun m2  a2 t2
-tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = do
+  PInline k2 <$> tbEditRef itRefFun m2  a2 t2
+    
+tbEdit m g@(FKT apk arel2  a2) f@(PFK rel2 pk  t2) = do
   inf <- askInf
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel =  _relOrigin <$> kvkeys pk
-  recoverFK pkrel rel2 <$> (tbEditRef (tbRefFun rel2) m2 (liftFK g) (liftFK f))
+    pkrel =  _relOrigin <$> kvkeys apk 
+  fromMaybe (error "not empty") . recoverPFK pkrel rel2 <$> (tbEditRef (tbRefFun rel2) m2 (liftFK g) (liftPFK f))
+
 
 type RelOperations b
   = (b -> TBData Key Showable
+    , Index b -> TBIdx Key Showable
+    , TBIdx Key Showable -> Index b
     , TBData Key Showable -> b
-    , KVMetadata Key -> KV Key Showable -> KV Key Showable -> TransactionM (KV Key Showable)
+    , KVMetadata Key -> KV Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
     , KVMetadata Key -> KV Key Showable -> TransactionM (KV Key Showable) )
 
 
@@ -170,13 +178,19 @@ type RelOperations b
 -- | TBMerge a a a
 --  | TBConflict (TBOperation a) a
 
-operationTree :: (a -> a -> TBOperation a) -> FTB a -> FTB a -> FTB (TBOperation a)
-operationTree f (TB1 i) (TB1 j) = TB1 (f i j)
-operationTree f (LeftTB1 i) (LeftTB1 j ) = LeftTB1 $ (liftA2 (operationTree f) i j) <|> (fmap TBInsert <$> j)
-operationTree f (ArrayTB1 i) (ArrayTB1 j) = (\i a -> ArrayTB1 . NonS.fromList $ F.toList i ++ F.toList a)  (NonS.zipWith (operationTree f) i j)  (fmap TBInsert <$> NonS.drop (NonS.length i) j)
+operationTree :: Patch a => (a -> Index a -> TBOperation a) -> FTB a -> PathFTB (Index a) -> PathFTB (TBOperation a)
+operationTree f (TB1 i) (PAtom j) = PAtom (f i j)
+operationTree f (LeftTB1 i) (POpt j ) = POpt $ (liftA2 (operationTree f) i j) <|> (fmap (TBInsert . create) <$> j)
+operationTree f (ArrayTB1 i) (PIdx ix jm) = PIdx ix $ (\ j ->  if ix >= L.length i then (TBInsert . create <$> j) else operationTree f  ( (NonS.!!)  i ix )  j ) <$> jm 
+operationTree f i (PatchSet l ) = PatchSet $ fmap (operationTree  f i) l 
 
-tbEditRef :: Show b => RelOperations b -> KVMetadata Key ->  FTB b -> FTB b -> TransactionM (FTB b)
-tbEditRef fun@(funi,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse (fmap funo  . (interp <=< recheck) . fmap funi) $operationTree comparison v1 v2)
+opmap :: (a -> b) -> (Index a -> Index b) -> TBOperation a -> TBOperation b
+opmap f d (TBInsert i ) = TBInsert $ f i 
+opmap f d (TBNoop i) = TBNoop (f i)
+opmap f d (TBUpdate i j ) = TBUpdate (f i )  (d j )
+
+tbEditRef :: (Patch b ,Show b) => RelOperations b -> KVMetadata Key ->  FTB b -> PathFTB (Index b) -> TransactionM (PathFTB (Index b))
+tbEditRef fun@(funi,funid,funod,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse ((interp <=< recheck) . opmap funi funid) $operationTree comparison v1 v2)
   where
     recheck (TBInsert l ) = do
       inf <- askInf
@@ -189,13 +203,13 @@ tbEditRef fun@(funi,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse (fmap funo 
          else return (TBNoop l)
     recheck l = return l
 
-    interp (TBNoop l) = return l
-    interp (TBInsert l) = insert m2  l
-    interp (TBUpdate ol l) = edit m2  ol l
-    comparison ol l = if G.getIndex m2 inol  == G.getIndex m2 inl then TBUpdate ol l else TBInsert l
+    interp (TBNoop l) = return (patch $ funo l)
+    interp (TBInsert l) = patch . funo <$> insert m2  l
+    interp (TBUpdate ol l) = funod <$> edit m2  ol l
+    comparison ol l = if G.getIndex m2 inol  == G.getIndex m2 inl then TBUpdate ol l else TBInsert (apply ol l ) 
       where
         inol = funi ol
-        inl = funi l
+        inl = apply inol (funid l)
 
 
 tbInsertEdit :: KVMetadata Key -> Column Key Showable -> TransactionM (Column Key Showable)
@@ -214,10 +228,10 @@ tbInsertEdit m f@(FKT pk rel2 t2) = do
   recoverFK  pkrel rel2 <$> tbInsertRef (tbRefFun rel2) m2 (liftFK f)
 
 tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
-tbRefFun rel2 = (snd.unTBRef,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,recInsert)
+tbRefFun rel2 = (snd.unTBRef,(\(PTBRef i j k)  -> compact (j <> k) ),(\i -> PTBRef [] i [] ), (\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,recInsert)
 
 tbInsertRef ::Show b => RelOperations b -> KVMetadata Key ->  FTB b -> TransactionM (FTB b)
-tbInsertRef (funi,funo,edit,insert) m2 = mapInf m2 . traverse (fmap funo . insert m2 .funi)
+tbInsertRef (funi,_ ,_,funo,edit,insert) m2 = mapInf m2 . traverse (fmap funo . insert m2 .funi)
 
 mapInf m2 = localInf (\inf -> fromMaybe inf (HM.lookup (_kvschema m2) (depschema inf)))
 

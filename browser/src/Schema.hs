@@ -391,3 +391,6 @@ loadPlugins :: InformationSchema -> R.Dynamic [Plugins]
 loadPlugins inf =  do
   code <- liftIO$ indexSchema  (rootRef inf) "code"
   loadPlugins' code
+
+
+

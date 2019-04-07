@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDef,agendaDefS,testAgendaDef) where
+module TP.AgendaSelector (Mode(..),eventWidgetMeta,calendarView,agendaDefS,agendaDef,testAgendaDef) where
 
 import GHC.Stack
 import Environment
@@ -41,6 +41,7 @@ import qualified Types.Index as G
 import Debug.Trace
 import Types
 import SchemaQuery
+import Schema
 import TP.Widgets
 import Prelude hiding (head)
 import Control.Monad.Reader
@@ -84,19 +85,19 @@ eventWidgetMeta inf =  do
        ["fullcalendar-3.5.0/fullcalendar.min.css"
        ,"fullcalendar-scheduler-1.7.0/scheduler.min.css"
        ]
-    fmap F.toList $ ui $ runMetaArrow inf agendaDef 
+    fmap F.toList $  join . fmap (currentValue .facts ) . ui $ runMetaArrow inf agendaDefS
 
 
 data Tree f a 
-  = Leaf { unLeaf :: a}
-  | Tree a (f (Tree f a))
+  = Leaf { unLeaf :: f a}
+  | Tree (f (a,Maybe (Tree f a)))
 
-instance (Foldable f, Show a) => Show (Tree f a ) where
-  show (Leaf i )=  show i 
-  show (Tree a i ) = show a <> " - " <> L.intercalate "," (show <$> F.toList i)
+instance (Show a) => Show (Tree NonS.NonEmptySeq a ) where
+  show (Leaf i) = show i 
+  show (Tree i) = L.intercalate "\n" . F.toList $ fmap (\(i,j) -> show i <> maybe "" (\ j ->" - \n" <> (show j) ) j )  i
 
-explodeTree (Tree i f ) = concat $ zipWith (\(SText i) j -> RelAccess (Inline  i) <$> j ) (F.toList i) (fmap explodeTree (F.toList f))
-explodeTree (Leaf i ) = ((\(SText t) -> Inline t ) <$> F.toList i) 
+explodeTree (Tree f) = concat $ fmap ((\(SText i,  j) -> maybe [ Inline i]  (fmap (RelAccess (Inline i)) ) j). fmap (fmap explodeTree)) (F.toList f)
+explodeTree (Leaf i) = (\(SText t) -> Inline t) <$> F.toList i
 
 agendaDefS inf 
   = projectS 
@@ -105,22 +106,22 @@ agendaDefS inf
         (innerJoinS
           (fromS "tables" `whereS` schemaPred)
           (fromS "event") [Rel "oid" Equals "table" ] ) 
-        (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (Just indexDescription ) )
+        (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (indexDescription ) )
       (fromS "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  ) 
     (agendaDefProjection inf)
   where schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals) )]
-        indexDescription = fmap keyValue $ liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
+        indexDescription = liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
                             (RelAccess (Inline "col_type")
                                 (RelAccess (Inline "composite")
                                     (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
 
+  
+testAgendaDef inf = fmap fst . runDynamic $  do
+   runMetaArrow inf agendaDefS
+   -- ! b <- runMetaArrow inf agendaDef
+   -- liftIO $ print (view _1 <$> F.toList b)
 
-testAgendaDef inf =runDynamic $  do
-   v <-  runMetaArrow inf agendaDefS
-   ! m <- currentValue (facts v)
-   ! b <- runMetaArrow inf agendaDef
-   liftIO $ print (view _1 <$> F.toList m)
-   liftIO $ print (view _1 <$> F.toList b)
+
 
 
 agendaDef inf
@@ -130,7 +131,7 @@ agendaDef inf
         (innerJoinR
           (fromR "tables" `whereR` schemaPred)
           (fromR "event") eventjoin )
-        (fromR "table_description") descjoin   (Just indexDescription ) )
+        (fromR "table_description") descjoin (Just indexDescription))
       (fromR "pks") pkjoin ) 
       (agendaDefProjection inf) 
    where
@@ -143,7 +144,6 @@ agendaDef inf
                                 (RelAccess (Inline "composite")
                                     (RelComposite compdescjoin )))  
       schemaPred =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
-
 agendaDefProjection inf =  fields
   where
       pkjoin = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
@@ -152,7 +152,7 @@ agendaDefProjection inf =  fields
       compdescjoin = [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
       eitherDescription = isum [nestedDescription, directDescription] 
       directDescription = fmap (fmap Leaf) $ iforeign descjoin (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
-      nestedDescription = fmap (join .fmap (\(i,j) -> Tree i <$> NonS.pruneSequence j)) . iforeign descjoin  . iopt . ivalue $ irecord 
+      nestedDescription = fmap (fmap (\(i,j) -> Tree $ NonS.zipWith (,) i j)) . iforeign descjoin  . iopt . ivalue $ irecord 
               (liftA2 (,) 
                 (ifield "description" (imap . ivalue $  readV PText))
                 (iforeign (relUnComp $ fmap keyValue $ liftRel (meta inf ) "table_description" $ relComp $ [Rel "description" Equals "column_name"] )
@@ -187,7 +187,7 @@ agendaDefProjection inf =  fields
             projfT ::  Showable  -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
             projfT efield@(SText field) = irecord $ proc _-> do
               i <- convertRel inf tname field  -< ()
-              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ) . NonS.fromList. explodeTree <$> desc) ) -< ()
+              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ).  traceShowId . NonS.fromList. explodeTree  . traceShowId <$> desc) ) -< ()
               pkfields <- mapA (\(SText i) -> (Inline (lookKey inf tname i), ) <$> convertRel inf tname i)  pks -<  ()
               returnA -< HM.fromList $ fmap (fmap A.toJSON) $ -- traceShow ("row agenda", desc ,pks,fields)$
                   [("id" :: Text, txt (writePK' tname pkfields (TB1 efield)))

@@ -24,6 +24,7 @@ import Control.Lens ( _1, _2)
 import PrimEditor
 import qualified Control.Lens as Le
 import qualified Control.Category as Cat
+import Serializer (decodeT)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.Writer hiding ((<>))
@@ -49,7 +50,7 @@ import qualified Data.Traversable as Tra
 import Default
 import Expression
 import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (apply)
+import Graphics.UI.Threepenny.Core hiding (apply,render)
 import Graphics.UI.Threepenny.Internal (ui)
 import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
@@ -62,7 +63,7 @@ import TP.AgendaSelector
 import TP.MapSelector
 import TP.Selector
 import TP.Widgets
-import Text hiding (render)
+import Text 
 import Types
 import qualified Types.Index as G
 import Types.Patch
@@ -823,8 +824,8 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
     let
       m = tableMeta table
       editEnabled = (\i j k l m -> i && j && k && l && m ) <$> (maybe False (\i -> (isRight .tableCheck m  $ i) || isJust (matchUpdate inf (tableMeta table ) i)) <$> inscrud ) <*> (isJust <$> oldItemsi) <*>   liftA2 (\i j -> maybe False (flip (containsOneGist table) j) i ) inscrud gist <*>   liftA2 (\i j -> maybe False (flip (containsGist table) j) i ) oldItemsi gist <*>  (isDiff  <$> inscrudp)
-      crudEdi i j =  do
-        transaction inf $ fullEdit m i j
+      crudEdi (Just i) (Diff j) =  do
+        Just <$> transaction inf $ fullEdit m i j
     editI <- UI.span # set UI.class_ "glyphicon glyphicon-edit"
     editB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
@@ -832,7 +833,7 @@ editCommand lbox inf table oldItemsi inscrudp inscrud  authorize gist = do
         # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "UPDATE" `elem`) i && j)) <$>authorize <*> editEnabled)
     -- Edit when any persistent field has changed
     cliEdit <- UI.click editB
-    diffEdi <- ui $ mapEventDyn catchEd $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
+    diffEdi <- ui $ mapEventDyn catchEd $ crudEdi <$> facts oldItemsi <*> facts inscrudp <@ unionWith const cliEdit (filterKey (facts editEnabled)  altU)
     return (diffEdi,editB)
 
 deleteCommand lbox inf table oldItemsi authorize gist = do
@@ -884,22 +885,22 @@ debugConsole oldItemsi inscrudp = do
     let
       inscrud = fmap join $ applyIfChange <$> facts oldItemsi <#> inscrudp
       gen (h,s) = do
-        v <- ui $ currentValue s
         header <- UI.h6
                   # set UI.class_ "header"
                   # set UI.text h
                   # set UI.style [("text-align","center")]
         out <- UI.mkElement "textarea"
-                  # set UI.value v
+                  # sink UI.value s
                   # set UI.style [("max-height","300px"),("width","100%")]
+        onChanges s (\ _ -> element out # method "textAreaAdjust(%1)")
         element out # method  "textAreaAdjust(%1)"
         UI.div # set children [header,out]
                # set UI.class_ "col-xs-6"
     debugT <- mapM gen
-                  [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi),
+                  [("Last", maybe "" (ident . render) <$> facts oldItemsi),
                   -- ("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud),
-                  ("Diff", onDiff (ident . renderRowPatch) (const "") <$> facts inscrudp)
-                  ,("Undo", maybe "" (onDiff (ident . renderRowPatch) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
+                  ("Diff", onDiff (ident . render) (const "") <$> facts inscrudp)
+                  ,("Undo", maybe "" (onDiff (ident . render) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
     UI.div # set children debugT # set UI.class_ "col-xs-12"
 
 processPanelTable
@@ -1368,6 +1369,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       nav <- openClose (pure False) 
       let
         merge :: Editor (TBIdx CoreKey Showable ) -> Editor (TBIdx CoreKey Showable) -> Editor (TBIdx CoreKey Showable) -> Editor (PTBRef CoreKey Showable)
+        -- merge i j k | traceShow (i,j ,k ) False = undefined
         merge (Diff i) (Diff j) (Diff k) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
         merge (Diff i) (Diff j) Keep = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j [])
         merge Keep (Diff i) Keep = Diff $ PTBRef [] i []
@@ -1400,7 +1402,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                     reftb@(_,gist,_) <- refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
                     flip mapTidingsDyn gist $ \(TableRep (_,s,g)) -> do
                       let out = searchGist rel targetTable  g s =<< newsel
-                      liftIO $ void $ traverse  helselTarget  (diff (snd .unTBRef<$> initial) out)
+                      when (isJust newsel && isJust out || isNothing newsel) $ 
+                        liftIO $ void $ do
+                          traverse  helselTarget  (diff (snd .unTBRef<$> initial) out)
                 return ())
           pan <- UI.div
             # set UI.class_ "col-xs-11 fixed-label"
@@ -1422,6 +1426,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           cliZone <- jsTimeZone
           metaAgenda <- eventWidgetMeta inf
           let
+            replaceTarget = (\i j ->  let delta = diff i j 
+                               in if isNothing delta then Keep else 
+                                  (if  isKeep (fromJust delta ) then Keep else patch j))
             hasMap = L.find ((== targetTable).(Le.^._2)) metaMap
             hasAgenda = L.find ((== targetTable).(Le.^._2)) metaAgenda
             add i m =  if i then (m:) else id
@@ -1467,7 +1474,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
 
           let
             fksel =  fmap TBRef . (\box -> (,) <$>  (reflectFK reflectRels  =<< box ) <*> box ) <$> triding itemList
-            output = fromMaybe Keep <$> (diff <$> facts oldItems <#> fksel)
+            output =  replaceTarget <$> facts oldItems <#> fksel
           ui $ onEventIO (rumors output)
             (\i -> do
               when (not (L.null reflectRels)) $ do
@@ -1514,7 +1521,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           checkOutput old tdfk =
             let oldn =  lintReflect old
             in diff' oldn (lintReflect (join $ applyIfChange  oldn  tdfk)) -}
-      out <- ui $ calmT ( tdfk )
+      out <- ui $ calmT  tdfk
       return $ LayoutWidget  out top layoutT
 
 traceShowIdPrefix s i = traceShow (s,show i) i
@@ -1599,19 +1606,18 @@ indexPatchSet ix i@(PAtom _) = Just i -- TODO :  Debug  what is triggering this 
 indexPatchSet ix v = error (show (ix, v))
 
 instance ToJS Showable where
-  render = render . A.toJSON 
-
--- instance FromJS Showable where
+  render = UI.render . A.toJSON 
+instance FromJS Showable where
 
 instance (A.ToJSON a) => ToJS (FTB a ) where
-  render = render . A.toJSON 
+  render = UI.render . A.toJSON 
 
--- instance FromJS a => FromJS (FTB a ) where
+instance FromJS a => FromJS (FTB a ) where
 
 instance (A.ToJSON a) => ToJS (PathFTB a ) where
-  render = render . A.toJSON 
+  render = UI.render . A.toJSON 
 
--- instance FromJS a => FromJS (PathFTB a ) where
+instance FromJS a => FromJS (PathFTB a ) where
 
 testPStream = do 
   (e,h) <- ui newEvent 

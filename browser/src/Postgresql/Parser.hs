@@ -331,7 +331,7 @@ parseShowableJSON  fun p@(Primitive l i) v = fix parseKTypePrim l v
         A.Null ->  return $ LeftTB1 Nothing
         vn -> (LeftTB1 . Just  <$>  f i vn) <|> return (LeftTB1 Nothing)
     parseKTypePrim  f (KArray :i )  (A.Array l )
-      =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . NonS.fromList) . mapM (f i)) (nonEmpty $ F.toList l)
+      =  maybe (fail $ "parseKTypePrim empty list: "  ++ show l ) (fmap (ArrayTB1 . NonS.fromList) . mapM (f i)) (nonEmpty $ F.toList l)
     parseKTypePrim f (KInterval :l ) (A.String v)
       = do
         env <- ask

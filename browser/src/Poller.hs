@@ -132,13 +132,13 @@ poller schmRef authmap user db plugs is_test = do
 
                                   ovm  <- fmap (liftTable' inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
-                                         fullEdit (tableMeta $ lookTable inf a)inp ov
+                                         traverse (fullEdit (tableMeta $ lookTable inf a) inp) (diff inp ov ) 
                                          return ()) ovm
                                 Left action -> do
                                   (_,getP) <- getFrom table (allFields inf table)  inp
                                   ovm  <- fmap (liftPatch inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
-                                      fullEdit (tableMeta $ lookTable inf a) inp (apply inp ov)
+                                      fullEdit (tableMeta $ lookTable inf a) inp ov
                                       return ()) ovm
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
@@ -156,7 +156,7 @@ poller schmRef authmap user db plugs is_test = do
 
                       transactionNoLog metas  $ do
                           fktable2 <- loadFKS ( lookTable metas "polling") (liftTable' metas "polling"  table2)
-                          fullEdit ( lookMeta metas "polling") curr fktable2
+                          traverse (fullEdit ( lookMeta metas "polling") curr ) (diff curr fktable2)
                       return ()
 
           pid <- forkIO (void $ do

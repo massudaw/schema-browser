@@ -50,7 +50,7 @@ configExtension inf model view = do
           tname <-UI.h4 # set text (T.unpack $ tableName table )
           tpred <-UI.h5 # set text (show pred)
           reftb@(vptmeta,vpt,var) <- ui $ refTables' minf table Nothing pred
-          let desc = recPKDescIndex inf (tableMeta table) (allRec' (tableMap minf) table)
+          let desc = recPKDescIndex minf (tableMeta table) (allRec' (tableMap minf) table)
           config <- selector minf table reftb  (pure (Just pred)) desc (pure Nothing)
           let tds = triding config
           LayoutWidget pretdi cru _ <- crudUITable minf table reftb mempty [] (allRec' (tableMap minf) table) (triding config)

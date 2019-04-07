@@ -52,7 +52,7 @@ revertModification idx = do
       DropRow -> do
         deleteFrom (tableMeta targetTable) r
       PatchRow p -> do
-        fullEdit (tableMeta targetTable) r (apply r p)
+        fullEdit (tableMeta targetTable) r p
       CreateRow p -> do
         fullInsert (tableMeta targetTable) r
           ) r

@@ -6,6 +6,7 @@ module SchemaQuery.Store
   -- Clear in memory cache
     resetCache
   -- Read current state
+  , dynFork
   , readIndex
   , readState
   , joinPatch
@@ -39,6 +40,7 @@ import qualified Data.Interval as Interval
 import qualified Data.List as L
 import qualified Data.Map as M
 import Data.Maybe
+import Text
 import qualified Data.Text as T
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
@@ -52,7 +54,7 @@ import Utils
 lookDBVar :: InformationSchema -> M.Map (KVMetadata Key) (DBRef Key Showable) -> KVMetadata Key -> IO (DBRef Key Showable)
 lookDBVar inf mmap table =
     case M.lookup table mmap of
-      Nothing ->  do
+      Nothing ->  fmap fst $ runDynamic $  do
         snd <$> createTableRefs inf (lookTable inf (_kvname table))
       Just i-> return i
 
@@ -122,7 +124,7 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ trans
 
 
 prerefTable :: InformationSchema -> Table -> IO (DBRef Key Showable)
-prerefTable  inf table  = do
+prerefTable  inf table  = liftIO $ do
   mmap <- readTVarIO (mvarMap inf)
   lookDBVar inf mmap (tableMeta table)
 
@@ -152,20 +154,21 @@ childrenRefsUnique  source inf pre (FKInlineTable rel target) = concat $ childre
     fks = rawFKS targetTable
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     targetTable = lookTable rinf $ snd target
-childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),joinPatch rel targetTable pre )]
+childrenRefsUnique  source inf pre (FKJoinTable rel target)  =  [((rinf,targetTable),joinPatch False rel targetTable pre )]
   where
     rinf = maybe inf id $ HM.lookup (fst target)  (depschema inf)
     targetTable = lookTable rinf $ snd target
 
 joinPatch
   :: (Functor t, Foldable t) =>
-     [Rel Key]
+     Bool 
+     -> [Rel Key]
      -> TableK Key
      -> (Rel Key -> Rel Key)
      -> t (RowPatch Key Showable)
      -> TableRep Key Showable
      -> [RowPatch Key Showable]
-joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
+joinPatch isLeft rel targetTable prefix evs (TableRep (m,sidxs,base)) =
    let
     sidx = M.lookup rel sidxs
     pkTable = rawPK targetTable
@@ -179,53 +182,65 @@ joinPatch rel targetTable prefix evs (TableRep (m,sidxs,base)) =
             idx <- simplifyRel t `L.elemIndex` (simplifyRel <$> pkTable)
             field <- atMay v idx
             unSOptional (create <$> field)
-        outputs = filter (isJust . _relOutputs ) rel
-        predK = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
+        outputs = rel -- filter (isJust . _relOutputs ) rel
+        predIndex = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
           WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
         predScanOut = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
+          WherePredicate  (go prefix (relComp outputs )) -- AndColl $ ((\(Rel o op t) -> PrimColl (prefix (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
         -- TODO: Is the logic for inputs only necessary  for functions?
         -- inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         -- predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
           -- WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
-        resIndex idx = -- traceShow ("resIndex",predK , rel) $
-          concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predK idx
-        resScan idx = -- traceShow ("resScan", v,pkTable,(\i->  (i,) <$> G.checkPredId i predScan ) <$> G.toList idx,predScan,G.keys idx) $
-          catMaybes $  (\i->  (G.getIndex m i,) <$>  ( G.checkPredId i predScanOut))  <$> {-G.filterRows predScanIn -}(G.toList idx)
-        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation rel t pattr]) ) <$> ts
+            where go p (RelComposite output ) = AndColl (go p <$> output)
+                  go p (Rel o op t) = PrimColl (p  o ,  [(o,Left (pkIndex t ,Flip op))] )
+                  go p a@(RelAccess i j ) = go (\v -> p (RelAccess i v ) ) j 
+
+
+        resIndex idx = -- traceShow ("resIndex",predIndex ) $
+          concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predIndex idx
+        resScan idx =  -- traceShow ("resScan", predScanOut) $ 
+          catMaybes $  (\i->  traceShow ( renderPredicateWhere predScanOut )  $ (G.getIndex m i,) <$>     G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation isLeft rel t pattr]) ). traceShowId <$> ts
     search idxM (RowPatch (Idex v, CreateRow _ )) = [] 
     search idxM (RowPatch (Idex v, DropRow )) = [] 
         
     result = search sidx <$>  evs
    in  concat result
 
+relLast (RelAccess _ i  ) = relLast i 
+relLast i = i
+
 joinPathFTB :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
 joinPathFTB i p =  go i
   where
     go (G.ManyPath j) = justError "empty" .  patchSet .F.toList $ go <$> j
     go (G.NestedPath i j) = matcher i (go j)
+      where
+        matcher (PIdIdx ix )  = PIdx ix . Just
+        matcher PIdOpt   = POpt . Just
     go (G.TipPath j) = PAtom (p j)
-    matcher (PIdIdx ix )  = PIdx ix . Just
-    matcher PIdOpt   = POpt . Just
 
-joinPathRelation :: Show a => [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
-joinPathRelation prel (G.PathForeign rel i) p 
+joinPathRelation :: Show a => Bool -> [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
+joinPathRelation isLeft prel (G.PathForeign rel i) p 
   | prel == rel =
       PFK prel [] (joinPathFTB i (const p)) 
   | otherwise   = 
       PFK rel  [] (joinPathFTB i nested)
   where
-    nested  (Many i) =  flip (joinPathRelation prel) p <$> i
-joinPathRelation rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
+    nested  (Many i) =  flip (joinPathRelation isLeft prel) p <$> i
+joinPathRelation isLeft rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
   where
-    nested  (Many i) =  flip (joinPathRelation rel) p <$> i
-joinPathRelation rel (G.PathAttr i _) p   = PFK rel [] (ref p)
-  where 
-    ref = F.foldl' (flip (.)) PAtom  (ty <$> _keyFunc ( relType $ relComp rel)) 
-    ty KOptional = POpt . Just 
+    nested  (Many i) =  flip (joinPathRelation isLeft rel) p <$> i
+joinPathRelation isLeft rel (G.PathAttr i v) p   = PFK (relUnComp $ relLast (relComp rel)) [] ((if isLeft && not (isLeftTB1 v) then (POpt . Just) else id) $ joinPathFTB v (const p))
+  where isLeftTB1 (G.NestedPath PIdOpt _ ) = True
+        isLeftTB1 _ = False
+
 
 dynFork a = do
-  liftIO $  forkIO a
+  i <- liftIO $  forkIO a
+  registerDynamic  ( killThread i )
+  return i 
+
 
 tryTakeMany :: TChan a -> STM [a]
 tryTakeMany mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar
@@ -276,7 +291,7 @@ logTable inf t s = do
   t <- getCurrentTime 
   atomically $ writeTChan (snd (dblogger ref)) (show t <> " : " <> s )
 
-createTableRefs :: InformationSchema -> Table -> IO (Collection Key Showable,DBRef Key Showable)
+createTableRefs :: InformationSchema -> Table -> Dynamic (Collection Key Showable,DBRef Key Showable)
 createTableRefs inf (Project table (Union l)) = do
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup (tableMeta table) map of
@@ -325,7 +340,7 @@ createTableRefs inf table = do
           -- TODO : Add evaluator for functions What to do when one of the function deps change?
           nestedFKS <- mapM (\((rinf, t),l) -> do
             liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
-            o <- prerefTable rinf t
+            o <- liftIO $ prerefTable rinf t
             return (l,o)) (M.toList childrens)
           newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
           tidsrefs <- mapM (\(j,var)-> dynFork $ forever $ updateReference j var dbref) newNestedFKS

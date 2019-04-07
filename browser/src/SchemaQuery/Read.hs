@@ -149,9 +149,9 @@ getFrom table allFields b = mdo
         new = G.lookup (G.getIndex m b) reso
         delta = diff b =<< new
     (maybe (do
-      liftIO . putStrLn $ "getFrom: row is loaded from global storage"  <> show (pred,G.getIndex m b, new ,G.keys reso )
+      liftIO . putStrLn $ "getFrom: row is loaded from global storage"  <> show (pred,G.getIndex m b) -- , new ,G.keys reso )
       return delta )  (\comp -> do
-      liftIO . putStrLn $ "Loading complement\n"  <> (ident . renderTable $ comp)
+      liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
       let newRow = apply (apply b (fromMaybe [] delta)) v
       resFKS  <- getFKS inf pred table  [newRow] comp
@@ -164,9 +164,9 @@ getFrom table allFields b = mdo
         liftIO . putStrLn $ "Old\n" <> show b
         liftIO . putStrLn $ "Delta\n" <> (maybe ("") show delta)
         liftIO . putStrLn $ "Get\n" <> (show v)
-        liftIO . putStrLn $ "Result\n" <> (either show (ident.renderTable) output)
+        liftIO . putStrLn $ "Result\n" <> (either show (ident.render) output)
         liftIO . putStrLn $ "DiffResult\n" <> (maybe "" show  result)
-        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .renderTable $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
       return result) n)) comp
   return (dbvar,r)
 
@@ -304,8 +304,8 @@ fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
     primPredicate o (RelAccess ref tar) 
-      =  join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty (F.toList i )
-      where i = justError ("no ref: " <> show (ref ,o,rel)) $ refLookup ref o  
+      =  join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty i 
+      where i = concat $ fmap F.toList $ F.toList $ refLookup ref o  
     primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes .  fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
       let attr = lkAttr ori o
@@ -456,10 +456,10 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
              final = either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo (TableRep (m,sidx,reso) ) newRes
          if L.null newRes
             then do
-              liftIO . putStrLn $ "No new fields " <> show (tableName table) <> show (G.keys (snd final)) <> show (G.getIndex m <$> resK )
+              liftIO . putStrLn $ "No new fields " <> show (tableName table) -- <> show (G.keys (snd final)) <> show (G.getIndex m <$> resK )
               return (nidx,final)
             else do
-              liftIO . putStrLn $ "New fields " <> show (tableName table) <> " --------  "<> show (_kvpk m) <> " -----  "<> show (G.keys (snd final)) 
+              liftIO . putStrLn $ "New fields " <> show (tableName table) <> " --------  "<> show (_kvpk m) -- <> " -----  "<> show (G.keys (snd final)) 
               return (nidx,final)
     (nidx,(sidx2,ndata)) <- case hasIndex of
       Just (sq,idx) ->
@@ -467,7 +467,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
-              liftIO . putStrLn $ "Load complement from existing page " <> show pageidx <> ": " <> (ident . renderTable $ i)
+              liftIO . putStrLn $ "Load complement from existing page " <> show pageidx <> ": " <> (ident . render $ i)
               readNew sq i
             Nothing -> do
               -- Check if interval is inside the current interval in case is not complete
@@ -477,7 +477,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                   return ((sq,idx), (sidx,reso))
                 else do
                   -- BUG: DEBUG why this is happening
-                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (sq, G.size reso,pageidx) <> (ident . renderTable $ tbf)
+                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (sq, G.size reso,pageidx) <> (ident . render $ tbf)
                   readNew sq tbf 
           Nothing -> do
             liftIO . putStrLn $ "New page requested: " <> show pageidx
@@ -492,7 +492,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
           case projection of
             Just remain -> do
               liftIO . putStrLn $ "Current table is partially complete: " <> show (tableName table, sq,G.size reso)
-              liftIO . putStrLn $ (ident $ renderTable remain)
+              liftIO . putStrLn $ (ident $ render remain)
               readNew  sq tbf
             Nothing -> do
               case pagetoken of 
@@ -518,7 +518,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            then
             case L.null complements of
               True -> do
-                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table,  reso)
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table) -- ,  reso)
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
                 if L.length  complements  == 1
@@ -547,9 +547,6 @@ tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non null
     available = S.unions $ relOutputSet . keyattr <$> unkvlist t
     need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (_kvattrs m)
 
-dynFork a = do
-  t <- liftIO $  forkIO a
-  registerDynamic (killThread t)
 
 convertChanEventIndex inf table nchan = do
     (e,h) <- newEvent
@@ -654,10 +651,10 @@ convertChanEvent inf table fixed select bres chan = do
     TableRep (_,_,v) <- currentValue bres
     let
       meta = tableMeta table
-      m =  tableDiff <$> concat  ml
+      deltas  =  tableDiff <$> concat  ml
       match :: RowPatch Key Showable -> Bool
       match (RowPatch (i,PatchRow j)) = case G.lookup i v  of
-                  Just r ->   G.checkPred (apply r j )   (fst fixed )
+                  Just r -> G.checkPred (apply r j ) (fst fixed )
                   Nothing -> False
       match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
         where
@@ -666,15 +663,20 @@ convertChanEvent inf table fixed select bres chan = do
             Nothing ->  False
       match (RowPatch (i,DropRow)) = isJust (G.lookup i v)
       match (BatchPatch i j) = maybe False (const True ) $ nonEmpty (filter (\ix -> match (RowPatch (ix,j)) ) i ) 
-
       filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
-      newRows =  filter match m
-      oldRows = filterPredNot v m
+      newRows =  filter match deltas 
+      oldRows = filterPredNot v deltas 
       patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> (oldRows <> nonEmpty newRows)
+      mapPatch r (RowPatch (ix,j)) = (ix,patchType j ,match r)
+      mapPatch r i = error (show i)
     traverse h patches
+    
     return ()) (\e -> atomically (takeMany chan) >>= (\d -> putStrLn $  show ("error convertChanEvent"  ,e :: SomeException,d)<>"\n"))
   return e
 
+patchType (PatchRow _ ) = "PatchRow"
+patchType (CreateRow _ ) = "CreateRow"
+patchType (DropRow  ) = "DropRowRow"
 
 mapTableRep f (TableRep (m,i,j))= TableRep (f <$> m, mapSecondary f i, mapPrimary f j)
 mapSecondary f = M.mapKeys (fmap (fmap f)) . fmap (fmap (fmap (fmap (G.mapAttributePath f))))
@@ -787,12 +789,13 @@ fromTableS origin whr = mdo
   liftIO . putStrLn $ "Load fromTableS:  " <> show origin
   (ref,(_,rep)) <- tableLoaderAll table Nothing  (liftPredicateF lookupKeyName inf origin inipred) Nothing
   (e,h) <- lift newEvent 
-  ev <- lift $ convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
-  lift $ onEventIO ev (mapM h)
-  lift $ onChangeDyn (psvalue whr) (\pred -> do
+  (_,ini) <- liftIO . runDynamic $ do 
+    ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
+    onEventIO ev (mapM h.compact)
+  lift $ onChangeDynIni ini (psvalue whr) (\pred -> do
     liftIO . putStrLn $ "Listen fromTableS:  " <> show origin
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) (allFields inf table) (psvalue t)  (patchVar ref)
-    onEventIO ev (mapM h))
+    onEventIO ev (mapM h.compact))
   t <- lift $ accumS rep e
   return (t,ref)
 
@@ -801,7 +804,7 @@ fromTable origin whr = mdo
   inf <- askInf
   let table = lookTable inf origin
       pred = liftPredicateF lookupKeyName inf origin whr
-  liftIO $ putStrLn (show (whr,pred))
+  -- liftIO $ putStrLn (show (whr,pred))
   (ref,(n,rep)) <- tableLoaderAll table Nothing  pred Nothing
   ev <- lift $ convertChanEvent inf table (pred,rawPK table) (allFields inf table) (psvalue t) (patchVar ref)
   t <- lift $ accumS rep  (head <$> ev)

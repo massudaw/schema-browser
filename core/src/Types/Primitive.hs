@@ -877,9 +877,9 @@ relType i = error (show i)
 relType' :: Show a => Rel (FKey (KType a)) -> KType [a]
 relType' (Inline k) = pure <$> keyType k
 relType' (RelAccess xs n) =
-  Primitive (_keyFunc (mergeFKRef $ relType <$> relUnComp xs) ++ ty) [at]
+  Primitive (_keyFunc (mergeFKRef $ relType' <$> relUnComp xs) ++ ty) at
   where
-    Primitive ty at = relType n
+    Primitive ty at = relType' n
 relType' (RelComposite i ) = fmap concat $ mergeFKRef $ relType' <$> i 
 relType'  (RelFun i j k ) = relType' i 
 relType' (Rel i k l) = relType' i 

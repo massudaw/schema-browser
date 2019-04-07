@@ -456,9 +456,8 @@ newtype PageTokenF v
 
 data TBOperation a
   = TBInsert a
-  | TBUpdate a a
+  | TBUpdate a (Index a)
   | TBNoop a
-  deriving(Functor)
 
 data OverloadedRule
   =  CreateRule  (TBData Key Showable -> TransactionM (RowPatch Key Showable))
@@ -882,6 +881,7 @@ allKVRec' inf m e =  concat $ fmap snd (L.sortBy (comparing (\i -> maximum $ (`L
 
 patchRowM' m o v =  RowPatch . (G.getIndex m v,) . PatchRow  <$> diff o v
 patchRow' m o v =  RowPatch (G.getIndex m v,PatchRow (diff' o v))
+patchRow m o d =  RowPatch (G.getIndex m o,PatchRow d)
 createRow' m v =  RowPatch (G.getIndex m v,CreateRow v)
 dropRow' m v = RowPatch (G.getIndex m v,DropRow )
 

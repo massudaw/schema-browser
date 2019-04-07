@@ -806,7 +806,7 @@ instance Ord a => Ord (Interval.Interval a) where
   compare i j = compare (Interval.upperBound i) (Interval.upperBound j)
 
 instance Ord k => Semigroup (KV k a) where
-  KV i <> KV j = KV (Map.union i j)
+  (KV i) <> (KV j) = KV (Map.union i j)
 
 instance Ord k => Monoid (KV k a) where
   mempty = KV Map.empty
@@ -935,7 +935,7 @@ renderRel (RelFun k expr rel) = renderRel k ++ " = " ++ renderFun expr rel
         go (Function i e) =
           T.unpack i ++ "(" ++ L.intercalate "," (fmap go e) ++ ")"
         go (Value i) = renderRel $ justError "no value" $ ac `atMay` i
-renderRel (RelComposite l ) =  L.intercalate ","  (renderRel <$> l)
+renderRel (RelComposite l ) =  "(" <> L.intercalate ","  (renderRel <$> l) <> ")"
 renderRel (RelAccess i l) =
   renderRel i ++ "." ++ renderRel l
 renderRel (Rel i Equals k)

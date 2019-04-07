@@ -19,6 +19,7 @@ module SchemaQuery.Arrow
 
 import Control.Arrow
 import Control.Monad.State
+import TP.Widgets (calmT)
 import Data.Either
 import Reactive.Threepenny hiding (apply)
 import Control.Monad.RWS
@@ -108,8 +109,13 @@ instance Patch (WherePredicateK v) where
   type Index (WherePredicateK v) = WherePredicateK v
   applyUndo (WherePredicate (AndColl i)) (WherePredicate (AndColl j)) = Right $ (WherePredicate (AndColl (i <> j)),WherePredicate (AndColl i))
   applyUndo (WherePredicate (OrColl i)) (WherePredicate (OrColl j)) = Right $ (WherePredicate (OrColl (i <> j)), WherePredicate (OrColl (i )))
-    
-pmap f fp (PStream b e ) = PStream (trace "total pmap".f <$> b) (filterJust $ trace "partial pmap".  fp <$> e)
+
+pmap' f fp  (PStream b e ) = PStream (f <$> b) (fp <$> e)
+
+   
+pmap f fp  = Kleisli (\(PStream b e )->  lift $ do
+  ini <- currentValue b
+  accumS (f ini) (filterJust $ trace "partial pmap".  fp <$> e))
 
 pconst  b  = PStream (pure b) never 
 
@@ -136,13 +142,14 @@ innerJoinS (P j k) (P l n) srel =
   P (JoinV j l InnerJoin srel )
     (proc i -> do
       kv <- k -< i
-      nv <- n -< pmapPredicate (relComp srel ) kv
+      pred <- pmapPredicate (relComp srel ) -< kv 
+      nv <- n -<  pred
       Kleisli (pmerge (\i k -> innerJoin j l srel (primary i, primary k))  (\left last i -> do 
             inf <- askInf 
             let origin = sourceTable inf (JoinV j l InnerJoin srel )
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $  safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
+            return $  safeHead   $ joinPatch False rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
 
 mapPatch f (RowPatch (ix,PatchRow i) ) = RowPatch (ix, PatchRow $ f i )
 
@@ -175,11 +182,11 @@ innerJoin j l srel (emap,amap) = do
               taratt = getAtt tar (tableNonRef m)
           joined i = flip addAttr i <$> joinFK i
           result = (\(i,j,k) -> joined i)<$> G.getEntries emap
-        when (L.any isLeft result) . liftIO $do
-           putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
-           print (L.length $ rights result)
-           print (G.keys amap)
-           print (lefts result)
+        -- when (L.any isLeft result) . liftIO $do
+           -- putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
+           -- print (L.length $ rights result)
+           -- print (G.keys amap)
+           -- print (lefts result)
         let idx = (F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) (createRow' (tableMeta origin)<$> rights (F.toList result) ) )
         return  idx 
 
@@ -192,13 +199,14 @@ leftJoinS (P j k) (P l n) srel
   = P joinS
     (proc p -> do
       kv <- k -< p
-      nv <- n -< pmapPredicate (relComp srel) kv 
+      pred <-  pmapPredicate (relComp srel) -< kv 
+      nv <- n -< pred
       Kleisli (pmerge (\i k -> leftJoin joinS (primary i, primary k))  (\left last i -> do 
             inf <- askInf 
             let origin = sourceTable inf joinS 
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $ safeHead $ joinPatch rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
+            return $ safeHead $ joinPatch True rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
     where joinS = JoinV j l LeftJoin srel
 
 
@@ -236,7 +244,12 @@ joinP t = do
   (e,h) <- newEvent
   init <- currentValue (facts t)
   el <- currentValue (psvalue init)
-  mapTidingsDyn (flip onEventDyn (liftIO. h) .psevent ) t
+  (_,ini) <- liftIO $runDynamic $ do 
+    onEventDyn  (psevent init) (liftIO. h)
+
+  onChangeDynIni ini (facts t) (\i -> do
+    onEventDyn  (psevent i) (liftIO. h)
+    ) 
   accumS el e
 
 pmapPredicate cindex 
@@ -254,35 +267,53 @@ fixLeftJoinS
   :: DatabaseM (View T.Text T.Text) (PStream (WherePredicateK T.Text)) (PStream (TableRep Key Showable))
   -> DatabaseM (View T.Text T.Text) (PStream (WherePredicateK T.Text)) (PStream (TableRep Key Showable))
   -> [Rel T.Text]
-  -> Maybe (Rel T.Text)
+  -> Rel Key
   -> DatabaseM (View T.Text T.Text) (PStream (WherePredicateK  T.Text)) (PStream (TableRep Key Showable))
 fixLeftJoinS (P j k) (P l n) srel index 
-  = P  join 
+  = P  joinS
     (proc p -> do
+      preinf <- Kleisli (const askInf ) -< ()
+      let (origin ,inf) = updateTable preinf  joinS
+          target = sourceTable inf l
+          srelc = relComp $ (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
       kv <- k -< p
-      Kleisli (go srelc  (0 ::Int)) -< kv)
+      Kleisli (\(srelc ,kv ) -> go (0 ::Int) srelc kv) -< (srelc , kv))
     where 
-      srelc = relComp srel
-      join = JoinV j l LeftJoin srel 
-      go _  ix _ | ix > 5 = error "max recursion"
-      go cindex ix  kv = do
+      joinS = JoinV j l LeftJoin srel 
+      go ix _ _ | ix > 5 = error "max recursion"
+      go ix cindex  kv = do
         preinf <- askInf
         let 
-          (origin ,inf) = updateTable preinf  join 
-          consIndex = maybe srelc (flip relAppend srelc) index
-          predS :: Tidings (WherePredicateK T.Text)
-          predS = toTidings $ pmapPredicate cindex kv
-        lift $  joinP =<<  mapTidingsDyn (\predM -> if predM == mempty
+          srelc = relComp $ (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
+          (origin, inf) = updateTable preinf  joinS
+          target = sourceTable inf l
+          sindex = fmap keyValue cindex
+          consIndex = relAppend index srelc
+          -- predS :: PStream (WherePredicateK T.Text)
+        predS <- runKleisli (pmapPredicate sindex) kv
+        isEmpty <- lift $ calmT ( fmap (== mempty) (toTidings predS))
+
+        lift $  joinP =<<  mapTidingsDyn (\empty-> if empty
             then return kv 
             else transactionNoLog preinf $ do  
-              out <- (runKleisli n) (pconst predM)
-              result <- pmerge (\i j ->  do
-                let joined = joinRelation inf join cindex (primary i )
-                return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $ 
-                    (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) (\ _ _ i -> return (Just i) ) (\ _ _ i -> return (Just i) )  (out, kv)
-              go (relAppend cindex consIndex) (ix+1)  result 
-                                         ) predS
+              liftIO $ print  ("Loading go " ++ show ix)
+              out <- (runKleisli n) predS 
+              result <- pmerge 
+                (\j i ->  do
+                  let joined = joinRelation inf joinS sindex (primary i )
+                  return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $ 
+                      (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) 
+                (\_ last i -> do 
+                  inf <- askInf 
+                  let origin = sourceTable inf joinS 
+                      target = sourceTable inf l
+                  return $ safeHead . traceShowIdPrefix ("right fix: " ++ renderRel cindex ) (L.intercalate "\n\n" . fmap (ident . render . snd . unRowPatch ) ) $ joinPatch True (relUnComp cindex) target id [i] last )
+                (\ _ _ i -> return (Just i))  
+                (kv ,out)
+              go (ix+1) (relAppend cindex consIndex)   result 
+                                         ) isEmpty 
 
+traceShowIdPrefix p f i = trace (p ++ "-" ++ f i) i 
 
 fixLeftJoinR 
   :: DatabaseM (View T.Text T.Text) (WherePredicateK T.Text) (G.GiST (TBIndex Showable) (TBData Key Showable))
@@ -328,7 +359,6 @@ joinRelation preinf join@(JoinV j l LeftJoin srel ) index amap =  do
         where
           result = justError ("cant index: "  ++ show  (srel , m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
           findRef i v = maybe  Nothing Just $ patch . mapKey' keyValue <$> G.lookup pk  amap
-
             where targetRel = (L.sortOn (\ i -> L.elemIndex (simplifyRel $ _relTarget i) (fmap simplifyRel targetPK ))  i )
                   pk = G.getUnique targetRel (kvlist v)
 
@@ -377,11 +407,13 @@ projectS
     DatabaseM  (View i k) (PStream (WherePredicateK T.Text) ) (PStream (TableRep  Key Showable))
      -> PluginM (Union (G.AttributePath k MutationTy))  (Atom (TBData T.Text Showable))  TransactionM () b
      -> DatabaseM (View i k) () (Tidings (G.GiST (TBIndex Showable) b))
-projectS  (P i (Kleisli j))  p@(P (k,_) _ ) = P (ProjectV i (foldl mult one k)) (Kleisli $  \_ -> (j empty )  >>= mapArrow . fmap primary . toTidings  )
+projectS  (P i (Kleisli j))  p@(P (k,_) _ ) = P (ProjectV i (foldl mult one k)) (Kleisli $  \_ -> (j empty )  >>= mapArrow . fmap primary . toTidings  . pmap' id ( traceShowIdPrefix "project : "(ident . render)) )
         where empty = PStream (pure mempty) never
+              execute a = traverse (evalEnv p . (,mempty) . Atom .
+                {- traceShowIdPrefix "project : "(ident . renderTable) . -}  mapKey' keyValue) a
               mapArrow a = do
                   inf <- ask 
-                  lift $ mapTidingsDyn (\a -> transactionNoLog (fst inf) $ traverse (evalEnv p . (,mempty) . Atom . mapKey' keyValue) a) a 
+                  lift $ mapTidingsDyn  (transactionNoLog (fst inf) . execute) a 
 
 
 

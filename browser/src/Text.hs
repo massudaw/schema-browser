@@ -1,4 +1,5 @@
-module Text where
+{-# LANGUAGE TupleSections,TypeApplications,FlexibleInstances,TypeSynonymInstances #-}
+module Text (ident, render,renderShowable , readPrim,renderPrim,renderPredicateWhere,readType) where
 
 import Types
 import Types.Patch
@@ -48,29 +49,56 @@ instance PrettyRender Showable where
 explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> concat (replicate i depth) ++ j)
 
 ident :: [(Int,String)] -> String
-ident = explode '\n' "  "
+ident = explode '\n' " " . compressClosingBrackets
 
-renderTablePatch :: RowOperation T.Text Showable -> String
-renderTablePatch (CreateRow i) = "CreateRow " ++ ident (renderTable i)
-renderTablePatch (PatchRow i) = "PatchRow " ++ ident (renderRowPatch i)
-renderTablePatch DropRow  = "DropRow"
+compressClosingBrackets :: [(Int,String)] -> [(Int,String)]
+compressClosingBrackets =  foldr (flip mergeBracket) []  
+  where 
+   mergeBracket [] i = [i]
+   mergeBracket v@((ix, t ):xs) (ix2,t2) 
+     | L.all (=='}') t  && L.all (=='}') t2 = (max ix ix2 , t <> t2) :  xs
+     | otherwise = (ix2,t2)  : v
+
+instance PrettyRender Key where
+  render i = [(0,show i)]
+
+instance PrettyRender T.Text  where
+  render i = [(0,T.unpack i)]
+  
+instance (Show a, Ord a, PrettyRender a , PrettyRender b) => PrettyRender (RowOperation  a b ) where
+  render (CreateRow i) = wrapBrackets "CreateRow " (renderTable i)
+  render (PatchRow i) = wrapBrackets "PatchRow " (renderRowPatch i)
+  render DropRow = [(0,"DropRow")]
+
+instance (Show a, PrettyRender a) => PrettyRender (TBIndex a) where
+  render (Idex i ) =   concat $ render  <$> i
+
+instance (Ord a,Show a, Show b, PrettyRender a , PrettyRender b) =>  PrettyRender (RowPatch a b) where
+  render (RowPatch (ix,op)) = wrapBrackets "PK => " (render ix) <> render op
 
 renderRowPatch :: (PrettyRender b,Show a) => TBIdx a b-> [(Int,String)]
 renderRowPatch i =  concat $ renderPatch  <$> i
 
+instance  (Ord a , Show a ,PrettyRender b) => PrettyRender (TBData a b ) where
+  render = renderTable
+
 renderTable :: (Ord a , Show a,PrettyRender b) => TBData a b ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
+wrapBrackets i l 
+  | length l > 3 = [(0,i ++ "{")]  ++ offset 1 l ++  [(0,"}")]
+  | length l > 1 = [(0,i)] ++ offset 1 l 
+  | otherwise = [(0, i  ++ maybe "" snd (safeHead l) )]
 
 offset ix =  fmap (first (+ix))
 renderPatch :: (PrettyRender b ,Show a) => PathAttr a b ->  [(Int,String)]
 renderPatch (PFK rel k v )
-  = [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] {")]
-  ++  offset 1 (renderFTBPatch renderRowPatch v)++ [(0,"}")]
-renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch render v))]
-renderPatch (PInline k v ) = [(0,show k ++ " {")] ++ offset 1 (renderFTBPatch renderRowPatch v) ++ [(0,"}")]
-renderPatch (PFun k j v ) = [(0,renderRel (RelFun (Inline k) (fst j) (snd j) ) ++ " => " ++ ident (renderFTBPatch render v))]
+  = wrapBrackets  (L.intercalate " && " (fmap renderRel rel) ++ " => ")
+  ((concat $ renderPatch <$> k) 
+  ++  offset 1 (render v))
+renderPatch (PAttr k v ) = wrapBrackets (show k ++ " => ") (render v) 
+renderPatch (PInline k v ) = wrapBrackets (show k ++ " => ") (render v) 
+renderPatch (PFun k j v ) = wrapBrackets  (renderRel (RelFun (Inline k) (fst j) (snd j) ) ++ " => ") (render v)
 
 
 renderPredicateWhere (WherePredicate i) = renderPredicate i
@@ -92,10 +120,19 @@ renderAttr (Attr k v ) = breakLine  (renderFTB render v)
 renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ i  )  (first (+1) <$> renderFTB renderTable v)
 renderAttr (Fun i k v) = renderAttr (Attr i v)
 
+
+instance PrettyRender a => PrettyRender (FTB a) where
+  render  = renderFTB render
+instance PrettyRender a => PrettyRender (PathFTB a) where
+  render  = renderFTBPatch render
+instance (Show k ,PrettyRender a) => PrettyRender (TBIdx k a) where
+  render  = renderRowPatch 
+
+
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
 renderFTBPatch f (PAtom i) = f i
 renderFTBPatch f (POpt i) = concat $ maybeToList $ fmap (renderFTBPatch f ) i
-renderFTBPatch f (PIdx ix i)  = [(0, show ix ++ " : {")]  ++ maybe [] (offset (1) .renderFTBPatch f) i ++ [(0,"}")]
+renderFTBPatch f (PIdx ix i)  =  wrapBrackets (show ix  ++ " => ") (maybe [] (renderFTBPatch f) i)
 renderFTBPatch f (PatchSet l ) =  concat $ F.toList $ fmap (renderFTBPatch f) l
 renderFTBPatch f (PInter b i)  = [(0,showFin i)]
   where
@@ -135,7 +172,7 @@ renderPrim (STime i)
     SDayTime a -> show a
     SPInterval a -> show a
 renderPrim (SBinary i) = "Binary= " ++ show (hash i )
-renderPrim (SDynamic (HDynamic s)) = fromMaybe  "can't render SDynamic" $ fmap renderShowable (fromDynamic s) <|> fmap (L.intercalate "," . map renderPK) (fromDynamic s) <|> fmap renderTablePatch (fromDynamic s)
+renderPrim (SDynamic (HDynamic s)) = fromMaybe  "can't render SDynamic" $ fmap renderShowable (fromDynamic s) <|> fmap (L.intercalate "," . map renderPK) (fromDynamic s) <|> fmap (ident. render @(RowOperation T.Text Showable) ) (fromDynamic s)
 renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i
 

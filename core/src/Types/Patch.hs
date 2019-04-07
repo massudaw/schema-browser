@@ -29,6 +29,7 @@ module Types.Patch
   , Atom(..)
   , filterDiff
   , isDiff
+  , kvlistp
   , isKeep
   , isDelete
   , Address(..)
@@ -59,6 +60,7 @@ module Types.Patch
   , firstPatchAttr
   , PatchConstr
   , firstPatchRow
+  , firstRowOperation
   , RowOperation(..)
   , RowPatch(..)
   ) where
@@ -515,7 +517,7 @@ instance PatchConstr k a => Patch (TB k a) where
   patch = patchAttr
 
 
-instance (Ord k) => Address (PathAttr k a) where
+instance (Show a, Show k ,Ord k) => Address (PathAttr k a) where
   type Idx (PathAttr k a) = Rel k
   type Content (PathAttr k a ) = PValue k a
   index = pattrKey
@@ -528,6 +530,7 @@ instance (Ord k) => Address (PathAttr k a) where
   rebuild (Inline i) (PRef k ) =  PInline i k
   rebuild (RelComposite l) (PRel i k ) =  PFK l i k
   rebuild r@(Rel _ _ _ ) (PRel i k ) =  PFK [r] i k
+  rebuild i j = error ("missing pattern on rebuild" <> show (i,j))
 
 instance (Ord k) => Address (TB k a) where
   type Idx (TB k a) = Rel k
@@ -731,6 +734,10 @@ pattrKey (PAttr s _) = Inline s
 pattrKey (PFun s l _) = RelFun (Inline s) (fst l) (snd l)
 pattrKey (PInline s _) =  Inline s
 pattrKey (PFK s _ _) = relComp s
+
+kvlistp :: (Ord (Idx a) , Monoid (Content a)) => Address a => [a] -> Map (Idx a) (Content a)
+kvlistp v = Map.fromListWith mappend (fmap (\i -> (index i,content i )) v )
+
 
 applyRecordChange ::
   forall  d a . PatchConstr d a

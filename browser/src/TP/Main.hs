@@ -385,7 +385,7 @@ withTable s m w =
     i2 <- currentValue (facts $ collectionTid db)
     let
       debug i =  ( (show  <$> M.toList (secondary i)))
-    liftIO $ putStrLn (unlines  $ fmap show $ (F.toList $ primary i2))
+    liftIO $ putStrLn (unlines  $ fmap (\i -> show $ G.getIndex (tableMeta table) i ) $ (F.toList $ primary i2))
     return ()
                )
 
@@ -409,17 +409,6 @@ testPartialLoading s t = do
 testCreate = withInf  "metadata"
  (\inf -> liftIO $ createFresh "tables" inf "geo" (Primitive [KOptional] (RecordPrim ("metadata","geo"))))
 
-withInf s v  = do
-  args <- getArgs
-  let db = argsToState args
-  smvar <- createVar
-  let
-    amap = authMap
-  (inf,fin) <- runDynamic $ keyTables smvar  ("metadata",postgresUser) amap
-  (inf,fin) <- runDynamic $ keyTables smvar  ("code",postgresUser) amap
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap
-  v inf
-
 
 testPlugin s t p  = do
   args <- getArgs
@@ -437,11 +426,6 @@ postgresUser = unsafePerformIO $ do
     now <-getCurrentTime
     return $ AuthCookie (User 10 "postgres")  rnd now
 
-testMain = withInf "personal" (\inf->  do
-  o <- fmap (fmap (view _1) . F.toList . view _1) ( runDynamic $ runMetaArrow inf agendaDef)
-  -- i <- fmap (fmap (view _1) . F.toList . view _1) ( runDynamic $ runMetaArrow inf )
-  print  o-- ,i,zipWith (==) i o )
-                              )
 
 testCalls = testWidget (do
   setCallBufferMode BufferAll
@@ -450,3 +434,16 @@ testCalls = testWidget (do
   j <- callFunction (ffi "1")
   UI.div # set text (show (i + j :: Int))
                        )
+
+withInf s v  = do
+  args <- getArgs
+  let db = argsToState args
+  smvar <- createVar
+  let
+    amap = authMap
+  (inf,fin) <- runDynamic $ keyTables smvar  ("metadata",postgresUser) amap
+  (inf,fin) <- runDynamic $ keyTables smvar  ("code",postgresUser) amap
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,postgresUser) amap
+  v inf
+
+

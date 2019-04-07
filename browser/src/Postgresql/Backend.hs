@@ -114,7 +114,7 @@ updateQuery m (pks,skv) = (qstr,qargs,Nothing)
     qargs = (first (fmap textToPrim) <$> (catMaybes $ fst <$> inputs)) <> concat (koldPk <$> pks)
     equality k = k <> "="  <> "?"
     koldPk (Idex kold) = zip (fmap textToPrim . keyType . L.head . F.toList . relOutputSet <$> _kvpk m) (F.toList kold)
-    pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_relOrigin <$> _kvpk m) (F.toList kold))
+    pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (L.head  . F.toList . relOutputSet <$> _kvpk m) (F.toList kold))
     inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
     paren i = "(" <> i <> ")"
@@ -164,11 +164,11 @@ sqlPatchFTB f k call (Primitive l c ) s = go k call l s
     go  prefix ca (KArray:xs)  (PIdx ix o) = do
       case o of
         Just j -> go  (k <> six ix ) ca xs  j
-        Nothing -> inpStatic $ (k <> " = " <>  escapeInline prefix <> sixDown (ix -1) <> " || " <> escapeInline prefix <> sixUp (ix + 1)  )
+        Nothing -> inpStatic $ (k <> " = " <>  escapeInline prefix <> sixDown ix  <> " || " <> escapeInline prefix <> sixUp ix  )
       where
-        six ix = "[" <> T.pack (show ix) <> "]"
-        sixUp ix = "[" <> T.pack (show ix) <> ":]"
-        sixDown ix = "[:" <> T.pack (show ix) <> "]"
+        six ix = "[" <> T.pack (show (ix + 1 )) <> "]"
+        sixUp ix = "[" <> T.pack (show (ix + 2)) <> ":]"
+        sixDown ix = "[:" <> T.pack (show (ix )) <> "]"
     go  prefix ca (KInterval:xs) b@(PatchSet _ ) =
       f prefix ca (Primitive (KInterval:xs) c ) b
     go  prefix ca (KInterval:xs)  (PInter s (v,j)) =
