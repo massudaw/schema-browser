@@ -331,7 +331,7 @@ checkPredId
      -> TBPredicate k a -> Maybe [AttributePath k ()]
 checkPredId v (WherePredicate l) = checkPredIdx  v l
   where
-    checkPredIdx v (AndColl i ) = fmap (fmap traceShowId. L.nub . foldr1 (\ i j -> concat $ [traceShowId $ unifyPaths a b | a <-i , b <- j ])) $ allMaybes $ checkPredIdx v <$> i
+    checkPredIdx v (AndColl i ) = fmap (L.nub . foldr1 (\ i j -> concat $ [unifyPaths a b | a <-i , b <- j ])) $ allMaybes $ checkPredIdx v <$> i
     checkPredIdx v (OrColl i ) = fmap concat $ nonEmpty $ catMaybes $ checkPredIdx v <$>  i
     checkPredIdx v (PrimColl i) = fmap pure (indexPredIx i v)
 
@@ -433,7 +433,7 @@ indexInline eqs ik@(Inline key) r = fmap (PathAttr key) . recPred (snd eq)  =<< 
     Just (k,Left eq) = L.find ((==ik).fst) eqs
     recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq) i
     recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
-    recPred op i = traceShow (ik , i, op,fst eq) $ if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
+    recPred op i = {-traceShow (ik , i, op,fst eq) $-} if match (Left (fst eq,op)) (Right i) then  Just (TipPath ()) else Nothing
 indexInline eqs rel r 
   | L.all isRel (relUnComp rel) = fmap (PathForeign (relUnComp rel)) . recPred gop  =<< relLookup rel r 
   | otherwise = Nothing
@@ -448,7 +448,7 @@ indexInline eqs rel r
     recPred (Flip (AnyOp eq)) (ArrayTB1 i) = fmap ManyPath  . Non.nonEmpty . catMaybes . F.toList $ NonS.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i ) i
     recPred op (TB1 (TBRef (v,_))) =  TipPath . Many <$> allMaybes ( checkAttr v <$> relUnComp rel)
         where 
-          checkAttr v (Rel i j k ) = traceShow (rel,i, op,fst eq) $ if match (Left (fst eq,op)) (Right (justError "no attr" $ attrLookup i v)) then  Just (PathAttr (_relOrigin i )(TipPath ())) else Nothing
+          checkAttr v (Rel i j k ) = {-traceShow (rel,i, op,fst eq) $ -} if match (Left (fst eq,op)) (Right (justError "no attr" $ attrLookup i v)) then  Just (PathAttr (_relOrigin i )(TipPath ())) else Nothing
               where Just (k,Left eq) = L.find ((==i).fst) eqs
 
 

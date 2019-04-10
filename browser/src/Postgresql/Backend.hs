@@ -236,7 +236,7 @@ insertMod m j  = do
         ini = compact (defs ++  patch j)
       d <- either error (maybe (return []) (insertPatch  inf (conn  inf) m) . kvNonEmpty . tableNonRef. filterWriteable ) (tableCheck m (create ini))
       l <- liftIO getCurrentTime
-      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ ini ++ d))
+      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (rawSchema table,rawName table)) (create $ ini ++ d))
 
 
 deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))

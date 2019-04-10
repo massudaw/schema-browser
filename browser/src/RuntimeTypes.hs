@@ -652,11 +652,20 @@ liftASchRel inf s tname st ttarget r@(Rel l e t) = Rel (lookKey s tname <$> l) e
     lookKey s tname c = justError ("no attr: " ++ show (c,tname,s,r,tname,ttarget)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$> (inf s tname))
 liftASchRel  _ i j k l m = error (show (i,j,k,l,m))
 
+findRelation
+  :: Foldable f =>
+     (t1 -> t2 -> Maybe (TableK (FKey a)))
+     -> t1
+     -> t2
+     -> f (Rel T.Text)
+     -> Maybe (Rel (FKey a))
 findRelation inf s tname  l = do  
   tb <- inf s tname
-  let output l = relOutputSet (relCompS l)
+  let output l = (relCompS l)
+      outputSet l = relOutputSet (relCompS l)
       relToKey = S.map (fmap keyValue) . pathRelRel
   rel <- L.find (\i ->  output l ==  output (relToKey i)) (rawFKS tb)
+          <|> L.find (\i ->  outputSet l ==  outputSet (relToKey i)) (rawFKS tb)
   case unRecRel rel of
     FKJoinTable l _ -> Just $ relCompS l
     i -> Nothing
@@ -895,7 +904,7 @@ tablePredicate' p = (WherePredicate . AndColl $ PrimColl .fixrel <$> p)
 
 lookRef k = _fkttable . lookAttrs' k
 
-tablePK t = (_rawSchemaL t ,_rawNameL t)
+tablePK t = (rawSchema t ,rawName t)
 
 lookAttrs' k = err . lookAttrsM k
   where

@@ -864,6 +864,7 @@ mergeOpt i j = error ("mergeOpt" <> show (i, j))
 
 relType :: Show a => Rel (FKey (KType a)) -> KType a
 relType (Inline k) = keyType k
+relType (NInline _ k) = keyType k
 relType (RelAccess xs n) =
   Primitive (_keyFunc (mergeFKRef $ relType <$> relUnComp xs) ++ ty) at
   where
@@ -876,6 +877,7 @@ relType i = error (show i)
 
 relType' :: Show a => Rel (FKey (KType a)) -> KType [a]
 relType' (Inline k) = pure <$> keyType k
+relType' (NInline _ k) = pure <$> keyType k
 relType' (RelAccess xs n) =
   Primitive (_keyFunc (mergeFKRef $ relType' <$> relUnComp xs) ++ ty) at
   where
