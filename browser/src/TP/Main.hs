@@ -90,7 +90,7 @@ setup smvar bstate plugList w = void $ do
                [("Map",fmap (^._2) <$>mapWidgetMeta inf)
                ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf)
                ,("Task",fmap (^._2) <$> taskWidgetMeta inf)
-               ,("Account",fmap (^._2) <$> accountWidgetMeta inf)
+               ,("Account",fmap (^._2) <$> ui (accountWidgetMeta inf))
                ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf )]
     let checkNav i =  maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav
     element menu # set UI.class_ "col-xs-1"

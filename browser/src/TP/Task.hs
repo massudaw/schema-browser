@@ -67,10 +67,10 @@ taskDef inf
             ifield "table_name" (ivalue (readV PText))  -< ()
         desc <- iforeign descRel (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
         pks <- iforeign pkRel (ivalue $ irecord 
-          (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] 
+          (iforeign [Rel "pks" Equals "column_name"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         efields <- iforeign (schemaI "event") (ivalue $ irecord 
-            (iforeign [Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] 
+            (iforeign [ Rel "column" Equals "ordinal_position"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         (color,child) <- iforeign (schemaI "planner")  (
            (,)<$> ivalue ( irecord (ifield "color" (ivalue $  readV PText)))

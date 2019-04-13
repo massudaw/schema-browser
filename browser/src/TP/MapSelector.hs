@@ -191,7 +191,7 @@ mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
 
         fin <- traverseUIInt (\pred-> do
           let 
-            selection = projectFields inf tb (fst $ staticP proj) $ allFields inf tb
+            selection = projectFields inf tb (fst $ staticP proj) mempty $ allFields inf tb
           reftb <- ui $ refTablesProj inf tb Nothing pred selection
           let v = primary <$> reftb ^. _2
           traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v

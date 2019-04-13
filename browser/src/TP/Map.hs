@@ -99,7 +99,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
               traverseUIInt (\pred ->
                 if mempty /= pred
                   then do
-                    reftb <- ui $ refTablesProj inf tb Nothing pred (projectFields inf tb (fst $ staticP proj) $ allFields inf tb)
+                    reftb <- ui $ refTablesProj inf tb Nothing pred (projectFields inf tb (fst $ staticP proj) mempty $ allFields inf tb)
                     let v = primary <$> reftb ^. _2
                     let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
                     onEvent evsel (liftIO . hselg)

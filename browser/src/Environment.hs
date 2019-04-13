@@ -18,7 +18,7 @@ import Utils
 
 import qualified Data.List as L
 import Control.Arrow
-import Data.Text (Text)
+import Data.Text (Text,unpack)
 import Control.Applicative
 
 import qualified Data.Map as M
@@ -38,7 +38,7 @@ data RowModifier
 
 mapA f a = F.foldr (liftA2 (:))  (pure []) (f <$> a)
 
-convertRel inf tname = fmap fromJust . buildRel . splitRel inf tname
+convertRel inf tname = fmap (justError $ "cannot convert" ++ show tname ). buildRel . splitRel inf tname
 
 splitRel inf tname = liftRel inf tname . indexerRel 
 
@@ -250,7 +250,7 @@ iforeign ::
   -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
 iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) 
-  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++show (kvkeys i)). indexField (Nested (Non.fromList s) (Many [])) $ i )). op ))
+  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++ show (kvkeys i)). indexField (Nested (Non.fromList (relUnComp $ relComp s)) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 
@@ -351,28 +351,67 @@ matchFTB f (TipPath i ) (TB1 v ) =  f i v
 matchFTB f (NestedPath PIdOpt  l ) (LeftTB1 v ) =  maybe False (matchFTB f l) v
 matchFTB f i j = error$  show (i,j)
 
-projectFields :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> TBData Key a -> TBData Key a
--- projectFields  _  _ s  l | traceShow  (s,l) False = undefined
-projectFields inf t s l = kvlistMerge . catMaybes $ pattr l <$> (F.toList =<< s )
-  where 
-    pattr v (G.PathAttr i _) 
-      =  kvLookup (Inline (lookKey inf (tableName t) i)) v
-        <|> kvFind (\v -> _relOutputs v == Just [lookKey inf (tableName t) i]) v 
-        <|> kvLookup (Inline (lookKey inf (tableName t) i)) (tableNonRef v)
-    pattr v (G.PathInline i n) =  pfun (\n -> Le.over ifkttable (fmap (projectFields inf nt [n]))) n <$> kvLookup (Inline (lookKey inf (tableName t) i)) v
+validateAttributePath :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)]  -> [Union (G.AttributePath Key MutationTy)] 
+validateAttributePath inf table l 
+  = validateRow  inf table <$> l 
+  where  
+    validateRow inf table (Many r) 
+        = Many $ validateAttribute inf table <$> r
+    validateAttribute inf table (G.PathForeign rel i ) 
+        = G.PathForeign lrel (validateRow ninf nt <$> i)
+      where 
+        lrel = liftRelation inf table rel
+        nst = findRefTableKey table lrel 
+        (ninf,nt) = lookInfTable inf nst 
+    validateAttribute inf table (G.PathAttr k i ) 
+        = G.PathAttr (lookKey inf (tableName table) k) i
+    validateAttribute inf table (G.PathInline k i ) 
+        = G.PathInline ki  (validateRow ninf nt <$> i)
         where Primitive _ (RecordPrim nst) = keyType ki
-              ki  = (lookKey inf (tableName t) i)
-              nt = lookSTable inf nst 
+              ki = lookKey inf (tableName table) k
+              (ninf,nt) = lookInfTable inf nst 
+    liftRelation  inf t l = relUnComp $ liftASch (lookKeyNested $tableMap inf ) (schemaName inf ) (tableName t)  $ relComp (l)
 
-    pattr v (G.PathForeign i n ) 
-      = pfun (\n -> Le.over ifkttable (fmap (projectFields inf nt [n]))) n  <$> kvLookup (relComp $ liftRelation $ i) v
-        where 
-              nst = findRefTableKey t (liftRelation i )
+projectFields :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
+projectFields inf table l w v = projectFields' inf table (validateAttributePath inf table l ) w v
+
+projectFields' :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
+-- projectFields' _ _ l  w _ | traceShow ("projectFields",l,w) False = undefined
+projectFields' inf t s (WherePredicate pred) l 
+  =  kvlistMerge . catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList <> fkAttrList ))
+  where 
+    attrList = fst <$> F.toList pred 
+    fkAttrList = concat $ fmap mappath  (F.toList  =<< s )  
+      where mappath (G.PathForeign i _ ) =  concat $ explodeRel <$> i
+            mappath _ = [] 
+            explodeRel (Rel (RelAccess i _) _ _ )=  explodeRel i
+            explodeRel (Rel i _ _ ) = [i] 
+            explodeRel (RelComposite l ) = concat $ explodeRel <$> l
+
+    -- pattr v i | traceShow ("pattr",i , kvkeys v) False = undefined
+    pattr v (G.PathAttr key  _) 
+      =  kvLookup (Inline key ) v
+        <|> (findRef =<< kvFind (\v -> _relOutputs v == Just [key]) v )
+        <|> kvLookup (Inline key) (tableNonRef v)
+          where 
+            findRef (FKT v _ _ ) = kvLookup (Inline key) v
+    pattr v (G.PathInline ki n) 
+      = pfun (\n -> Le.over ifkttable (fmap (projectFields' inf nt [n] (WherePredicate pred )))) n <$> kvLookup (Inline ki) v
+        where Primitive _ (RecordPrim nst) = keyType ki
               nt = lookSTable inf nst 
+    pattr v (G.PathForeign i n ) 
+      = pfun (\n ->  Le.over ifkttable (fmap (projectFields' inf nt [n,relAttrs] mempty)))  n  <$> (kvLookup (relComp i) v)
+        where 
+          attrs (Rel _ _ r ) = G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
+            where i = _relOrigin r 
+          attrs i = error (show i )
+          relAttrs = Many $  attrs <$> i 
+          nst = findRefTableKey t i
+          nt = lookSTable inf nst 
     pattr i j = error (show j )
-    liftRelation  l = relUnComp $ liftASch (lookKeyNested $tableMap inf ) (schemaName inf ) (tableName t)  $ relComp (relNormalize l)
     pfun f (G.TipPath n ) = f n
     pfun f (G.NestedPath _ n ) = pfun f n
+    pfun _ i = error "not valid" 
  
 
 translate

@@ -504,7 +504,14 @@ lookTableM :: InformationSchema -> Text -> Maybe Table
 lookTableM inf t =  HM.lookup t (_tableMapL inf)
 
 lookSTable :: InformationSchema -> (Text,Text) -> Table
-lookSTable inf (s,t) = justError ("no table: " <> show (s,t)) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
+lookSTable inf (s,t) = justError ("lookSTable no table: " <> show (s,t)) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
+
+lookInfTable :: InformationSchema -> (Text,Text) -> (InformationSchema,Table)
+lookInfTable inf (s,t) = justError ("lookInfTable no table: " <> show (s,t)) $  do
+  tmap <- HM.lookup s (tableMap inf)
+  let ninf = fromMaybe inf (HM.lookup s (depschema inf)) 
+  table <- HM.lookup t tmap
+  return (ninf,table)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
@@ -524,7 +531,7 @@ mapModification f (FetchData d e) = FetchData (fmap f d) (firstPatchRow f e)
 
 putPatchSTM m =  writeTChan m -- . force
 putIdx m = liftIO .atomically . putIdxSTM m
-putIdxSTM m =  writeTChan m  . force
+putIdxSTM m =  writeTChan m  -- . force
 
 typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
 typeCheckValuePrim f (KSerial :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
@@ -590,7 +597,9 @@ liftTable' = liftTableF lookupKeyName
 findRefTableKey
   :: (Show t, Ord t) => TableK t -> [Rel t] -> (T.Text, T.Text)
 findRefTableKey ta rel =  tname2
-  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError ("no fk ref1" <> show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList $ rawFKS  ta)
+  where   
+    (FKJoinTable  _ tname2 )  = unRecRel $ justError ("no fk ref1" <> show (tableName ta, renderRel <$> rel ,rawFKS ta)) $ 
+          L.find (\r->  pathRelRel r == S.fromList rel) (F.toList $ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2
@@ -675,7 +684,7 @@ liftASch
      -> T.Text -> T.Text -> Rel T.Text -> Rel Key
 -- liftASch inf s tname l | traceShow (s,tname,l) False = undefined
 liftASch inf s tname (RelComposite l) =
-  fromMaybe (relCompS $ liftASch inf s tname <$> l) $ 
+  fromMaybe (relCompS $  liftASch inf s tname <$> l) $ 
       findRelation inf s tname l
 liftASch inf s tname (RelAccess i c) = RelAccess (relComp $ pathRelRel rel) (liftASch inf sch st c)
   where
@@ -689,7 +698,7 @@ liftASch inf s tname l =  fromMaybe (lookKey <$> l ) rel
   where
     rel = findRelation inf s tname [l]
     tb = inf s tname
-    lookKey c = justError ("no attr: " ++ show (c,tname,s,l,rel)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
+    lookKey c = justError ("liftASch no attr: " ++ show (c,tname,s,l,rel,rawFKS <$> tb)) $ L.find ((==c).keyValue ) =<< (rawAttrs <$>tb)
 
 lookKeyNested inf s tname = HM.lookup tname =<<  HM.lookup s inf
 lookKeyNestedDef tb inf s tname 
@@ -814,12 +823,14 @@ recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
     go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
-      | S.isSubsetOf (relOutputSets (_relAccess <$> rel)) (relOutputSets $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | isNothing hasJoin = Nothing
+      | S.isSubsetOf (relOutputSets ( concatMap (fmap relAccessSafe. relUnComp )  rel)) (relOutputSets $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
         merged = filterAttrs  (_relTarget <$> rel) m2 <$> tb <*> tb1
-        FKJoinTable _ ref = unRecRel $ justError "cant find fk rec complement" $ L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        hasJoin = L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
+        FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec complement: " ++ show (_kvname m ) ++ " - "++ renderRel (relComp rel) <> show (_kvjoins m ))  $  hasJoin
         m2 = lookSMeta inf (RecordPrim ref)
     go _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
@@ -843,7 +854,7 @@ recPKDescIndex inf = filterTBData pred inf
     pred = (\m k _ ->
             let
                 pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m <> concat (_kvuniques m) <> concat relAccess )
-                relAccess = fmap (fmap _relAccess ) . L.filter (L.all isRelAccess ) . _kvuniques $ m
+                relAccess = fmap (fmap relAccessSafe ) . L.filter (L.all isRelAccess ) . _kvuniques $ m
                 isRelAccess (RelAccess l i) = True
                 isRelAccess _ = False
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)

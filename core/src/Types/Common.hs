@@ -21,6 +21,7 @@ module Types.Common
   , mapFAttr
   , simplifyRel
   , relComp
+  , relAccessSafe
   , relCompS
   , relNormalize 
   , relNull
@@ -82,6 +83,7 @@ module Types.Common
   , findFKAttr
   , findAttr
   , kvLookup
+  , recLookupKV
   , refLookup
   , relAppend
   , recLookup'
@@ -415,6 +417,13 @@ data Rel k
            , _relReference :: [Rel k] }
   deriving (Eq, Show, Ord, Functor, Traversable, Foldable, Generic)
 
+relAccessSafe (Rel i _ _)  = i 
+relAccessSafe (RelAccess i _ ) = i 
+relAccessSafe (RelFun i _ _ ) = i 
+relAccessSafe (Output i ) = i
+relAccessSafe i@(Inline _ ) = i
+relAccessSafe i = error $ "failed relAccess on " ++ show (i)
+
 _relTarget (Rel _ _ i) = i
 -- _relTarget (RelComposite i ) = _relTarget <$> i
 _relTarget (RelAccess _ i) = _relTarget i
@@ -446,6 +455,7 @@ relNormalize l
 _relOrigin (Rel i _ _) = _relOrigin i
 _relOrigin (RelComposite i ) = error "origin needs to be unique" --  _relOrigin <$> i
 _relOrigin (Inline i) = i
+_relOrigin (NInline _ i ) = i
 _relOrigin (Output i) = _relOrigin i
 _relOrigin (RelAccess _ i) = _relOrigin i
 _relOrigin (RelFun i _ _) = _relOrigin i
@@ -815,7 +825,7 @@ instance Ord k => Monoid (KV k a) where
 findFK :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
 findFK l v =
   fmap (recoverAttr . first originalRel) $
-    L.find (\(i, v) -> isFK v && S.map _relOrigin (S.fromList $ relUnComp $ originalRel i) == (S.fromList l)) $
+    L.find (\(RelSort _ _ i, v) -> isFK v && relOutputSet i == (S.fromList l)) $
   Map.toList $ _kvvalues $ v
   where
     isRel (Rel _ _ _) = True
@@ -863,6 +873,14 @@ recLookup' p@(RelComposite i) v = join $ maybeToList $ nonEmpty (join $ traverse
   where explodeAttr (Attr i v ) = [v]
         explodeAttr (FKT i _ _ ) = join $ explodeAttr <$> unkvlist i 
 recLookup' p@(Rel i _ _) v = maybeToList $ _tbattr <$> kvLookup i  v 
+
+recLookupKV :: (Show k ,Ord k) => Rel k -> TBData k v -> Maybe (FTB (TB k v))
+recLookupKV i j | traceShow (i,kvkeys j )  False = undefined
+recLookupKV n@(RelAccess l nt) v =
+  join $ fmap join . traverse (recLookupKV nt) <$> refLookup (trace (renderRel l ++ " - " ++ L.intercalate ", " (renderRel <$> kvkeys v) ) l) v
+recLookupKV p@(RelComposite i) v = TB1 <$> kvLookup p  v 
+recLookupKV p@(Rel _ _ _) v = TB1 <$> kvLookup p  v 
+recLookupKV p@(Inline l) v = TB1 <$> kvLookup p v
 
 
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
@@ -940,7 +958,7 @@ renderRel (RelAccess i l) =
   renderRel i ++ "." ++ renderRel l
 renderRel (Rel i Equals k)
   | show i == show k = renderRel i
-renderRel (Rel i op k) = renderRel i <> renderBinary op <> renderRel k
+renderRel (Rel i op k) = "[" <> renderRel i <> " " <> renderBinary op <> " "<> renderRel k <> "]"
 
 
 makeLenses ''KV

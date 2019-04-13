@@ -107,7 +107,7 @@ agendaDefS inf
           (fromS "tables" `whereS` schemaPred)
           (fromS "event") [Rel "oid" Equals "table" ] ) 
         (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  (indexDescription ) )
-      (fromS "pks") [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]  ) 
+      (fromS "pks") [Rel "schema_name"  Equals "schema_name", Rel "table_name" Equals "table_name"]  ) 
     (agendaDefProjection inf)
   where schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals) )]
         indexDescription = liftRel (meta inf ) "table_description" $ RelAccess (Rel "description" Equals "column_name")
@@ -117,7 +117,9 @@ agendaDefS inf
 
   
 testAgendaDef inf = fmap fst . runDynamic $  do
-   runMetaArrow inf agendaDefS
+   v <- runMetaArrow inf agendaDefS
+   vi <- currentValue (facts v)
+   liftIO $ print (fmap (\(a,b,c,d) -> a ) vi)
    -- ! b <- runMetaArrow inf agendaDef
    -- liftIO $ print (view _1 <$> F.toList b)
 
@@ -144,6 +146,7 @@ agendaDef inf
                                 (RelAccess (Inline "composite")
                                     (RelComposite compdescjoin )))  
       schemaPred =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
+
 agendaDefProjection inf =  fields
   where
       pkjoin = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
@@ -166,13 +169,13 @@ agendaDefProjection inf =  fields
               ifield "table_name" (ivalue (readV PText))  -< ()
           efields <- iforeign eventjoin 
             (ivalue $ irecord 
-              (iforeign [Rel "table" Equals "table", Rel "column" Equals "oid"] 
+              (iforeign [Rel "column" Equals "ordinal_position"] 
                 (imap . ivalue $ irecord 
                   (ifield "column_name" 
                     (ivalue $ readV PText))))) -< ()
           desc <-  eitherDescription -< ()
           dir <- directDescription -< ()
-          pks <- iforeign pkjoin (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          pks <- iforeign pkjoin (ivalue $ irecord (iforeign [ Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
           color <- iforeign eventjoin (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
           let
             table = lookTable inf tname
@@ -187,7 +190,7 @@ agendaDefProjection inf =  fields
             projfT ::  Showable  -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
             projfT efield@(SText field) = irecord $ proc _-> do
               i <- convertRel inf tname field  -< ()
-              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ).  traceShowId . NonS.fromList. explodeTree  . traceShowId <$> desc) ) -< ()
+              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ).  NonS.fromList. explodeTree   <$> desc) ) -< ()
               pkfields <- mapA (\(SText i) -> (Inline (lookKey inf tname i), ) <$> convertRel inf tname i)  pks -<  ()
               returnA -< HM.fromList $ fmap (fmap A.toJSON) $ -- traceShow ("row agenda", desc ,pks,fields)$
                   [("id" :: Text, txt (writePK' tname pkfields (TB1 efield)))
@@ -228,8 +231,10 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,pred,proj)-> do
-        let  selection = projectFields inf t (fst $ staticP proj) $ allFields inf t
-        reftb <- ui $ refTablesProj inf t Nothing (pred predicate (incrementT,resolution)) selection
+        let  selection = projectFields inf t (fst $ staticP proj) whereClause $ allFields inf t
+             whereClause = pred predicate (incrementT,resolution)
+        liftIO $ putStrLn . ident $ Text.render selection
+        reftb <- ui $ refTablesProj inf t Nothing whereClause selection
         let output  = reftb ^. _2
             evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc
         ui $ onEventIO evsel hselg

@@ -58,7 +58,7 @@ import qualified Data.Map as M
 
 
 accountWidgetMeta inf = do
-  fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (accountDef inf) ()
+  fmap F.toList $ transactionNoLog (meta inf) $ dynPK (accountDef inf) ()
 
 accountDef inf
   = projectV
@@ -67,7 +67,7 @@ accountDef inf
           (innerJoinR
             (innerJoinR
               (fromR "tables" `whereR` schemaPred)
-              (fromR "accounts" ) (schemaI "account"))
+              (fromR "accounts" ) (schemaI "accounts"))
             (fromR "event" ) (schemaI "event"))
           (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] )
         (fromR "pks" )  pkrel ) (irecord fields)
@@ -82,11 +82,19 @@ accountDef inf
       fields =  proc t -> do
         SText tname <-
             ifield "table_name" (ivalue (readV PText))  -< ()
-        afields <- iforeign (schemaI "account")(ivalue $ irecord (ifield "account" (imap $ ivalue $  readV PText))) -< ()
+        (color,afields) <- iforeign (schemaI "accounts")(ivalue $ irecord (
+          (,)<$> ifield "color" (ivalue $ readV PText)
+             <*> ifield "account" (imap $ ivalue $  readV PText))) -< ()
         desc <- iforeign descrel (iopt . ivalue $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pks <- iforeign pkrel (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        efields <- iforeign (schemaI "event") (ivalue $ irecord (iforeign [ Rel "table" Equals "table", Rel "column" Equals "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-        color <- iforeign (schemaI "account") (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
+        pks <- iforeign pkrel (ivalue $ irecord 
+          (iforeign [Rel (RelAccess (Rel "schema_name" Equals "schema_name" ) "schema_name") Equals "schema_name", Rel (RelAccess (Rel "table_name" Equals "table_name") "table_name") Equals "table_name", Rel "pks" Equals "column_name"] 
+            (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        efields <- iforeign (schemaI "event") (ivalue $ 
+            irecord 
+              (iforeign [Rel (RelAccess (Rel "table" Equals "oid") "table") Equals "table", Rel "column" Equals "ordinal_position"] 
+                (imap . ivalue $ 
+                irecord 
+                  (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         let
           toLocalTime = fmap to
             where
@@ -112,7 +120,7 @@ accountDef inf
 accountWidget (incrementT,resolutionT) sel inf = do
     let
       calendarSelT = liftA2 (,) incrementT resolutionT
-    dashes <- accountWidgetMeta inf
+    dashes <- ui $ accountWidgetMeta inf
     let allTags =  dashes
     itemListEl2 <- mapM (\i ->
       (i^. _2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes

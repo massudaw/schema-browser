@@ -898,7 +898,6 @@ debugConsole oldItemsi inscrudp = do
                # set UI.class_ "col-xs-6"
     debugT <- mapM gen
                   [("Last", maybe "" (ident . render) <$> facts oldItemsi),
-                  -- ("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i) <$> facts inscrud),
                   ("Diff", onDiff (ident . render) (const "") <$> facts inscrudp)
                   ,("Undo", maybe "" (onDiff (ident . render) (const "")) <$> (diff <$> facts inscrud <*> facts oldItemsi))]
     UI.div # set children debugT # set UI.class_ "col-xs-12"

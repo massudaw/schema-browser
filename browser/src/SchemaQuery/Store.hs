@@ -199,8 +199,8 @@ joinPatch isLeft rel targetTable prefix evs (TableRep (m,sidxs,base)) =
         resIndex idx = -- traceShow ("resIndex",predIndex ) $
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predIndex idx
         resScan idx =  -- traceShow ("resScan", predScanOut) $ 
-          catMaybes $  (\i->  traceShow ( renderPredicateWhere predScanOut )  $ (G.getIndex m i,) <$>     G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
-        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation isLeft rel t pattr]) ). traceShowId <$> ts
+          catMaybes $  (\i->  (G.getIndex m i,) <$>     G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation isLeft rel t pattr]) ) <$> ts
     search idxM (RowPatch (Idex v, CreateRow _ )) = [] 
     search idxM (RowPatch (Idex v, DropRow )) = [] 
         
@@ -210,7 +210,7 @@ joinPatch isLeft rel targetTable prefix evs (TableRep (m,sidxs,base)) =
 relLast (RelAccess _ i  ) = relLast i 
 relLast i = i
 
-joinPathFTB :: G.PathIndex PathTID a -> (a -> b) -> PathFTB b
+joinPathFTB :: Show a=> G.PathIndex PathTID a -> (a -> b) -> PathFTB b
 joinPathFTB i p =  go i
   where
     go (G.ManyPath j) = justError "empty" .  patchSet .F.toList $ go <$> j
@@ -220,17 +220,19 @@ joinPathFTB i p =  go i
         matcher PIdOpt   = POpt . Just
     go (G.TipPath j) = PAtom (p j)
 
-joinPathRelation :: Show a => Bool -> [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
+joinPathRelation :: (Eq a,Show a) => Bool -> [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
 joinPathRelation isLeft prel (G.PathForeign rel i) p 
   | prel == rel =
       PFK prel [] (joinPathFTB i (const p)) 
   | otherwise   = 
       PFK rel  [] (joinPathFTB i nested)
   where
-    nested  (Many i) =  flip (joinPathRelation isLeft prel) p <$> i
+    -- TODO: Remove  L.nub hack to fix duplication of patches 
+    nested  (Many i) =  L.nub $ flip (joinPathRelation isLeft prel) p <$> i
 joinPathRelation isLeft rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
   where
-    nested  (Many i) =  flip (joinPathRelation isLeft rel) p <$> i
+    -- TODO: Remove L.nub hack to fix duplication of patches 
+    nested  (Many i) =  L.nub $ flip (joinPathRelation isLeft rel) p <$> i
 joinPathRelation isLeft rel (G.PathAttr i v) p   = PFK (relUnComp $ relLast (relComp rel)) [] ((if isLeft && not (isLeftTB1 v) then (POpt . Just) else id) $ joinPathFTB v (const p))
   where isLeftTB1 (G.NestedPath PIdOpt _ ) = True
         isLeftTB1 _ = False
@@ -296,10 +298,10 @@ createTableRefs inf (Project table (Union l)) = do
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup (tableMeta table) map of
     Just ref  ->  do
-      liftIO$ putStrLn $ "Loading Cached Union Table: " ++ T.unpack (rawName table)
+      -- liftIO$ putStrLn $ "Loading Cached Union Table: " ++ T.unpack (rawName table)
       liftIO $ atomically $ readCollectionSTM ref
     Nothing -> do
-      liftIO$ putStrLn $ "Loading New Union Table: " ++ T.unpack (rawName table)
+      -- liftIO$ putStrLn $ "Loading New Union Table: " ++ T.unpack (rawName table)
       let keyRel t k = do
             let look i = HM.lookup (tableName i , keyValue k) (keyMap inf)
             new <- look table
@@ -319,15 +321,15 @@ createTableRefs inf table = do
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup (tableMeta table) map of
     Just ref -> do
-      liftIO$ putStrLn $ "Loading Cached Table: " ++ T.unpack (rawName table)
+      -- liftIO$ putStrLn $ "Loading Cached Table: " ++ T.unpack (rawName table)
       liftIO $ atomically $ readCollectionSTM ref
     Nothing -> do
-      liftIO$ putStrLn $ "Loading New Table: " ++ T.unpack (rawName table)
+      -- liftIO$ putStrLn $ "Loading New Table: " ++ T.unpack (rawName table)
       let (iv,v)  = (IndexMetadata M.empty,G.empty)
       map2 <- liftIO$ atomically $ readTVar (mvarMap inf)
       case M.lookup (tableMeta table) map2 of
         Just ref ->  do
-          liftIO$ putStrLn $ "Skiping Reference Table: " ++ T.unpack (rawName table)
+          -- liftIO$ putStrLn $ "Skiping Reference Table: " ++ T.unpack (rawName table)
           liftIO $ atomically $ readCollectionSTM ref
         Nothing -> do
           dbref@(DBRef {..}) <- newDBRef inf table (iv,v)
@@ -339,7 +341,7 @@ createTableRefs inf table = do
             childrens = M.fromListWith mappend $ fmap (fmap (\i -> [i])) $  concat $ fmap (childrenRefsUnique table inf id  . unRecRel ) (rawFKS table)
           -- TODO : Add evaluator for functions What to do when one of the function deps change?
           nestedFKS <- mapM (\((rinf, t),l) -> do
-            liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
+            -- liftIO $ putStrLn $ "Load table reference: from " <> (T.unpack $ tableName table) <> " to "  <> (T.unpack $ tableName t)
             o <- liftIO $ prerefTable rinf t
             return (l,o)) (M.toList childrens)
           newNestedFKS <- liftIO . atomically$ traverse (traverse (\DBRef {..}-> cloneTChan  patchVar)) nestedFKS
@@ -362,7 +364,7 @@ updateReference ::
   -> IO ()
 updateReference j var (DBRef {..}) = do
   let label = "Update Reference: " ++ T.unpack (tableName dbRefTable )
-  putStrLn label
+ --  putStrLn label
   catchJust
     notException
     (atomically
@@ -382,7 +384,7 @@ tableDiffs i = [tableDiff i]
 
 updateIndex :: (Ord k, Show k, Show v) => DBRef k v -> IO ()
 updateIndex (DBRef {..}) = do
-  putStrLn ("Update Index: " ++ T.unpack (tableName dbRefTable ) )
+  -- putStrLn ("Update Index: " ++ T.unpack (tableName dbRefTable ) )
   catchJust
     notException
     (do atomically
@@ -400,7 +402,7 @@ updateTable
   :: InformationSchema -> DBRef Key Showable -> IO ()
 updateTable inf (DBRef {..})
   = do
-  putStrLn ("Update Table : " ++ T.unpack (tableName dbRefTable ))
+  -- putStrLn ("Update Table : " ++ T.unpack (tableName dbRefTable ))
   catchJust notException (do
     upa <- atomically $ do
         patches <- fmap concat $ takeMany patchVar

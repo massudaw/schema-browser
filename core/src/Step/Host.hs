@@ -54,6 +54,7 @@ indexField p@(IProd b l) v =
         Nothing -> findFKAttr [l] v
     i -> i
 indexField n@(Nested ix nt) v = kvLookup (relComp $ F.toList ix) v <|> findFK (concat $ F.toList (fromMaybe [] . _relOutputs <$> ix)) v
+  <|> foldr (<|> ) Nothing (fmap (\i -> kvLookup  (relComp i) v ) $ L.permutations (F.toList ix) )
 indexField i _ = error (show i)
 
 joinFTB (LeftTB1 i) = LeftTB1 $ fmap joinFTB i

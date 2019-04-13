@@ -452,6 +452,7 @@ indexInline eqs rel r
               where Just (k,Left eq) = L.find ((==i).fst) eqs
 
 
+
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Rel k ,[(Rel k,AccessOp a)]) -> TBData k a-> Bool
 indexPred (n@(RelAccess k nt ) ,eq) r
   = case refLookup k r of
@@ -464,13 +465,13 @@ indexPred (n@(RelAccess k nt ) ,eq) r
     recPred i = error (show ("RecPred",i))
 indexPred ((Rel key _ _ ),eqs) r = indexPred (key ,eqs) r
 indexPred (RelComposite l , eqs) r = 
-  fromMaybe False $ (recPred matchRel <$> relLookup (relComp l )  r ) <|> (  matchInline <$> kvLookup (_relAccess $ simplifyRel (relComp l)) (tableNonRef r))  
+  (fromMaybe False $ (recPred matchRel <$> relLookup (relComp l )  r ))  || (  F.all (\l -> fromMaybe False $ matchInline <$> kvLookup (relAccessSafe l  ) (tableNonRef r) ) (concatMap relUnComp $ relUnComp $ simplifyRel (relComp l)) )
   where
     isRel (Rel _ _ _ ) = True
     isRel _ = False
     matchRel (TBRef (rv, _)) = L.any (\(Rel i _ _) -> indexPred  (i,eqs) rv) (L.filter (\i -> (isRel i) && (not . Set.null . relOutputSet  $ i )) l)
     matchInline (Attr _ v)  = match  eq (Right v) 
-      where eq = getOp (_relAccess $ simplifyRel (relComp l)) eqs
+      where eq = getOp (relComp $ fmap relAccessSafe $ relUnComp $ simplifyRel (relComp l)) eqs
     recPred f (TB1  i ) =  f i 
     recPred f (LeftTB1 i) = maybe False (recPred f ) i
     recPred f (ArrayTB1 i) = any (recPred f) i
