@@ -382,7 +382,8 @@ joinRel2 tb ref table = recurse ref
               (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,ref)). (flip NonS.atMay i) $ unArray $ snd arr ) 
               [0..(NonS.length (unArray $ snd arr)   - 1)])
       | otherwise
-        =  TB1 <$> G.lookup idx table
+      -- TODO: There is a nasty bug in the index library
+      =  TB1 <$> (G.lookup idx table <|> L.find  (\i -> G.getIndex tb i == idx) table)
         where
           debug = (_kvname tb ,renderRel .simplifyRel <$> _kvpk tb ,  _relTarget .fst <$> ref, (flip L.elemIndex (simplifyRel <$> _kvpk tb). _relTarget .fst ) <$> ref ,idx)
           idx = Idex $ fmap snd $ L.sortBy (comparing (justError (show debug).flip  L.elemIndex (simplifyRel <$> _kvpk tb). _relTarget .fst )) ref

@@ -100,16 +100,16 @@ cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
-getUnique :: (NFData a , Show k ,Ord k) => [Rel k] -> TBData k a -> TBIndex  a
+getUnique :: (Show k ,Ord k) => [Rel k] -> TBData k a -> TBIndex  a
 getUnique ks = Idex . fmap snd . L.sortBy (comparing ((pkIndexM  ks).simplifyRel . fst)) .  getUn  (Set.fromList ks) 
 
-getUniqueM :: (NFData a , Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
+getUniqueM :: (Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
 
-getIndex :: (NFData a , Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
+getIndex :: (Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
 getIndex m  = getUnique  (_kvpk m) 
 
-getBounds :: (NFData a , Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
+getBounds :: (Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
 getBounds m [] = (ER.NegInf,False) `interval` (ER.PosInf,False)
 getBounds m ls = (ER.Finite i,True) `interval` (ER.Finite j,False)
   where i = getIndex m (head ls)
@@ -122,10 +122,10 @@ notOptionalM (Idex m) =
 notOptional :: Show a => TBIndex a -> TBIndex a
 notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
-tbpredM :: (NFData a , Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
+tbpredM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
 tbpredM m = notOptionalM . getUnique  (_kvpk m)
 
-tbpred :: (NFData a , Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
+tbpred :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
 tbpred m = notOptional . getIndex m
 
 instance Affine a => Affine [a] where

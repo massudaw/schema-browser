@@ -194,7 +194,8 @@ paginate
   -> IO (Int, [TBData Key Showable])
 paginate inf meta t order off size koldpre wherepred = do
   let ((que,attr),name) = selectQuery inf meta t koldpre order wherepred
-  let quec = fromString $ T.unpack $ "SELECT row_to_json(q),(case WHEN ROW_NUMBER() over () = 1 then count(*) over () else null end) as count FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+  let quec = fromString $ T.unpack $ 
+        "SELECT row_to_json(q),(case WHEN ROW_NUMBER() over () = 1 then count(*) over () else null end) as count FROM (" <> que <> ") as q " <> offsetQ <> limitQ
   liftIO $ logTable inf meta . BS.unpack =<< formatQuery (conn inf ) quec (fromMaybe [] attr)
   v <- queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf) quec (fromMaybe [] attr) `catch` (\e -> print (t,wherepred ) >> throw (e :: SomeException))
   let estimateSize = maybe 0 (\c-> c - off ) $ join $ safeHead ( fmap snd v :: [Maybe Int])
@@ -298,7 +299,7 @@ selectAll meta m offset i  j k st = do
   inf <- askInf
   let
       unIndex (Idex i) = i
-      unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
+      unref (TableRef i) = traceShow i $ fmap unIndex $ unFin $ upperBound i
   (l,i) <- liftIO $ paginate inf meta (filterReadable m) k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
   return (i,(TableRef $ G.getBounds meta i) ,l)
 

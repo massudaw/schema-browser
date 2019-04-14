@@ -29,10 +29,9 @@ module SchemaQuery.Read
   , tableCheck
   -- SQL Arrow API
   ) where
+
 import Control.Arrow
-import Debug.Trace
 import Reactive.Threepenny.PStream
-import Control.Concurrent
 import SchemaQuery.Store
 import Serializer
 import Text
@@ -57,7 +56,6 @@ import Expression
 import Query
 import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
-import Safe
 import Step.Common
 import Types
 import qualified Types.Index as G
@@ -281,8 +279,9 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
       inj = S.difference refl old
       joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-      joinFK m  = maybe (Left (atttar,i))  Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+      joinFK m  = maybe (Left (atttar,i))  Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) targetAttr tb2
         where
+          targetAttr= (fmap (replaceRel i )$ atttar ) 
           replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           nonRef = tableNonRef m
           atttar = getAtt tar nonRef
@@ -497,7 +496,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
           case projection of
             Just remain -> do
               liftIO . putStrLn $ "Current table is partially complete: " <> show (tableName table, sq,G.size reso)
-              liftIO . putStrLn $ "Remain " ++ (ident $ render remain)
+              -- liftIO . putStrLn $ "Remain " ++ (ident $ render remain)
               -- liftIO . putStrLn $ "Existing " ++ (maybe "" (ident . render) existingProjection )
               -- TODO : Investigate if we can optimize just loading complements
               readNew  sq tbf

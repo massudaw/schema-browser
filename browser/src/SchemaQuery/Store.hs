@@ -315,8 +315,9 @@ createTableRefs inf (Project table (Union l)) = do
         (uidx,udata) = foldr mergeDBRef (IndexMetadata M.empty,[]) (fst <$> res)
         udata2 = createUn (tableMeta table) (rawPK table) udata
 
-      dbref <- newDBRef inf table (uidx,udata2)
-      return ((uidx,udata2) ,dbref)
+      dbref@(DBRef {..}) <- newDBRef inf table (uidx,udata2)
+      tilog <- dynFork $ forever $ logChanges (rawSchema table <> "_"<> tableName table) dblogger 
+      return ((uidx,udata2) ,dbref {threadIds = tilog:[]})
 createTableRefs inf table = do
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   case  M.lookup (tableMeta table) map of
@@ -333,7 +334,7 @@ createTableRefs inf table = do
           liftIO $ atomically $ readCollectionSTM ref
         Nothing -> do
           dbref@(DBRef {..}) <- newDBRef inf table (iv,v)
-          tilog <- dynFork $ forever $ logChanges dblogger 
+          tilog <- dynFork $ forever $ logChanges (rawSchema table <> "_"<> tableName table) dblogger 
           tidix <- dynFork $ forever $ updateIndex dbref
           tidst <- dynFork $ forever $ updateTable inf dbref
           let
@@ -348,12 +349,15 @@ createTableRefs inf table = do
           tidsrefs <- mapM (\(j,var)-> dynFork $ forever $ updateReference j var dbref) newNestedFKS
           return ((iv,v),dbref {threadIds = tilog:tidix:tidst:tidsrefs})
 
-logChanges :: TEvent String ->  IO ()
-logChanges  (e,c) = 
-    atomically $ do
+
+logChanges :: T.Text -> TEvent String ->  IO ()
+logChanges  t (e,c) =  do
+    i <- atomically $ do
        m <- takeMany c
        i <- readTVar e 
        writeTVar e (m ++ i)
+       return m 
+    appendFile ("log/" ++ T.unpack t) (unlines i)
 
 
 updateReference ::

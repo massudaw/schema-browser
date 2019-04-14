@@ -23,10 +23,8 @@ module Postgresql.Printer
   )
   where
 
-import Control.Applicative
 import Control.Monad
 import Control.Monad.RWS
-import Debug.Trace
 import Data.Bifunctor
 import qualified Data.Foldable as F
 import Data.Functor.Identity
@@ -35,7 +33,6 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Ord
 import Postgresql.Function
-import qualified Data.Poset as P
 import qualified Data.Set as S
 import Data.String
 import qualified Data.Text as T
