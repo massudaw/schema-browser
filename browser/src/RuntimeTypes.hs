@@ -223,7 +223,12 @@ instance (NFData k,  PatchConstr k Showable) => Patch (PrimaryRep k Showable) wh
 instance (Ord k , Show k , Show v) => Patch (IndexMetadata k v) where
   type Index (IndexMetadata k v) =  [IndexMetadataPatch k v]
   applyUndo i =Right . (,[]). F.foldl' vapply i
-    where vapply (IndexMetadata m) (v,s,i,p,t) = IndexMetadata $ M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i (p,t) l ))) j  <|> Just (s,M.singleton i (p,t))) v m
+    where 
+      vapply (IndexMetadata m) (v,s,i,p,t) = IndexMetadata $ M.alter modify v m
+        where 
+          modify j 
+            = fmap (\(_,l) -> (s,M.insertWith (\(p,r) (pn,rn) -> (kvlistMerge (concatMap unkvlist [p,pn]), rn)) i (p,t) l )) j  
+              <|> Just (s,M.singleton i (p,t))
 
 instance (Show v, Show k ,Ord k ,Compact v) => Compact (TableModificationK k  v) where
   compact = foldCompact assoc
@@ -811,34 +816,45 @@ mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
 
+-- Recurse over the two KVData types computing the complement and adding relation as needed
+--  There is a special case for the top level where it does not add primary keys just the predicate used
+-- TODO: Does not handle RelAccess predicates
+-- TODO: Evaluate if should have two functions one for plain complement and one for auxiliary data for querying 
+--  does filterTBData gives all we want?
 recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key ->  TBData Key () -> WherePredicate -> TBData Key  a -> Maybe (TBData Key ())
-recComplement inf m  p (WherePredicate i) r =  filterAttrs attrList m r p
+recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
   where
     attrList  = fst <$> F.toList i
-    filterAttrs :: [Rel Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
-    filterAttrs r m e v
-      | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) =  (\i -> kvlist . pure <$>  ((\v -> go r m (index i ) i v) =<< kvLookup (index i) v)) =<< L.find (isJust . unLeftItens) (unkvlist e)
-      | otherwise = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go r m)) (unKV e) . unKV $ v
-      where notPKOnly k =   if relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets (_kvpk m <> r ) then Nothing else Just k
+    filterAttrs :: Bool -> [Rel Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
+    filterAttrs top r m e v
+      | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) 
+        = do
+            current <- L.find (isJust . unLeftItens) (unkvlist e)
+            kvlist . pure <$>  ((\v -> go top r m (index current ) current v) =<< kvLookup (index current) v)
+      | otherwise 
+        = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go top r m)) (unKV e) . unKV $ v
+      where notPKOnly k =   if (relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets (_kvpk m <> r ) && not top  )
+                               || (relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets attrList  && top)
+                                    then Nothing else Just k
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
-    go r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
+    go top r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
       | isNothing hasJoin = Nothing
-      | S.isSubsetOf (relOutputSets ( concatMap (fmap relAccessSafe. relUnComp )  rel)) (relOutputSets $ _kvpk m <> r) =  Just (FKT l1 rel1 tb1)
+      | S.isSubsetOf (relOutputSets ( concatMap (fmap relAccessSafe. relUnComp )  rel)) (relOutputSets $ if not top then _kvpk m <> r else r ) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
         result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
-        merged = filterAttrs  (_relTarget <$> rel) m2 <$> tb <*> tb1
+        merged = filterAttrs  False (_relTarget <$> rel) m2 <$> tb <*> tb1
         hasJoin = L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec complement: " ++ show (_kvname m ) ++ " - "++ renderRel (relComp rel) <> show (_kvjoins m ))  $  hasJoin
         m2 = lookSMeta inf (RecordPrim ref)
-    go _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go top _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
       where
-        merged = filterAttrs [] ms <$> tb <*> tb1
+        merged = filterAttrs False [] ms <$> tb <*> tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
-    go r m _ _ v@(Attr k a) = if L.elem (Inline k) (_kvpk m <> r) then Just v else Nothing
-    go r m _ _ v@(Fun _ _ _) = Nothing
+    go top r m _ _ v@(Attr k a) = if L.elem (Inline k) (if not top then _kvpk m <> r else r ) then Just v else Nothing
+    go top r m _ _ v@(Fun _ _ _) = Nothing
 
 relOutputSets s = S.unions (relOutputSet <$> s )
 

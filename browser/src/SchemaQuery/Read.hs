@@ -135,10 +135,11 @@ selectFrom t a d = do
 
 getFrom table allFields b = mdo
   inf <- askInf
-  let
+  let 
+    attrs = justError "missing attr" $ traverse (\ i-> (i, ) <$> kvLookup (simplifyRel i)   (tableNonRef b)) ( _kvpk m)
     m = tableMeta table
     pred = WherePredicate . AndColl $ 
-        (\i -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ justError ("no attribute" <> show (i,_kvpk m,b))$ (kvLookup (simplifyRel i)   (tableNonRef b)) )<$> _kvpk m
+        (\(i,v) -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ v ) <$> attrs
     comp = recComplement inf m allFields pred b
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
@@ -204,6 +205,7 @@ paginateTable table pred tbf = do
           cond = maybe False (\i -> fst i >= G.size tb2 && fst i >= next * (opsPageSize $ schemaOps inf))  (lookIndexMetadata pred i)
         output <- if cond
             then  do
+              liftIO $ putStrLn $ "Loading table " ++ show (tableName table) ++ " page " ++ show ix
               (_,(nidx,TableRep(_,_,ndata))) <- tableLoaderAll table (Just next) pred (Just tbf)
               -- Check if nothing has changed  or no more data to load
               if G.size ndata == G.size tb2
@@ -279,7 +281,7 @@ getFKRef inf predtop (me,old) set (FKJoinTable i j) tbf =  do
     let
       inj = S.difference refl old
       joinFK :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (Column Key Showable)
-      joinFK m  = maybe (Left (atttar,i)) ( Right) $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
+      joinFK m  = maybe (Left (atttar,i))  Right $ FKT (kvlist attinj) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ atttar ) tb2
         where
           replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
           nonRef = tableNonRef m
@@ -397,8 +399,8 @@ tableLoader' = do
     let preresult =  mapResult <$> res
         mapResult i = do
             case G.lookup (G.getIndex (tableMeta table) i) reso of
-                Just orig -> case recComplement inf (tableMeta table) tbf predicate orig   of
-                    Just _ ->  Left (apply orig (patch i))
+                Just orig ->  case recComplement inf (tableMeta table) tbf predicate orig   of
+                    Just d -> Left (apply orig (patch i))
                     Nothing -> Right  orig
                 Nothing -> Left i
     result <- if L.any isLeft preresult
@@ -406,15 +408,15 @@ tableLoader' = do
         resFKS <- getFKS inf predicate table (lefts preresult) tbf
         return (either resFKS Right <$> preresult)
       else return (either (error  "") Right <$> preresult)
-    -- liftIO $ when (not $ null (lefts result)) $ do
-      --putStrLn . T.unpack $ "Missing references: "  <> tableName table
+    liftIO $ when (not $ null (lefts result)) $ do
+      putStrLn . T.unpack $ "Missing references: "  <> tableName table
       --putStrLn $ "Filters: \n"  <> renderPredicateWhere predicate
       --putStrLn $ "Fields: \n"  <> show tbf
-      --putStrLn $ "Errors: \n" <>  (unlines $ show . fmap (fmap renderRel) <$> lefts result)
+      putStrLn $ "Errors: \n" <>  (unlines $ show . fmap (fmap renderRel) <$> lefts result)
       --putStrLn $ "PreResult: \n" <>  show preresult
       --putStrLn $ "Result: \n" <>  show res 
     liftIO $ putStrLn $ "Size "  <> show (tableName table) <> " " <> show (L.length (rights result))
-    return (rights  result,x,o )) 
+    return (rights  result,x,o ))
 
 
 -- TODO: Could we derive completeness information from bounds
@@ -469,8 +471,9 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
-              -- liftIO . putStrLn $ "Load complement from existing page " <> show pageidx <> ": " <> (ident . render $ i)
-              readNew sq i
+              liftIO . putStrLn $ "Load complement from existing page " <> show pageidx
+                 <> "\n"<> ident (render  i )
+              readNew sq tbf 
             Nothing -> do
               -- Check if interval is inside the current interval in case is not complete
               if (sq  ==  G.size reso || G.size reso >= pageidx )
@@ -479,33 +482,47 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                   return ((sq,idx), (sidx,reso))
                 else do
                   -- BUG: DEBUG why this is happening
-                  -- liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (sq, G.size reso,pageidx) <> (ident . render $ tbf)
+                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (tableName table,sq, G.size reso,pageidx) -- <> (ident . render $ tbf)
                   readNew sq tbf 
           Nothing -> do
             liftIO . putStrLn $ "New page requested: " <> show pageidx
             readNew sq tbf
         else  do
           let
-            pagetoken = M.lookupLE (maybe pagesize (*pagesize) page) idx
+            pagetoken = M.lookupLE pageidx idx
             existingProjection = fmap (fst .snd) pagetoken
             projection = recComplement inf m tbf fixed =<< existingProjection
           when (sq < G.size reso) $ do
             fetchPatches (tableMeta table) [(fixed, G.size reso, pageidx, tbf,TableRef $ G.getBounds (tableMeta table) (G.toList reso))] []
           case projection of
             Just remain -> do
-              --liftIO . putStrLn $ "Current table is partially complete: " <> show (tableName table, sq,G.size reso)
-              -- liftIO . putStrLn $ (ident $ render remain)
+              liftIO . putStrLn $ "Current table is partially complete: " <> show (tableName table, sq,G.size reso)
+              liftIO . putStrLn $ "Remain " ++ (ident $ render remain)
+              -- liftIO . putStrLn $ "Existing " ++ (maybe "" (ident . render) existingProjection )
+              -- TODO : Investigate if we can optimize just loading complements
               readNew  sq tbf
             Nothing -> do
               case pagetoken of 
-                Nothing ->  if F.any (isJust . recComplement inf (tableMeta table) tbf fixed ) reso
-                            then readNew sq tbf
-                            else  do
-                              liftIO . putStrLn $ "Current table is complete: " <> show (tableName table, sq, G.size reso)
-                              return ((max (G.size reso) sq,idx), (sidx,reso))
-                Just i -> do
-                  liftIO . putStrLn $ "Current table is complete: " <> show (tableName table, sq,G.size reso)
-                  return ((max (G.size reso) sq,idx), (sidx,reso))
+                Nothing ->  
+                  if F.any (isJust . recComplement inf (tableMeta table) tbf fixed ) reso
+                    then do
+                      liftIO . putStrLn $ "New pagetoken missing complement" <> show (tableName table, sq, G.size reso, pageidx)
+                      readNew sq tbf
+                    else  do
+                      liftIO . putStrLn $ "New pagetoken but current table is complete  : " <> show (tableName table, sq, G.size reso, pageidx)
+                      return ((max (G.size reso) sq,idx), (sidx,reso))
+                Just (_,(proj,_)) -> do
+                  if isJust (recComplement inf (tableMeta table) tbf fixed proj )
+                    then do
+                      liftIO $ putStrLn $ "Existing token with remaining complement " <> show (tableName table, sq,G.size reso)
+                      -- ++  maybe ""  (ident . render ) (recComplement inf (tableMeta table) tbf fixed proj )
+                      -- TODO : Investigate if we can optimize just loading complements
+                      readNew sq tbf
+                    else do 
+                      liftIO . putStrLn $ "Existing token current table is complete: " <> show (tableName table, sq,G.size reso)
+                      -- liftIO $ putStrLn $ "Old proj \n" ++ ( ident $ render  proj)
+                      -- liftIO $ putStrLn $ "New proj \n" ++ ( ident $ render  tbf)
+                      return ((max (G.size reso) sq,idx), (sidx,reso))
       Nothing -> do
         liftIO $ putStrLn $ "No index: "  <> T.unpack (tableName table)
         let m = rawPK table
@@ -526,7 +543,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 if L.length  complements  == 1
                    then do
                      liftIO $ putStrLn $ "Loading complement : " <> show (tableName table, G.size reso)
-                     readNew maxBound (head complements)
+                     -- TODO : Investigate if we can optimize just loading complements
+                     readNew maxBound tbf 
                    -- TODO: Compute the max of complements for now just use all required
                    else do
                      liftIO $ putStrLn $ "Loading Not unique complement : " <> show (tableName table, G.size reso)
@@ -703,7 +721,7 @@ convertChanTidings0 inf table fixed select ini nchan = mdo
     evdiff <-  convertChanEvent inf table  fixed select (snd <$> facts t) nchan
     ti <- liftIO getCurrentTime
     let projection (TableRep (a,b,i)) =  TableRep (a,b , restrict <$>   i)
-        restrict = justError ("empty restriction projection " ). restrictRow select 
+        restrict i = justError ("empty restriction projection: \n"  ++ ident (render select) ++ "\n" ++ ident (render i) ). restrictRow select  $ i
     t <- accumT (0,projection ini) ((\i (ix,j) -> (ix+1,either error fst $ foldUndo j i )) <$> evdiff)
     return  (snd <$> t)
 

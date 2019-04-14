@@ -701,7 +701,10 @@ crudUITable
 crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   let
     m = tableMeta table
-  preoldItems <-  ui $ loadItems inf table ftb preoldItems2
+
+  preoldItems <-  ui $ loadItems inf table ftb  
+  -- FIXME : this kvNonEmpty was not necessary before somewhere is leaking empty tables
+      =<< mapTidingsDyn (pure . join . traverse kvNonEmpty) preoldItems2
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
   -- liftIO $ print ("Table Constraints",fst <$> constraints,_kvuniques (tableMeta table))

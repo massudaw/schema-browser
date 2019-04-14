@@ -151,7 +151,7 @@ renderFTB :: (a -> [(Int,String)]) -> FTB a -> [(Int,String)]
 renderFTB f (TB1 i) = f i
 renderFTB f (LeftTB1 i) = concat $ maybeToList $ fmap (renderFTB f ) i
 renderFTB f (ArrayTB1 i)
-  | L.length (concat children) == NonS.length i =  [(0,noident  ',' (concat children))]
+  | L.length (concat children) == NonS.length i =  [(0,"{ " <> noident  ',' (concat children) <> "}")]
   | otherwise = concat$ zipWith (\ i j -> (0,show i  ++ " :") : offset 1 j )  [0..]  children
     where children = (F.toList $ fmap (renderFTB f) i)
 renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]

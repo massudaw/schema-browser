@@ -453,7 +453,9 @@ relNormalize l
           relRef (RelAccess _ ref) = ref
 
 _relOrigin (Rel i _ _) = _relOrigin i
-_relOrigin (RelComposite i ) = error "origin needs to be unique" --  _relOrigin <$> i
+_relOrigin (RelComposite i ) = case simplifyRel (relComp i) of
+                                 RelComposite i -> error "origin needs to be unique"
+                                 i -> _relOrigin i
 _relOrigin (Inline i) = i
 _relOrigin (NInline _ i ) = i
 _relOrigin (Output i) = _relOrigin i
@@ -875,9 +877,9 @@ recLookup' p@(RelComposite i) v = join $ maybeToList $ nonEmpty (join $ traverse
 recLookup' p@(Rel i _ _) v = maybeToList $ _tbattr <$> kvLookup i  v 
 
 recLookupKV :: (Show k ,Ord k) => Rel k -> TBData k v -> Maybe (FTB (TB k v))
-recLookupKV i j | traceShow (i,kvkeys j )  False = undefined
+-- recLookupKV i j | traceShow (i,kvkeys j )  False = undefined
 recLookupKV n@(RelAccess l nt) v =
-  join $ fmap join . traverse (recLookupKV nt) <$> refLookup (trace (renderRel l ++ " - " ++ L.intercalate ", " (renderRel <$> kvkeys v) ) l) v
+  join $ fmap join . traverse (recLookupKV nt) <$> refLookup  l v
 recLookupKV p@(RelComposite i) v = TB1 <$> kvLookup p  v 
 recLookupKV p@(Rel _ _ _) v = TB1 <$> kvLookup p  v 
 recLookupKV p@(Inline l) v = TB1 <$> kvLookup p v
@@ -957,7 +959,7 @@ renderRel (RelComposite l ) =  "(" <> L.intercalate ","  (renderRel <$> l) <> ")
 renderRel (RelAccess i l) =
   renderRel i ++ "." ++ renderRel l
 renderRel (Rel i Equals k)
-  | show i == show k = renderRel i
+  | show i == show k = "[" <> renderRel i <> "]"
 renderRel (Rel i op k) = "[" <> renderRel i <> " " <> renderBinary op <> " "<> renderRel k <> "]"
 
 

@@ -267,7 +267,7 @@ getRow table  delayed (Idex idx) = do
     check inf delayed = do
          let
              (str,namemap) = codegen (getFromQuery inf m delayed)
-             pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_relOrigin <$> _kvpk m) idx
+             pk = fmap (firstTB (recoverFields inf) ) $ zipWith Attr (_relOrigin .simplifyRel <$> _kvpk m) idx
              qstr = (fromString $ T.unpack str)
          liftIO $ logTable inf m . BS.unpack =<< formatQuery (conn inf) qstr pk
          is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) qstr pk

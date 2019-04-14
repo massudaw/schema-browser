@@ -82,8 +82,8 @@ mapDef inf
               (fromR "tables" `whereR` schemaPred)
               (fromR "geo") (schemaI "geo"))
             (fromR "event") (schemaI "event"))
-          (fromR "table_description" `whereR` schemaNamePred ) descRel )
-        (fromR "pks" `whereR` schemaNamePred2 ) pkRel  ) fields
+          (fromR "table_description"  ) descRel )
+        (fromR "pks" ) pkRel  ) fields
   where
     pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
     descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
