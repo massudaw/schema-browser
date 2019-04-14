@@ -51,6 +51,11 @@ explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> concat (replicate 
 ident :: [(Int,String)] -> String
 ident = explode '\n' " " . compressClosingBrackets
 
+noident :: Char ->  [(Int,String)] -> String
+noident sep = explode sep " " 
+
+
+
 compressClosingBrackets :: [(Int,String)] -> [(Int,String)]
 compressClosingBrackets =  foldr (flip mergeBracket) []  
   where 
@@ -103,8 +108,8 @@ renderPatch (PFun k j v ) = wrapBrackets  (renderRel (RelFun (Inline k) (fst j) 
 
 renderPredicateWhere (WherePredicate i) = renderPredicate i
 renderPredicate (AndColl l  ) = "(" <> L.intercalate " AND "  (renderPredicate <$> l ) <> ")"
-renderPredicate (OrColl l )= "(" <> L.intercalate " \n\tOR\n "  (renderPredicate <$> l ) <> ")"
-renderPredicate (PrimColl (_,l) )= L.intercalate " AND " $ fmap (\(i,j)-> renderRel i <> either (\(s,o) -> renderBinary o <> renderShowable s  ) renderUnary  j ) l  
+renderPredicate (OrColl l )= "(" <> L.intercalate " OR "  (renderPredicate <$> l ) <> ")"
+renderPredicate (PrimColl (_,l) )= L.intercalate " AND " $ fmap (\(i,j)-> renderRel i <> either (\(s,o) -> renderBinary o <> (renderShowable s )) renderUnary  j ) l  
 
 renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
 renderAttr (FKT k rel v )
@@ -145,7 +150,10 @@ renderFTBPatch f (PInter b i)  = [(0,showFin i)]
 renderFTB :: (a -> [(Int,String)]) -> FTB a -> [(Int,String)]
 renderFTB f (TB1 i) = f i
 renderFTB f (LeftTB1 i) = concat $ maybeToList $ fmap (renderFTB f ) i
-renderFTB f (ArrayTB1 i)  = concat$ zipWith (\ i j -> (0,show i  ++ " :") : offset 1 j )  [0..] (F.toList $ fmap (renderFTB f) i)
+renderFTB f (ArrayTB1 i)
+  | L.length (concat children) == NonS.length i =  [(0,noident  ',' (concat children))]
+  | otherwise = concat$ zipWith (\ i j -> (0,show i  ++ " :") : offset 1 j )  [0..]  children
+    where children = (F.toList $ fmap (renderFTB f) i)
 renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
   where
     showInterval (Interval.Interval (i,j) (l,m)) = ocl j <> (showFin i) ++ "," ++ (showFin l) <> ocr m
