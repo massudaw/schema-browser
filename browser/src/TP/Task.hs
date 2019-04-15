@@ -70,7 +70,7 @@ taskDef inf
           (iforeign [Rel "pks" Equals "column_name"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         efields <- iforeign (schemaI "event") (ivalue $ irecord 
-            (iforeign [ Rel "column" Equals "ordinal_position"] 
+            (iforeign [ Rel "column" (AnyOp Equals) "ordinal_position"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
         (color,child) <- iforeign (schemaI "planner")  (
            (,)<$> ivalue ( irecord (ifield "color" (ivalue $  readV PText)))
