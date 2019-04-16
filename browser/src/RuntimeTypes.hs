@@ -765,8 +765,8 @@ genPredicateFull'
   -> Map Int (Union (Access a))
   -> Access a
   -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
-genPredicateFull' i s (Rec ix l) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.insert ix l s) <$> F.toList l)
-genPredicateFull' i s (Point ix) = AndColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.delete ix  s) <$> F.toList (maybe [] F.toList $ M.lookup ix s))
+genPredicateFull' i s (Rec ix l) = andColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.insert ix l s) <$> F.toList l)
+genPredicateFull' i s (Point ix) = andColl <$> (nonEmpty . catMaybes $ genPredicateFull' i (M.delete ix  s) <$> F.toList (maybe [] F.toList $ M.lookup ix s))
 genPredicateFull' i s (IProd b l) =  Just . maybe (PrimColl (Inline l ,Right Exists)) (\i -> PrimColl (Inline l,Right i )) $ b
 genPredicateFull' i s (Nested p l) = fmap (\(a,b) -> (RelAccess (relComp p) a , b )) <$> genPredicateFullU' i s l
 genPredicateFull' _ s i = error (show i)
@@ -780,14 +780,14 @@ genPredicateFullU'
   -> Map Int (Union (Access a))
   -> Union (Access a)
   -> Maybe (BoolCollection (Rel a, Either a1 UnaryOperator))
-genPredicateFullU' i s (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
-genPredicateFullU' i s (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
+genPredicateFullU' i s (Many l) = andColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
+genPredicateFullU' i s (ISum l) = orColl <$> nonEmpty (catMaybes $ genPredicateFull' i s<$> l)
 
-genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
-genPredicateU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
+genPredicateU i (Many l) = andColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
+genPredicateU i (ISum l) = orColl <$> (nonEmpty $ catMaybes $ (\(o) -> genPredicate i o) <$> l)
 
 genPredicate o (IProd b l) =  (\i -> PrimColl (Inline l,Right (if o then i else Not i ) )) <$> b
-genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing (_relOrigin a)) else  Nothing ) <$> F.toList p
+genPredicate i n@(Nested p  l ) = fmap andColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd Nothing (_relOrigin a)) else  Nothing ) <$> F.toList p
 genPredicate _ i = error (show i)
 
 
@@ -926,8 +926,8 @@ createUn m un = G.fromList  (justError ("empty: " ++ show un) . transPred) . L.f
   where transPred = G.notOptionalM . G.getUnique un
 
 
-tablePredicate inf t p = (WherePredicate . AndColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
-tablePredicate' p = (WherePredicate . AndColl $ PrimColl .fixrel <$> p)
+tablePredicate inf t p = (WherePredicate . andColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
+tablePredicate' p = (WherePredicate . andColl $ PrimColl .fixrel <$> p)
 
 lookRef k = _fkttable . lookAttrs' k
 

@@ -187,6 +187,7 @@ data RelSort k =
 instance Show k => Show (RelSort k) where
   show (RelSort _ _ i )= renderRel  i
 
+    
 
 newtype MutRec a = MutRec
   { unMutRec :: [a]
@@ -200,6 +201,7 @@ sortRels = fmap relComp . fst .topSortRels . fmap (S.fromList . relUnComp) -- fm
 simplifyRel (RelAccess i l ) = simplifyRel l
 simplifyRel (RelComposite l ) = relComp $ fmap simplifyRel $ filter (not . S.null . relOutputSet ) l
 simplifyRel (Rel i _ j ) = i
+-- simplifyRel (NInline _ i) = Inline i
 simplifyRel i = i 
 
 

@@ -87,22 +87,20 @@ mapDef inf
   where
     pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
     descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
-    schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-    schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
     schemaI t = [Rel "oid" Equals (NInline t "table")]
     fields =  irecord $ proc t -> do
       SText tname <-
           ifield "table_name" (ivalue (readV PText))  -< ()
       evfields  <- iforeign (schemaI "event") 
-            (iopt $ ivalue $ irecord (iforeign [ Rel "table" Equals "table", Rel "column" Equals "oid"] 
+            (iopt $ ivalue $ irecord (iforeign [Rel "column" (AnyOp Equals) "oid"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       (efields , features, color) <- iforeign (schemaI "geo") ((,,) 
                  <$> (ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText)))))
                  <*> (ivalue $ irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) 
                  <*> (ivalue $ irecord (ifield "color" (ivalue $ readV PText)))) -<  ()
       desc <- iforeign descRel  (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pks <- iforeign pkRel (ivalue $ irecord (iforeign [Rel "schema_name" Equals "schema_name" , Rel "table_name" Equals "table_name", Rel "pks" Equals "column_name"] 
+      pks <- iforeign pkRel (ivalue $ irecord (iforeign [Rel "pks" (AnyOp Equals) "column_name"] 
           (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       let
         table = lookTable inf tname

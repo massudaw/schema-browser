@@ -184,14 +184,14 @@ joinPatch isLeft rel targetTable prefix evs (TableRep (m,sidxs,base)) =
             unSOptional (create <$> field)
         outputs = rel -- filter (isJust . _relOutputs ) rel
         predIndex = -- (\i -> traceShow (tableName source ,"index",isJust idxM,rel ,i)i ) $
-          WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
+          WherePredicate . andColl $ ((\(Rel o op t) -> PrimColl (prefix o, [(o,Left (pkIndex t ,Flip op))])) <$> outputs)
         predScanOut = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
           WherePredicate  (go prefix (relComp outputs )) -- AndColl $ ((\(Rel o op t) -> PrimColl (prefix (RelAccess (relComp rel) o) ,  [(o,Left (pkIndex t ,Flip op))] )) <$> outputs)
         -- TODO: Is the logic for inputs only necessary  for functions?
         -- inputsOnly = filter (\i -> isJust (_relInputs i) && isNothing (_relOutputs i)) rel
         -- predScanIn = -- (\i -> traceShow (tableName source ,"scan",isJust idxM,rel ,i)i ) $
           -- WherePredicate . AndColl $ ((\(Rel o op t) -> PrimColl (prefix o ,  [(o,Left (pkIndex t ,Flip op))])) <$> inputsOnly )
-            where go p (RelComposite output ) = AndColl (go p <$> output)
+            where go p (RelComposite output ) = andColl (go p <$> output)
                   go p (Rel o op t) = PrimColl (p  o ,  [(o,Left (pkIndex t ,Flip op))] )
                   go p a@(RelAccess i j ) = go (\v -> p (RelAccess i v ) ) j 
 

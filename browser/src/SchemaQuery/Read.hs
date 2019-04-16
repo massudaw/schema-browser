@@ -136,7 +136,7 @@ getFrom table allFields b = mdo
   let 
     attrs = justError "missing attr" $ traverse (\ i-> (i, ) <$> kvLookup (simplifyRel i)   (tableNonRef b)) ( _kvpk m)
     m = tableMeta table
-    pred = WherePredicate . AndColl $ 
+    pred = WherePredicate . andColl $ 
         (\(i,v) -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ v ) <$> attrs
     comp = recComplement inf m allFields pred b
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
@@ -182,7 +182,7 @@ listenFrom table allFields b = mdo
   inf <- askInf
   let
     m = tableMeta table
-    pred = WherePredicate . AndColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (i )  (tableNonRef b) )<$> _kvpk m
+    pred = WherePredicate . andColl $ catMaybes $ fmap PrimColl . (\i -> (i ,) .  pure . (i,). Left . (,Equals) . _tbattr <$> kvLookup (i )  (tableNonRef b) )<$> _kvpk m
   (dbref,r) <- getFrom table allFields b
   let result = fromMaybe b $ applyIfChange b =<< r
   e <- lift $ convertChanEvent inf table (pred,rawPK table)  allFields  (pure (apply (TableRep (m,M.empty,G.empty)) (createRow' m  result)))  (patchVar dbref)
@@ -220,8 +220,8 @@ predicate
 predicate i (WherePredicate l ) =
    fmap WherePredicate (go (test (relComp i)) l)
   where
-    go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
-    go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
+    go pred (AndColl l) = andColl <$> nonEmpty (catMaybes $ go pred <$> l)
+    go pred (OrColl l) = orColl <$> nonEmpty (catMaybes $ go pred <$> l)
     go pred (PrimColl l) = PrimColl <$> pred l
     test f (RelAccess p i ,j)  = if p == f then Just ( i ,fmap (mapLeft (fmap (removeArray (_keyFunc $ relType  p)))) <$> j) else Nothing
     test v f = Nothing
@@ -305,22 +305,22 @@ fkPredicateIx rel set =  refs
   where 
     genpredicate o = primPredicate o rel 
     primPredicate o (RelAccess ref tar) 
-      =  join $ fmap OrColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty i 
+      =  join $ fmap orColl . nonEmpty . catMaybes . fmap (flip primPredicate tar) <$> nonEmpty i 
       where i = concat $ fmap F.toList $ F.toList $ refLookup ref o  
-    primPredicate o (RelComposite l ) =  fmap AndColl . allMaybes .  fmap (primPredicate o ) $ l
+    primPredicate o (RelComposite l ) =  fmap andColl . allMaybes .  fmap (primPredicate o ) $ l
     primPredicate o (Rel ori op tar)  = do
       let attr = lkAttr ori o
       i <- unSOptional ._tbattr $ attr 
       return $ PrimColl (tar,[(tar,Left (i,Flip op))])
     primPredicate _ i = error (show i)
     lkAttr k v =  justError ("noAttr " <> show (k,v,rel) )$ kvLookup k v <|> kvLookup k (tableNonRef v) <|> kvLookup (Inline $ _relOrigin k) (tableNonRef v)
-    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+    refs = fmap (WherePredicate .orColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 
 -- fkPredicateIx rel l | traceShow ("fkPredicate" , renderRel rel,head l) False = undefined
 fkPredicate i set =  refs
   where 
-    genpredicate o = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
+    genpredicate o = fmap andColl . allMaybes . fmap (primPredicate o)  $ i
     primPredicate o k  = do
       let a  = justError ("No Attr: " ++ show (k,L.intercalate ", " $ fmap renderRel $ kvkeys o,i)) $ lkAttr k o
       case a of 
@@ -329,7 +329,7 @@ fkPredicate i set =  refs
         i -> error ("not a attr " ++ show i)
     lkAttr k v 
       = kvLookup k v <|> kvLookup k (tableNonRef v) <|>  (kvLookup (Inline $ _relOrigin k) (tableNonRef v))
-    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+    refs = fmap (WherePredicate .orColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
 
 getFKS
   :: InformationSchemaKV Key Showable
@@ -392,7 +392,8 @@ tableLoader' = do
           go pred (OrColl l) = OrColl (go pred <$> l)
           go pred (PrimColl l) = PrimColl $ pred l
           predicate (RelAccess i j ,_ ) = (i, ((\a -> (a,Right (Not IsNull)))<$>) $ relUnComp i)
-          predicate i  = i
+          predicate (NInline i j ,r)   = (Inline j ,r)
+          predicate i = i
     (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (restrictTable nonFK tbf) page token size presort (unestPred predicate)
 
     let preresult =  mapResult <$> res
@@ -531,12 +532,14 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 match (OrColl l) =  sum $ match <$> l
                 match (PrimColl (i,_)) = if L.elem i m then 1 else 0
             complements = catMaybes $ (recComplement inf (tableMeta table) tbf fixed ) <$> G.toList reso
-            size = G.size reso
+            -- TODO: there are some wrong matchings in the reso filter
+            size = L.length $ G.filterRows fixed  (G.toList reso)
         if fixed /= mempty && isComplete fixed == size && size /= 0
            then
             case L.null complements of
               True -> do
-                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table) -- ,  reso)
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table,  G.keys reso, renderPredicateWhere fixed)
+                --readNew maxBound tbf
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
                 if L.length  complements  == 1

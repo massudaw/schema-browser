@@ -275,4 +275,4 @@ convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i
 
 execTable project =  runIdentity .evalEnv project . (,[]) . Atom .  mapKey' keyValue
 
-columnName name = ivalue $ irecord $ iforeign [ Rel "table" Equals "table", Rel name Equals "ordinal_position"] (ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText)))
+columnName name = ivalue $ irecord $ iforeign [ Rel name Equals "ordinal_position"] (ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText)))

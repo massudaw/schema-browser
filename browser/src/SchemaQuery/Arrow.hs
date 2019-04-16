@@ -232,9 +232,10 @@ innerJoin j l srel (emap,amap) = do
           joined i = flip addAttr i <$> joinFK i
           result = (\(i,j,k) -> joined i)<$> G.getEntries emap
         -- when (L.any isLeft result) . liftIO $do
-           -- putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
+           --putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
            -- print (L.length $ rights result)
-           -- print (G.keys amap)
+           --print ("Target Relation" , G.toList amap)
+           --print ("Target Relation" , (rawPK target) , G.getIndex (tableMeta target) <$>G.toList amap)
            -- print (lefts result)
         let idx = (F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) (createRow' (tableMeta origin)<$> rights (F.toList result) ) )
         return  idx 
@@ -478,6 +479,7 @@ projectV
      -> DatabaseM (View T.Text T.Text) () (t2 b)
 projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P projection  (Kleisli $  \_ -> do
       inp <- project i k projection
+      liftIO $ putStrLn (ident . render $ (snd inp))
       (j inp)  >>= (\a -> traverse (evalEnv p . (,mempty) . Atom .  mapKey' keyValue) a))
     where projection = ProjectV i (foldl mult one k)
 

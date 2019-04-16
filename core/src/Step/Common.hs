@@ -10,6 +10,7 @@ module Step.Common (
   TBPredicate(..),
   AccessOp,
   Union(..),
+  andColl,orColl,
   filterEmpty,
   traPredicate,
   mapPredicate,
@@ -29,7 +30,7 @@ import GHC.Generics
 import Control.Arrow
 import Control.DeepSeq
 import Control.Category (Category(..),id)
-import Prelude hiding((.),id,head)
+import Prelude hiding((.),id)
 import Data.Monoid
 
 
@@ -64,6 +65,14 @@ data BoolCollection a
   | PrimColl a
   deriving (Show, Eq, Ord, Functor, Foldable, Generic, Traversable)
 
+andColl l 
+  | Prelude.length l == 1 = Prelude.head l
+  | otherwise = AndColl l 
+
+orColl l 
+  | Prelude.length l == 1 = Prelude.head l
+  | otherwise = OrColl l 
+
 instance NFData a => NFData (BoolCollection a)
 
 instance Binary a => Binary (BoolCollection a)
@@ -86,6 +95,8 @@ instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
 instance Semigroup (TBPredicate k a) where
+  i <> (WherePredicate  (AndColl [])) = i 
+  (WherePredicate  (AndColl [])) <> i = i 
   (WherePredicate i) <> (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
 instance Monoid (TBPredicate k a) where

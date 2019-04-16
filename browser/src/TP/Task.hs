@@ -43,7 +43,7 @@ import Utils
 
 
 taskWidgetMeta inf = do
-  fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (taskDef inf) ()
+  fmap F.toList $ transactionNoLog (meta inf) $ dynPK (taskDef inf) ()
 
 taskDef inf
   = projectV
@@ -60,7 +60,7 @@ taskDef inf
   where
       schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
       schemaI t = [Rel "oid" Equals (NInline t "table")]
-      pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
+      pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
       descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
       fields =  irecord $ proc t -> do
         SText tname <-
@@ -138,7 +138,7 @@ taskWidget (incrementT,resolutionT) sel inf = do
     let
       calendarSelT = liftA2 (,) incrementT resolutionT
 
-    dashes <- taskWidgetMeta inf
+    dashes <- ui $ taskWidgetMeta inf
     let allTags =  dashes
     itemListEl2 <- mapM (\i ->
       (i^. _2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes

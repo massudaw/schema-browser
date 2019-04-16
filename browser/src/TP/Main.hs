@@ -89,7 +89,7 @@ setup smvar bstate plugList w = void $ do
     metadataNav <- sequenceA $  M.fromList
                [("Map",fmap (^._2) <$>mapWidgetMeta inf)
                ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf)
-               ,("Task",fmap (^._2) <$> taskWidgetMeta inf)
+               ,("Task",fmap (^._2) <$> ui (taskWidgetMeta inf))
                ,("Account",fmap (^._2) <$> ui (accountWidgetMeta inf))
                ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf )]
     let checkNav i =  maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav

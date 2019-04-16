@@ -980,9 +980,9 @@ splitIndexPK ::
   -> [Rel k]
   -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
 splitIndexPK (OrColl l) pk =
-  fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
+  fmap orColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (AndColl l) pk =
-  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
+  fmap andColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK i pk) <$> l
 splitIndexPK (PrimColl (p, op)) pk =
   if elem p pk || elem (simplifyRel p ) (simplifyRel <$> pk)
     then Just (PrimColl (p, op))
@@ -996,9 +996,9 @@ splitIndexPKB ::
   -> [Rel k]
   -> Maybe (BoolCollection (Rel k, [(Rel k, AccessOp Showable)]))
 splitIndexPKB (OrColl l) pk =
-  fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
+  fmap orColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (AndColl l) pk =
-  fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
+  fmap andColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB i pk) <$> l
 splitIndexPKB (PrimColl (p, op)) pk =
   if notElem p pk && notElem (simplifyRel p ) (simplifyRel <$> pk)
     then Just (PrimColl (p, op))

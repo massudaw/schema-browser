@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,DeriveTraversable,DeriveFoldable,GADTs,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-}
+{-# LANGUAGE ScopedTypeVariables, Arrows,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,DeriveTraversable,DeriveFoldable,GADTs,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-}
 module Environment where
 
 import RuntimeTypes
@@ -250,7 +250,7 @@ iforeign ::
   -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
 iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) 
-  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show s ++ "\n" ++ show (kvkeys i)). indexField (Nested (Non.fromList (relUnComp $ relComp s)) (Many [])) $ i )). op ))
+  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show (relComp s) ++ "\n" ++ show (kvkeys i)). indexField (Nested (Non.fromList (relUnComp $ relComp s)) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 
@@ -378,7 +378,7 @@ projectFields inf table l w v = projectFields' inf table (validateAttributePath 
 projectFields' :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
 -- projectFields' _ _ l  w _ | traceShow ("projectFields",l,w) False = undefined
 projectFields' inf t s (WherePredicate pred) l 
-  =  kvlistMerge . catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList <> fkAttrList ))
+  =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList <> fkAttrList ))
   where 
     attrList = fst <$> F.toList pred 
     fkAttrList = concat $ fmap mappath  (F.toList  =<< s )  
@@ -389,24 +389,36 @@ projectFields' inf t s (WherePredicate pred) l
             explodeRel (RelComposite l ) = concat $ explodeRel <$> l
 
     -- pattr v i | traceShow ("pattr",i , kvkeys v) False = undefined
+    pattr :: forall a. Show a => TBData Key a -> G.AttributePath Key MutationTy -> Maybe [TB Key a]
     pattr v (G.PathAttr key  _) 
-      =  kvLookup (Inline key ) v
+      = fmap pure $  kvLookup (Inline key ) v
         <|> (findRef =<< kvFind (\v -> _relOutputs v == Just [key]) v )
         <|> kvLookup (Inline key) (tableNonRef v)
           where 
             findRef (FKT v _ _ ) = kvLookup (Inline key) v
     pattr v (G.PathInline ki n) 
-      = pfun (\n -> Le.over ifkttable (fmap (projectFields' inf nt [n] (WherePredicate pred )))) n <$> kvLookup (Inline ki) v
+      = fmap pure $ pfun (\n -> Le.over ifkttable (fmap (projectFields' inf nt [n] (WherePredicate pred )))) n <$> kvLookup (Inline ki) v
         where Primitive _ (RecordPrim nst) = keyType ki
               nt = lookSTable inf nst 
-    pattr v (G.PathForeign i n ) 
-      = pfun (\n ->  Le.over ifkttable (fmap (projectFields' inf nt [n,relAttrs] mempty)))  n  <$> (kvLookup (relComp i) v)
+    pattr v (G.PathForeign rel n ) 
+      =  nonEmpty $ concat . catMaybes $ 
+            (pure. pfun (\n ->  Le.over ifkttable (fmap (projectFields' inf nt [n,relAttrs] mempty)))  n  <$> kvLookup (relComp rel) v  :: Maybe [TB Key a]) :  (attrs <$> rel )
         where 
-          attrs (Rel _ _ r ) = G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
+          attrs :: Rel Key -> Maybe [TB Key a]
+          attrs (Rel (Inline i ) _ r ) = pattr v $ G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
+          attrs (Rel (RelAccess i ti )  _ r ) | L.all isRel (relUnComp i) 
+              = nonEmpty $ concat $ catMaybes $ pattr v (G.PathForeign (relUnComp i) (TipPath $ Many $ [target  ti] )) : (attrs <$> relUnComp  i)
+            where isRel (Rel _ _ _ ) = True
+                  isRel _ = False
+          attrs (Inline i) = pattr v (G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))) 
+          attrs i = error (show i)
+
+          target (Rel _ _ r ) = G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
             where i = _relOrigin r 
-          attrs i = error (show i )
-          relAttrs = Many $  attrs <$> i 
-          nst = findRefTableKey t i
+          target (Inline i ) =  G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
+          target i = error (show i )
+          relAttrs = Many $  target <$> rel
+          nst = findRefTableKey t rel
           nt = lookSTable inf nst 
     pattr i j = error (show j )
     pfun f (G.TipPath n ) = f n
