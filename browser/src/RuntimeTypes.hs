@@ -803,12 +803,23 @@ notException e =  if isJust eb || isJust es || isJust as then Nothing else Just 
 
 showFKText inf m v = L.take 50 . L.intercalate "," $  (renderShowable <$> allKVRec' inf m v)
 
+patchNoRef :: TBIdx k i -> TBIdx k i 
 patchNoRef l =  concat $ attrNoRef <$> l
   where
     attrNoRef (PFK _ l _ ) = l
-    attrNoRef (PInline i l ) = [PInline i $ patchNoRef <$> l]
+    attrNoRef (PInline i l ) = PInline i <$> (traverse (fmap pure. patchNoRef) l)
     attrNoRef (PFun _ _ _) = []
     attrNoRef i = [i]
+
+rowPatchNoRef :: Ord i => RowPatch i j -> Maybe (RowPatch i j)
+rowPatchNoRef (RowPatch (i,j )) = RowPatch . (i,) <$> rowOperationNoRef j
+rowPatchNoRef (BatchPatch i j ) = BatchPatch i <$> rowOperationNoRef j
+
+rowOperationNoRef :: Ord i => RowOperation i j -> Maybe (RowOperation i j)
+rowOperationNoRef (PatchRow j) = PatchRow <$> nonEmpty (patchNoRef j)
+rowOperationNoRef (CreateRow j) = CreateRow <$> kvNonEmpty (tableNonRef j)
+rowOperationNoRef DropRow = Just DropRow 
+
 
 mergeCreate (Just i) (Just j) = Just $ mergeKV i j
 mergeCreate Nothing (Just i) = Just i

@@ -10,7 +10,6 @@ import qualified Data.Foldable as F
 import Data.Functor.Apply
 import Data.Interval (Extended(..), upperBound)
 import qualified Data.List as L
-import qualified Data.Map as M
 import qualified Data.ByteString.Char8 as BS
 import Data.Maybe
 import Data.String
@@ -222,7 +221,7 @@ batchEd m i =  do
     query = with <> many (uncurry as <$> tables) <> select ("("<>union (select  .fst <$> tables)<> ")")  <> " as t"
       where names ix = "r" <> T.pack (show ix)
             tables = zip (names <$> [0..]) ((\(i,_,_) -> i ) <$> l)
-    l = codeGen  . firstPatchRow (recoverFields inf) <$> F.toList i
+    l = codeGen  . firstPatchRow (recoverFields inf) <$> catMaybes  (rowPatchNoRef <$> F.toList i)
   l <- queryLogged inf m (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
   liftIO $ print (l :: [Only(Maybe Int)])
   return i
@@ -299,7 +298,7 @@ selectAll meta m offset i  j k st = do
   inf <- askInf
   let
       unIndex (Idex i) = i
-      unref (TableRef i) = traceShow i $ fmap unIndex $ unFin $ upperBound i
+      unref (TableRef i) = fmap unIndex $ unFin $ upperBound i
   (l,i) <- liftIO $ paginate inf meta (filterReadable m) k (fromMaybe 0 offset) (fromMaybe tSize j) ( join $ fmap unref i) st
   return (i,(TableRef $ G.getBounds meta i) ,l)
 

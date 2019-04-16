@@ -479,7 +479,7 @@ projectV
      -> DatabaseM (View T.Text T.Text) () (t2 b)
 projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P projection  (Kleisli $  \_ -> do
       inp <- project i k projection
-      liftIO $ putStrLn (ident . render $ (snd inp))
+      -- liftIO $ putStrLn (ident . render $ (snd inp))
       (j inp)  >>= (\a -> traverse (evalEnv p . (,mempty) . Atom .  mapKey' keyValue) a))
     where projection = ProjectV i (foldl mult one k)
 

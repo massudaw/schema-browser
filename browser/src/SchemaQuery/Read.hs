@@ -472,7 +472,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
             Just i -> do
               liftIO . putStrLn $ "Load complement from existing page " <> show pageidx
-                 <> "\n"<> ident (render  i )
+                 -- <> "\n"<> ident (render  i )
               readNew sq tbf 
             Nothing -> do
               -- Check if interval is inside the current interval in case is not complete

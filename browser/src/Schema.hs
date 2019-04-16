@@ -175,30 +175,22 @@ keyTablesInit schemaRef  (schema,user) authMap = do
                  newFields _ = []
              return (plugs,allPlugs)
           else return ([],[])
-       liftIO $  print plugs
-
        let
           keyMap = HM.fromList $ (fmap (typeTransform ops) <$> keyList) <> fst plugs
           backendKeys = M.fromList $ (\k -> (keyFastUnique k ,k)) . snd   <$>  keyList
           lookupKey' map t c = justError ("nokey" <> show (t,c)) $ HM.lookup (t,c) map
           lookupKey ::  Text -> Text ->  Key
           lookupKey = lookupKey' keyMap
-
-
-
-       let
-        schemaForeign :: Query
-        schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
+          schemaForeign :: Query
+          schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
        rslist <- liftIO $ query conn  schemaForeign (Only schema)
        rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaRef (s,user) authMap ) rslist
        let
-           lookupFKey s t k =  lookupKey' (sKeyMap s) t k
+          lookupFKey s t k =  lookupKey' (sKeyMap s) t k
             where
               sKeyMap s
                 | s == schema = keyMap
                 | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
-
-       let
           foreignKeys, functionKeys, uniqueIndexes :: Query
           foreignKeys = "SELECT origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks FROM metadata.fks WHERE origin_schema_name = ?"
           functionKeys = "SELECT table_name,column_name,cols,fun FROM metadata.function_keys WHERE schema_name = ?"
