@@ -142,15 +142,17 @@ getFrom table allFields b = mdo
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
   r <- maybe (do
-    liftIO . putStrLn $  "getFrom: row is complete " <> show (G.getIndex m b) 
+    liftIO . putStrLn $  "getFrom: "<> show (tableName table) <> " row is complete " <> renderPredicateWhere pred 
     return Nothing) (\comp -> debugTime ("getFrom: " <> show (tableName table)) $ do
     let n = recComplement inf m  allFields pred  =<< new
         new = G.lookup (G.getIndex m b) reso
         delta = diff b =<< new
+    --liftIO . putStrLn $ ident (render b)
+    --liftIO . putStrLn $ ident (render comp)
     (maybe (do
       liftIO . putStrLn $ "Local storage: get " <> T.unpack (tableName table) <>  " where "  <> (renderPredicateWhere pred) -- , new ,G.keys reso )
       return delta )  (\comp -> do
-      -- liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
+      liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
       let newRow = apply (apply b (fromMaybe [] delta)) v
       resFKS  <- getFKS inf pred table  [newRow] comp
@@ -158,14 +160,14 @@ getFrom table allFields b = mdo
         output = resFKS newRow
         result = either (const Nothing) (Just. patch )  output
       traverse (fetchPatches m [] . pure . (RowPatch . (G.getIndex m b,).PatchRow)) result
-      -- traverse (\i -> do
+      traverse (\i -> do
         --liftIO . putStrLn $ "Pred\n" <> show pred
         --liftIO . putStrLn $ "Old\n" <> show b
         --liftIO . putStrLn $ "Delta\n" <> (maybe ("") show delta)
         --liftIO . putStrLn $ "Get\n" <> (show v)
         --liftIO . putStrLn $ "Result\n" <> (either show (ident.render) output)
         --liftIO . putStrLn $ "DiffResult\n" <> (maybe "" show  result)
-        --liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
       return result) n)) comp
   return (dbvar,r)
 

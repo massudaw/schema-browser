@@ -19,7 +19,7 @@ module SchemaQuery.Arrow
 
 import Control.Arrow
 import Control.Monad.State
-import TP.Widgets (calmT)
+import TP.Widgets (joinP,calmT)
 import Data.Either
 import Reactive.Threepenny hiding (apply)
 import Control.Monad.RWS
@@ -127,6 +127,22 @@ pmap' f fp  (PStream b e ) = PStream (f <$> b) (fp <$> e)
 pmap f fp  = Kleisli (\(PStream b e )->  lift $ do
   ini <- currentValue b
   accumS (f ini) (filterJust $ trace "partial pmap".  fp <$> e))
+
+pmapA :: (KV Key Showable -> TransactionM b) 
+      -> (PrimaryRep  Key Showable -> RowPatch Key Showable -> TransactionM (TBIndex Showable, Editor (Maybe b -> b))) 
+      -> PStream (PrimaryRep  Key Showable) 
+      -> TransactionM  (Tidings (G.GiST (TBIndex Showable ) b))
+pmapA f fp   (PStream b e ) =  mdo
+  inf <- askInf
+  fre <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge right" ) (fp <$> b <@> e )
+  PrimaryRep (_,ini) <- currentValue b
+  fini <- traverse f  ini
+  o <- lift $ accumT fini ((\(k,i) j -> case i of 
+                                          Keep -> j 
+                                          Diff f -> G.alterWith f  k  j 
+                                          Delete -> G.delete  k (8,8) j) <$> fre)
+  return o 
+
 
 pconst  b  = PStream (pure b) never 
 
@@ -293,19 +309,6 @@ leftJoin joinPred@(JoinV j l LeftJoin srel) (emap,amap)= do
         let idx = (F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) (createRow' (tableMeta origin)<$> result ) )
         return idx
 
-joinP t = do
-  (e,h) <- newEvent
-  init <- currentValue (facts t)
-  el <- currentValue (psvalue init)
-  (_,ini) <- liftIO $runDynamic $ do 
-    onEventDyn  (psevent init) (liftIO. h)
-
-  onChangeDynIni ini (facts t) (\i -> do
-    onEventDyn  (psevent i) (liftIO. h)
-    ) 
-  accumS el e
-
- 
 
 fixLeftJoinS
   :: DatabaseM (View T.Text T.Text) (PStream (InputType)) (PStream (TableRep Key Showable))
@@ -392,7 +395,7 @@ fixLeftJoinR (P j k) (P l n) srel index
                   consIndex = maybe srelc (flip relAppend srelc) index
               go (relAppend cindex  consIndex) (ix+1)  (pred,proj) ((\i -> apply i (joined i)) <$> kv) 
 
-joinRelation preinf join@(JoinV j l LeftJoin srel ) index amap =  do
+joinRelation preinf join@(JoinV j l LeftJoin _ ) index amap =  do
     let
       origin = sourceTable preinf join 
       target = sourceTable preinf l
@@ -400,7 +403,7 @@ joinRelation preinf join@(JoinV j l LeftJoin srel ) index amap =  do
       joinFK :: TBData Key Showable ->  PathAttr T.Text Showable
       joinFK m  = result
         where
-          result = justError ("cant index: "  ++ show  (srel , m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
+          result = justError ("cant index: "  ++ renderRel index ++  "\n" ++ (ident $ render m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
           findRef i v = maybe  Nothing Just $ patch . mapKey' keyValue <$> G.lookup pk  amap
             where targetRel = (L.sortOn (\ i -> L.elemIndex (simplifyRel $ _relTarget i) (fmap simplifyRel targetPK ))  i )
                   pk = G.getUnique targetRel (kvlist v)
@@ -425,7 +428,7 @@ indexContainer f i = recFTB  i
     recFTB i = error (show ("IndexPredIx",i))
 
 indexRelation 
-  :: (Show k ,Show a,Ord k) 
+  :: (Text.PrettyRender a,Show k ,Show a,Ord k) 
   => (Rel k -> TBData k a -> Maybe (PathAttr k v)) 
   -> Rel k 
   -> TBData k a 
@@ -433,7 +436,7 @@ indexRelation
 -- indexRelation i j k | traceShow ("indexRelation",j) False = undefined
 indexRelation f (RelAccess (Inline key ) nt) r
  = do 
-   let i = justError ("ref error" <> show key ) $ refLookup (Inline key) r
+   let i = justError ("ref error: " <> show key <>  (ident . render $ r)) $ refLookup (Inline key) r
    PInline key . fmap pure <$> indexContainer (indexRelation f nt) i
 indexRelation f n@(RelAccess nk nt )  r
  = do
@@ -450,26 +453,29 @@ projectS
     DatabaseM  (View T.Text T.Text ) (PStream (InputType) ) (PStream (TableRep  Key Showable))
      -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  TransactionM () b
      -> DatabaseM (View T.Text T.Text) () (Tidings (G.GiST (TBIndex Showable) b))
-projectS  (P i (Kleisli j))  p@(P (k,_) _ ) = P  projection (Kleisli $  \_ -> 
-      do 
-       inp <- project i k projection
-       (j (empty inp ) >>= mapArrow . fmap primary . toTidings ))
+projectS  (P i (Kleisli j))  p@(P (k,_) _ ) = P  projection 
+    (proc i -> do 
+      set <- (Kleisli $  \_ -> do 
+           inp <- projectMeta i k projection
+           j (empty inp ) ) -< ()
+      let setp = pmap' primaryRep id set
+      Kleisli (pmapA convertState applyChanges) -< setp)
         where empty inp = PStream (pure inp) never
-              execute a = traverse (evalEnv p . (,mempty) . Atom .
-                {- traceShowIdPrefix "project : "(ident . renderTable) . -}  mapKey' keyValue) a
-              mapArrow a = do
-                  inf <- ask 
-                  lift $ mapTidingsDyn  (transactionNoLog (fst inf) . execute) a 
-              projection = (ProjectV i (foldl mult one k))
+              convertState = evalEnv p . (,mempty). Atom . mapKey' keyValue
+              projection = ProjectV i (foldl mult one k)
+              applyChanges (PrimaryRep (m ,g)) (RowPatch (k,d)) = 
+                (k,) <$> case d of 
+                  CreateRow d -> Diff . fromMaybe <$> convertState  d
+                  PatchRow p -> (\i -> Diff $ maybe i (const i) ) <$> (convertState $ fromJust (flip applyIfChange p =<< G.lookup k g))
+                  DropRow -> return Delete 
 
-
-project i k  projection  = do
-      preinf <- askInf
-      let 
-          (table,inf) = updateTable preinf i
-          fields = projectFields inf table k  predicate $ allFields inf table
-          predicate = liftPredicateF lookupKeyName inf  (tableName table) $ predicateTree i 
-      return (mempty,fields)
+projectMeta i k  projection  = do
+    preinf <- askInf
+    let 
+        (table,inf) = updateTable preinf i
+        fields = projectFields inf table k  predicate $ allFields inf table
+        predicate = liftPredicateF lookupKeyName inf  (tableName table) $ predicateTree i 
+    return (mempty,fields)
 
 
 projectV
@@ -478,8 +484,7 @@ projectV
      -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom ((TBData T.Text c)))  TransactionM () b
      -> DatabaseM (View T.Text T.Text) () (t2 b)
 projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P projection  (Kleisli $  \_ -> do
-      inp <- project i k projection
-      -- liftIO $ putStrLn (ident . render $ (snd inp))
+      inp <- projectMeta i k projection
       (j inp)  >>= (\a -> traverse (evalEnv p . (,mempty) . Atom .  mapKey' keyValue) a))
     where projection = ProjectV i (foldl mult one k)
 

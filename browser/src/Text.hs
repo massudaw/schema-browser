@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections,TypeApplications,FlexibleInstances,TypeSynonymInstances #-}
-module Text (ident, render,renderShowable , readPrim,renderPrim,renderPredicateWhere,readType) where
+module Text (PrettyRender(..),ident, render,renderShowable , readPrim,renderPrim,renderPredicateWhere,readType) where
 
 import Types
 import Types.Patch

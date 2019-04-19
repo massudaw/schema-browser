@@ -471,8 +471,11 @@ listBoxElEq eq list bitems bsel bdisplay = do
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
+    ini <- currentValue (facts bsel)
+    iniList <- currentValue (facts bitems)
     selEv <- fmap Just <$> UI.selectionChange list
-    selBh <- ui $ stepper  Nothing selEv
+    let idxIni = lookupIndex iniList ini
+    selBh <- ui $ stepper  (traceShow (idxIni ,ini,iniList ) idxIni) selEv
     let
         eindexes = (\l i-> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <#> tidings selBh selEv
     let
@@ -635,11 +638,23 @@ updateMemory x Empty  = New x
 updateMemory x (New  a) | a /= x = New x
 updateMemory x (Same a) | a /= x = New x
 updateMemory x _ = Same x
+
+updateMemoryFilter :: Eq b => (a -> b) ->  a -> Memory a -> Memory a
+updateMemoryFilter f x Empty  = New x
+updateMemoryFilter f x (New  a) | f a /= f x = New x
+updateMemoryFilter f x (Same a) | f a /= f x = New x
+updateMemoryFilter f x _ = Same x
+
 isNew :: Memory a -> Maybe a
 isNew (New x) = Just x
 isNew _ = Nothing
 
 -- | Returns a new 'Event' that skips consecutive triggers with the same value.
+--
+calmEFilter :: Eq b => (a -> b) -> Memory a  -> Event a -> Dynamic (Event a)
+calmEFilter f ini e =
+  filterJust . fmap isNew <$> accumE ini (updateMemoryFilter f <$> e)
+
 
 
 calmE :: Eq a => Memory a  -> Event a -> Dynamic (Event a)
@@ -661,6 +676,13 @@ calmDiff t = do
   current <- currentValue (facts t)
   eCalm <- calmD current (rumors t)
   stepperT current eCalm
+
+calmTFilter :: Eq b => (a-> b) -> Tidings a -> Dynamic (Tidings a )
+calmTFilter  f t = do
+  current <- currentValue (facts t)
+  eCalm <- calmEFilter f (New current) (rumors t)
+  stepperT current eCalm
+
 
 
 calmT :: Eq a => Tidings a -> Dynamic (Tidings a )
@@ -981,11 +1003,32 @@ hoverTip2 elemIn elemOut = do
     else return ()) (tidings bh hoev)
   return $ hoev
 
+joinP t = do
+  (e,h) <- newEvent
+  init <- currentValue (facts t)
+  el <- currentValue (psvalue init)
+  (_,ini) <- liftIO $runDynamic $ do 
+    onEventDyn  (psevent init) (liftIO. h)
+
+  onChangeDynIni ini (facts t) (\i -> do
+    onEventDyn  (psevent i) (liftIO. h)
+    ) 
+  accumS el e
+
+ 
 joinT t = do
   (e,h) <- newEvent
   init <- currentValue (facts t)
   el <- currentValue (facts init)
-  mapTidingsDyn (mapTidingsDyn  (liftIO. h)) t
+  (_,ini) <- liftIO $runDynamic $ do 
+    onEventDyn (rumors init) (\i -> liftIO $ do 
+       h i)
+
+  onEventDynIni ini (rumors t) (\i -> do
+    liftIO . h  =<< currentValue (facts i)
+    onEventDyn (rumors i) (\i -> liftIO $ do
+       h i )
+    ) 
   stepperT el e
 
 finalizerUI a = do

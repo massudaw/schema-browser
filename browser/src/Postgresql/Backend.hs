@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows,GADTs,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
+{-# LANGUAGE RecordWildCards,Arrows,GADTs,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module Postgresql.Backend (connRoot,postgresOps) where
 
 import Control.Exception
@@ -212,7 +212,7 @@ batchEd m i =  do
     codeGen (RowPatch (i,PatchRow dff)) = addRet $ updateQuery mpg ([i] ,filterWritablePatch dff)
     codeGen (BatchPatch i (PatchRow dff)) = addRet $ updateQuery mpg (i ,filterWritablePatch dff)
     addRet (q,i,j) = (q <> " RETURNING null",i,j)
-    mpg = (recoverFields inf <$> m)
+    mpg = (recoverFields inf <$> filterMetadataReadable m)
     with = "WITH "
     as i j = i <> " AS (" <> j <> ")"
     many l = T.intercalate "," l
@@ -221,7 +221,7 @@ batchEd m i =  do
     query = with <> many (uncurry as <$> tables) <> select ("("<>union (select  .fst <$> tables)<> ")")  <> " as t"
       where names ix = "r" <> T.pack (show ix)
             tables = zip (names <$> [0..]) ((\(i,_,_) -> i ) <$> l)
-    l = codeGen  . firstPatchRow (recoverFields inf) <$> catMaybes  (rowPatchNoRef <$> F.toList i)
+    l = codeGen  . firstPatchRow (recoverFields inf) <$> catMaybes  (rowPatchNoRef . filterWritableRowPatch <$> F.toList i)
   l <- queryLogged inf m (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
   liftIO $ print (l :: [Only(Maybe Int)])
   return i
@@ -276,13 +276,26 @@ getRow table  delayed (Idex idx) = do
            [] -> error $ "empty query: " ++ show (tableName table) ++ show idx
            v -> error $ "multiple result query: " ++ show (tableName table) ++ " - " ++  show idx  ++ "\n"++ show v
 
+filterMetadataReadable :: KVMetadata Key -> KVMetadata Key
+filterMetadataReadable i@KVMetadata{..} =i {_kvattrs = filter (\k -> L.elem FRead (keyModifier k)) _kvattrs  , _kvjoins = filter (not . isPlugin) _kvjoins }
+  where isPlugin (PluginField _  ) = True
+        isPlugin _ = False
+
 filterReadable = kvFilter (\k -> attr (relOutputSet k))
-  where attr = F.all (\k -> L.elem FRead (keyModifier k))
+  where attr = F.all (\k -> L.elem FRead (keyModifier k)) 
 
 filterWriteable = kvFilter (\k -> attr (relOutputSet k))
-  where attr = F.all (\k -> L.elem FWrite (keyModifier k))
+  where attr = F.all (\k -> L.elem FWrite (keyModifier k)) 
 
 filterWritablePatch = filter (\k -> F.all (L.elem FWrite . keyModifier) (relOutputSet $ index k)) 
+
+filterWritableRowPatch (BatchPatch i j) = BatchPatch i (filterWritableRow j )
+filterWritableRowPatch (RowPatch (i,j ))= RowPatch (i,filterWritableRow j ) 
+
+filterWritableRow (PatchRow j )= PatchRow $ filterWritablePatch j
+filterWritableRow (CreateRow j )= CreateRow $ filterWriteable j
+filterWritableRow (DropRow) = DropRow
+
 
 selectAll
   ::

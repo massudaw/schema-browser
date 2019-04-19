@@ -428,7 +428,6 @@ updateTable inf (DBRef {..})
             closeDynamic . transactionNoLog inf $ do
               l <- (patchEd $ schemaOps inf) m  [pk] p
               wrapModification m l
-
           AsyncTableModification  t (BatchPatch pk (PatchRow p))  ->  do
             let m = tableMeta t
             closeDynamic . transactionNoLog inf $ do
@@ -437,7 +436,7 @@ updateTable inf (DBRef {..})
           i -> return i
         val <- logger (schemaOps inf) inf mmod2
         undo (schemaOps inf) inf (RevertModification val  u) )
-      ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification"  ++ show (e :: SomeException))
+      ) upa `catchAll` (\e -> putStrLn $ "Failed logging modification\n"  ++ show (e :: SomeException) ++ "\n" ++ (either error (L.intercalate "\n\n". fmap ((ident . render).snd )) upa))
     return ())  (\e -> atomically ( readTChan patchVar ) >>= printException e )
 
 

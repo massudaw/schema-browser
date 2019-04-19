@@ -311,6 +311,7 @@ logUndoModification
   :: InformationSchema
   -> RevertModification Table (RowPatch Key Showable)  -> IO ()
 logUndoModification inf (RevertModification (FetchData id ip) _) = return ()
+logUndoModification inf (RevertModification (BatchedAsyncTableModification i l) u) = mapM_ (logUndoModification inf.flip RevertModification u) l 
 logUndoModification inf (RevertModification id ip) = do
   time <- getCurrentTime
   env <- lookupEnv "ROOT"

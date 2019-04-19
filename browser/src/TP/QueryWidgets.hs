@@ -24,7 +24,6 @@ import Control.Lens ( _1, _2)
 import PrimEditor
 import qualified Control.Lens as Le
 import qualified Control.Category as Cat
-import Serializer (decodeT)
 import Control.Monad
 import Control.Monad.Catch
 import Control.Monad.Writer hiding ((<>))
@@ -673,21 +672,22 @@ eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
 
 
 loadItems
-  :: (Show (t (KV Key Showable)) , Traversable t) =>
+  :: (Eq (t (TBIndex Showable)),Show (t (KV Key Showable)) , Traversable t) =>
      InformationSchema
      -> Table
      -> TBData CoreKey ()
      -> Tidings (t (TBData CoreKey Showable))
      -> Dynamic (Tidings (t (TBData CoreKey Showable)))
 loadItems inf table tbf preoldItems
-  = joinT =<< mapTidingsDyn
-    (fmap sequenceA . traverse
-      (\i -> do
-        fmap (justError ("failed getFrom " <> show (tableName table,i))) <$>  (transactionNoLog inf . getItem $ i)
-        ) )
-    preoldItems
+  = do
+     pkOnly <- calmTFilter (fmap (G.getIndex (tableMeta table ))) preoldItems
+     joinT =<< mapTidingsDyn
+        (fmap sequenceA .  traverse
+          (\i -> do
+            fmap (justError ("failed getFrom " <> show (tableName table,i))) <$>  (transactionNoLog inf . getItem $ i)
+            ) )pkOnly 
   where
-    getItem v = listenFrom table tbf v
+    getItem = listenFrom table tbf
 
 crudUITable
    :: InformationSchema
@@ -800,7 +800,7 @@ onDiff f g v = g v
 filterKey enabled k = void (filterApply (const <$> enabled) k)
 containsOneGist table ref = (==1).  L.length . conflictGist  table ref
 containsGist table ref = not . L.null .   conflictGist  table ref
-conflictGist table ref map = case  G.tbpredM (tableMeta table) ref of
+conflictGist table ref map = case  G.primaryKeyM (tableMeta table) ref of
               Just i -> G.search i map
               Nothing -> []
 
@@ -808,13 +808,16 @@ catchEd  m  = (Right <$> sequence m) `catchAll` (\ e -> return (Left (show e)))
 
 insertCommand lbox inf table inscrudp inscrud  authorize gist = do
     altI <- onAltI lbox
-    let insertEnabled = liftA3 (\i j k -> i && j && k ) (isDiff <$> inscrudp ) (maybe False  (\i -> (isRight .tableCheck m  $ i) || isJust (matchInsert inf (tableMeta table ) i) ) <$>  inscrud) (liftA2 (\j -> maybe True (not. (flip (containsGist table) j))) gist inscrud)
+    let insertEnabled = liftA3 (\i j k -> i && j && k ) 
+          (isDiff <$> inscrudp ) 
+          (maybe False  (\i -> (isRight .tableCheck m  $ i) || isJust (matchInsert inf (tableMeta table ) i) ) <$>  inscrud) 
+          (liftA2 (\j -> maybe True (not. (flip (containsGist table) j))) gist inscrud)
         m = tableMeta table
     insertI <- UI.span # set UI.class_ "glyphicon glyphicon-plus"
     insertB <- UI.button
         # set UI.class_ "btn btn-sm btn-default"
         # set children [insertI]
-        # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
+         # sink UI.style (facts $ (\i j -> noneShowSpan (maybe False (txt "INSERT" `elem`) i && j)) <$>authorize <*> insertEnabled)
     cliIns <- UI.click insertB
     let  crudIns j  =  do
         -- liftIO $ print j
@@ -1423,9 +1426,9 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           pred <- ui $ currentValue (facts predicate)
           reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> facts oldItems) <#> (fmap sourcePRef <$> inipl)
-          tdi <- ui $ calmT ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<< v) <$> gist  <*> newSel)
-          metaMap <- mapWidgetMeta inf
+          let  tdi = ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<<  v) <$> gist  <*> newSel)
           cliZone <- jsTimeZone
+          metaMap <- mapWidgetMeta inf
           metaAgenda <- eventWidgetMeta inf
           let
             replaceTarget = (\i j ->  let delta = diff i j 

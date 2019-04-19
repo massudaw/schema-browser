@@ -108,7 +108,7 @@ recInsert k1  v1 = do
    let tb  = lookTable inf (_kvname k1)
        overloadedRules = (rules $ schemaOps inf)
    (_,(_,TableRep(_,_,l))) <- tableLoaderAll  tb Nothing mempty (Just (recPK inf k1 (allFields inf tb)))
-   if  (isNothing $ (flip G.lookup l) =<< G.tbpredM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
+   if  (isNothing $ (flip G.lookup l) =<< G.primaryKeyM k1  ret) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema k1 ,_kvname k1) overloadedRules))
       then catchAll (do
         tb  <- insertFrom k1 ret
         return $ createRow tb) (\e -> liftIO $ do
@@ -198,7 +198,7 @@ tbEditRef fun@(funi,funid,funod,funo,edit,insert) m2 v1 v2 = mapInf m2 (traverse
         tb  = lookTable inf (_kvname m2)
         overloadedRules = (rules $ schemaOps inf)
       (_,(_,TableRep(_,_,g))) <- tableLoaderAll  tb Nothing mempty (Just (recPK inf m2 (allFields inf tb)))
-      if (isNothing $ (flip G.lookup g) =<< G.tbpredM m2 l) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema m2 ,_kvname m2) overloadedRules))
+      if (isNothing $ (flip G.lookup g) =<< G.primaryKeyM m2 l) && (rawTableType tb == ReadWrite || isJust (M.lookup (_kvschema m2 ,_kvname m2) overloadedRules))
          then return (TBInsert l)
          else return (TBNoop l)
     recheck l = return l

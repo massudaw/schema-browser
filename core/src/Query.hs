@@ -352,11 +352,12 @@ tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fma
   -> [([k],G.GiST (TBIndex  a1) (TBIndex a1))]
   -> t (TB Identity k a1)
   -> Maybe a-}
-searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) )
+searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (simplifyRel <$> rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> M.toList sgist) ) 
   where
     relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-    lookGist rel un pk  v =  join res
-      where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
+    lookGist rel un pk  v =  do
+       fk <- traceShowId (tbpredFK rel un (rawPK m) pk)
+       G.lookup fk v  -- <|> L.find (traceShowId . G.consistent (Right fk ) . traceShowId . Right .G.getIndex (tableMeta m)) v
 
     lookSGist sidsx rel un pk  v =  join res
       where res = fmap M.keys .flip G.lookup v <$> tbpredFK rel un sidsx pk

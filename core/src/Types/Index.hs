@@ -28,8 +28,8 @@ module Types.Index
   , getUniqueM
   , notOptional
   , notOptionalM
-  , tbpred
-  , tbpredM
+  , primaryKey 
+  , primaryKeyM 
   , unFin
   , Node(..)
   , indexParam
@@ -49,16 +49,12 @@ module Types.Index
   , filterRows
   , cinterval
   , PathTID(..)
-  , splitIndexPKB
   , alterWith
-  , splitIndexPK
   , module G
   ) where
 
 import Control.Applicative
-import Control.DeepSeq
 import Control.Monad
-import Data.Binary
 import GHC.Generics
 import Data.Char
 import Data.Either
@@ -101,7 +97,7 @@ uinterval ::Ord a=> ER.Extended a -> ER.Extended a -> Interval a
 uinterval i j = i Interval.<=..<= j
 
 getUnique :: (Show k ,Ord k) => [Rel k] -> TBData k a -> TBIndex  a
-getUnique ks = Idex . fmap snd . L.sortBy (comparing ((pkIndexM  ks).simplifyRel . fst)) .  getUn  (Set.fromList ks) 
+getUnique ks = Idex . fmap snd . L.sortBy (comparing (pkIndexM  ks.simplifyRel . fst)) .  getUn  (Set.fromList ks) 
 
 getUniqueM :: (Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
@@ -122,11 +118,11 @@ notOptionalM (Idex m) =
 notOptional :: Show a => TBIndex a -> TBIndex a
 notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
-tbpredM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
-tbpredM m = notOptionalM . getUnique  (_kvpk m)
+primaryKeyM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
+primaryKeyM m = notOptionalM . getIndex m 
 
-tbpred :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
-tbpred m = notOptional . getIndex m
+primaryKey :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
+primaryKey m = justError "primary key cannot be empty" . primaryKeyM  m
 
 instance Affine a => Affine [a] where
   type Tangent [a] = [Tangent  a]

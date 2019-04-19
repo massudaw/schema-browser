@@ -39,7 +39,6 @@ module Types.Patch
   , indexFilterP
   , indexFilterR
   , indexFilterPatch
-  , G.tbpred
   , PTBRef(..)
   --
   , nonRefPatch

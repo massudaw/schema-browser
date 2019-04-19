@@ -20,6 +20,7 @@ module TP.Selector
   ) where
 
 import Control.Monad.Reader
+import Debug.Trace
 import Data.Char
 import qualified Data.Foldable as F
 import PrimEditor
@@ -253,11 +254,19 @@ selectListUI
    -> Tidings (Maybe (TBData Key Showable))
    -> UI (Tidings (Maybe (TBData Key Showable)), Element)
 selectListUI inf table itemListEl predicate ref@(_,vpt,_)  constr proj tdi = do
+  first <- currentValue (facts tdi)
+  -- When first item exist on creation always hold the selected item
+  let buildList  a b = ((if isJust first && isJust b then (b :) else id) $ fmap Just (if isJust first && isJust b then L.delete (fromJust b) a else a))
   let m = tableMeta table
   (res4, fInp) <- paginateList inf table itemListEl predicate  ref constr proj tdi
-  lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just  . G.getIndex m) <$> res4 ) (fmap (Just . G.getIndex m)<$> tdi) ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) (primary <$> vpt))
+  let resultItem = ((\a b -> Nothing: fmap (fmap (G.getIndex m)) (buildList a b) ) <$> res4 <*> tdi) 
+  lbox <- listBoxEl 
+      itemListEl 
+      resultItem
+      (fmap (Just . G.getIndex m)<$> tdi) 
+      ((\i -> maybe (set text "None") (i$) )<$> showFKLook inf (tableMeta table) (primary <$> vpt))
   out <-  UI.div # set children [fInp,itemListEl]
-  return ((\i j -> join $ fmap (flip G.lookup  (primary j)) (join i)) <$> triding lbox <*> vpt   ,out)
+  return ((\i j -> flip G.lookup  (primary j) =<< i) <$> (join <$> triding lbox) <*> vpt   ,out)
 
 multiSelector
   :: InformationSchema

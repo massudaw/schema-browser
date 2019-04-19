@@ -271,7 +271,7 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
       return  (case G.notOptionalM (G.getIndex m el) of
           Just pk ->  (if G.notOptionalM i == Just pk
             then G.update (G.notOptional i) (flip apply patom)
-            else G.insert (el, G.tbpred m el) G.indexParam .
+            else G.insert (el, primaryKey m el) G.indexParam .
                  G.delete (G.notOptional i) G.indexParam) l
           Nothing -> G.update (G.notOptional i) (flip apply patom) l, RowPatch (ipa,PatchRow u))
     Nothing -> do
@@ -372,7 +372,7 @@ queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[Rel k]) -> TableRep k
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (TableRep (m,s,g)) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK  $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g)  <$> mergeSIdxs
-        notPK =  WherePredicate <$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
+        notPK =  WherePredicate <$> F.foldl' (\l i -> flip splitIndexPKB  i =<< l ) (Just bool) (pk : M.keys s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
         mergeSIdxs = L.foldl1' S.intersection <$> nonEmpty (catMaybes $ fmap (S.unions . fmap (M.keysSet.leafValue)). searchPK b <$> M.toList s)
 
