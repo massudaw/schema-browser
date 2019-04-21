@@ -3,53 +3,23 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda (agendaDef,eventWidget,agendaDefS,eventWidgetMeta,testAgendaDef) where
+module TP.Agenda (eventWidget,agendaDefS,eventWidgetMeta,testAgendaDef) where
 
-import GHC.Stack
-import Step.Host
 import TP.AgendaSelector
 import Control.Monad.Writer as Writer
-import TP.View
-import qualified Data.Interval as Interval
-import Control.Concurrent
-import Utils
-import Types.Patch
-import Control.Arrow
-import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
-import qualified Data.List as L
-import Data.Either
-import Data.Interval (Interval(..))
-import Data.Time.ISO8601
-import Data.Time.Calendar.WeekDate
-import Data.Char
-import qualified Data.Text.Encoding as TE
-import Control.Concurrent.Async
-import Safe
 import Query
-import Data.Time hiding(readTime)
-import qualified Data.Aeson as A
 import Text
-import qualified Types.Index as G
-import Debug.Trace
-import Types
 import SchemaQuery
 import TP.Widgets
 import Prelude hiding (head)
 import TP.QueryWidgets
-import Control.Monad.Reader
-import Data.Maybe
 import Reactive.Threepenny hiding (apply)
-import qualified Data.ByteString.Lazy.Char8 as BSL
 import RuntimeTypes
-import Environment
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
-import Data.Monoid hiding (Product(..))
 import qualified Data.Foldable as F
 import qualified Data.Text as T
-import Data.Text (Text)
 import qualified Data.Map as M
-import qualified Data.Set as S
 
 
 eventWidget (incrementT,resolutionT) sel inf cliZone = do

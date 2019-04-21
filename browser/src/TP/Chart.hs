@@ -48,37 +48,28 @@ chartRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tab
 
 
 chartDef inf
-  = projectV
-     (innerJoinR
-        (leftJoinR
-          (leftJoinR
-            (leftJoinR
-              (innerJoinR
-                (fromR "tables" `whereR` schemaPred)
-                (fromR "metrics" ) (schemaI "metrics"))
-              (fromR "geo" ) (schemaI "geo"))
-            (fromR "event" ) (schemaI "event"))
-          (fromR "table_description" ) descRel  )
-        (fromR "pks" ) pkRel  ) fields
+  = projectS
+      (leftJoinS
+        (leftJoinS
+          (innerJoinS
+            (tableDef inf `whereS` schemaPred)
+            (fromS "metrics" ) (schemaI "metrics"))
+          (fromS "geo" ) (schemaI "geo"))
+        (fromS "event" ) (schemaI "event")) fields
   where
-    pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
-    descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
     schemaI t = [Rel "oid" Equals (NInline t "table")]
     fields =  irecord $ proc t -> do
-      SText tname <-
-          ifield "table_name" (ivalue (readV PText))  -< ()
+      (tname,desc,_,pks) <- tableProj inf -< ()
       mfields <- iforeign (schemaI "metrics")  (ivalue $ irecord $ ifield "metrics" (imap $ ivalue $  readV PText)) -< ()
       gfields <- iforeign (schemaI "geo") (iopt $ ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText))))) -< ()
       evfields <- iforeign (schemaI "event") (iopt $ ivalue $ irecord (iforeign [Rel "column" (AnyOp Equals) "ordinal_position"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
-      desc <- iforeign descRel (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pks <- iforeign pkRel (ivalue $ irecord (iforeign [ Rel "pks" (AnyOp Equals) "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       color <- iforeign (schemaI "metrics") (ivalue $ irecord (ifield "color" (ivalue $ readV PText))) -< ()
       chart <- iforeign (schemaI "metrics") (ivalue $ irecord (ifield "chart_type" (ivalue $ readV PText))) -< ()
       let
         proj r = do
           values <- mapM (\(SText i)->  unSOptional =<< recLookupInf inf tname (indexerRel i) r) mfields
-          let fields = fmap fromJust $ filter isJust $ F.toList $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
+          let fields = fmap fromJust $ filter isJust $ F.toList $ fmap (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks (toListTree<$> desc))
           return $ A.toJSON <$> HM.fromList
                     [("value" :: Text,ArrayTB1 values)
                     ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> fields))
@@ -94,7 +85,7 @@ chartWidgetMetadata inf =  do
         ,css "leaflet.css"
         ,js "leaflet-svg-markers.min.js"
         ]
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (chartDef inf) ()
+    fmap F.toList  . currentValue . facts  =<< ui ( transactionNoLog (meta inf) $ dynPK (chartDef inf) ())
 
 chartWidget (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     dashes <- chartWidgetMetadata inf

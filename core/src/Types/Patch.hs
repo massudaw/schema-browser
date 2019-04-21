@@ -966,6 +966,7 @@ applyUndoFTBM (IntervalTB1 i) (PInter b (p, l)) =
       return ((Interval.PosInf, l), PInter b (fmap patch f, co))
     mapExtended NegInf (f, co) =
       return ((Interval.NegInf, l), PInter b (fmap patch f, co))
+--applyUndoFTBM (LeftTB1 (Just (LeftTB1 i))) p = applyUndoFTBM  (LeftTB1 i )  p 
 applyUndoFTBM (TB1 i) (PAtom p) = bimap TB1 PAtom <$> applyUndo i p
 applyUndoFTBM b (PatchSet l) =
   join . patchSet $ foldUndo b l
@@ -989,7 +990,8 @@ checkInterM (PInter b o) inter =
     else Right inter
 
 createUndoFTBM ::
-     (Patch a, Show a, Ord a) => PathFTB (Index a) -> Either String (FTB a)
+     forall a. (Patch a, Show a, Ord a) => PathFTB (Index a) -> Either String (FTB a)
+createUndoFTBM a@(POpt (Just i@(POpt _))) = traceStack (show (createUndoFTBM a :: Either String (FTB a)) ) $ createUndoFTBM i
 createUndoFTBM (POpt i) = if isJust i then (fmap LeftTB1 $ traverse createUndoFTBM i ) else Right (LeftTB1 Nothing)
 createUndoFTBM (PIdx ix o) =
   maybe (Left "Cant delete") (fmap (ArrayTB1 . pure) . createUndoFTBM) o

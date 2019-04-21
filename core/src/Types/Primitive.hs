@@ -84,6 +84,7 @@ data KType a = Primitive
   , _keyAtom :: a
   } deriving (Eq, Ord, Functor, Generic, Foldable, Show)
 
+
 makeLenses ''KType
 
 isSerial (Primitive (KSerial:_) _) = True
@@ -127,6 +128,8 @@ instance NFData DiffPosition
 instance NFData DiffShowable
 
 type CorePrim = Prim KPrim (Text, Text)
+
+type KVMeta k = FKV k KType CorePrim
 
 type CoreKey = FKey (KType CorePrim)
 

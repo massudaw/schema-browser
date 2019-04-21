@@ -58,37 +58,24 @@ import qualified Data.Map as M
 
 
 accountWidgetMeta inf = do
-  fmap F.toList $ transactionNoLog (meta inf) $ dynPK (accountDef inf) ()
+  (fmap F.toList . currentValue . facts ) =<<  (transactionNoLog (meta inf) $ dynPK (accountDef inf) ())
 
 accountDef inf
-  = projectV
-     (innerJoinR
-        (leftJoinR
-          (innerJoinR
-            (innerJoinR
-              (fromR "tables" `whereR` schemaPred)
-              (fromR "accounts" ) (schemaI "accounts"))
-            (fromR "event" ) (schemaI "event"))
-          (fromR "table_description" ) [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] )
-        (fromR "pks" )  pkrel ) (irecord fields)
+  = projectS
+      (innerJoinS
+        (innerJoinS
+          (tableDef inf `whereS` schemaPred)
+          (fromS "accounts" ) (schemaI "accounts"))
+        (fromS "event" ) (schemaI "event")) (irecord fields)
 
   where
-      pkrel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
-      descrel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"] 
-      schemaNamePred2 = [(keyRef "schema_name",Left (txt $schemaName inf ,Equals))]
       schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-      schemaNamePred = [(keyRef "table_schema",Left (txt (schemaName inf),Equals))]
       schemaI t = [Rel "oid" Equals (NInline t "table")]
       fields =  proc t -> do
-        SText tname <-
-            ifield "table_name" (ivalue (readV PText))  -< ()
         (color,afields) <- iforeign (schemaI "accounts")(ivalue $ irecord (
           (,)<$> ifield "color" (ivalue $ readV PText)
              <*> ifield "account" (imap $ ivalue $  readV PText))) -< ()
-        desc <- iforeign descrel (iopt . ivalue $  irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pks <- iforeign pkrel (ivalue $ irecord 
-          (iforeign [Rel (RelAccess (Rel "schema_name" Equals "schema_name" ) "schema_name") Equals "schema_name", Rel (RelAccess (Rel "table_name" Equals "table_name") "table_name") Equals "table_name", Rel "pks" Equals "column_name"] 
-            (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        (tname,desc,dir,pks) <- tableProj inf -< ()
         efields <- iforeign (schemaI "event") (ivalue $ 
             irecord 
               (iforeign [Rel (RelAccess (Rel "table" Equals "oid") "table") Equals "table", Rel "column" Equals "ordinal_position"] 
@@ -113,7 +100,7 @@ accountDef inf
                 ("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
                 ,("commodity", accattr )
                 ,("field", TB1 efield )] <> convField i
-          proj r = ( F.toList $ projf r desc <$> efields <*> afields)
+          proj r = ( F.toList $ projf r (fmap toListTree desc) <$> efields <*> afields)
         returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> efields,TB1 <$> afields,proj )
 
 

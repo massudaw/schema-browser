@@ -392,7 +392,7 @@ indexFieldL
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 indexFieldL inf m e c p@(Inline l) v =
   case findAttr l (restrictTable nonFK v) of
-    Just i -> pure . utlabel  (G.getOp p e) c <$> tlabel'  i
+    Just i -> pure . utlabel  (G.getOp p (first simplifyRel <$> e)) c <$> tlabel'  i
     Nothing -> error $ "not attr inline" ++ show (l,v)
 indexFieldL inf m e c n@(RelAccess l nt) v =
   case kvLookup l v of
@@ -412,7 +412,7 @@ indexFieldL inf m e c n@(RelAccess l nt) v =
 
 indexFieldL inf m e c p@(Rel l _ _) v =
   case findAttr (_relOrigin l) v of
-      Just i -> pure . utlabel  (G.getOp l e) c <$> tlabel'  i
+      Just i -> pure . utlabel  (G.getOp l (first simplifyRel <$> e)) c <$> tlabel'  i
       Nothing -> error $ "not attr rel " ++ show (_kvname m, l,v)
 indexFieldL inf m e c i v 
   | F.length (relOutputSet i) == 1  = indexFieldL inf m e c (Inline $ head $ F.toList $ relOutputSet i) v

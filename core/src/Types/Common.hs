@@ -13,7 +13,9 @@
 module Types.Common
   ( TB(..)
   , AValue(..)
+  , FAValue(..)
   , TBRef(..)
+  , FKV
   , _fkttable
   , _tbattr
   , ifkttable
@@ -154,12 +156,12 @@ import Prelude hiding (head)
 import Safe
 import Utils
 
-
-newtype KV k a
+newtype FKV k f a
   = KV
-  { _kvvalues :: Map (RelSort k) (AValue k a)
-  } deriving (Eq, Ord, Functor, Foldable, Traversable, Show, Generic)
+  { _kvvalues :: Map (RelSort k) (FAValue k f a)
+  } deriving (Functor, Foldable, Traversable, Generic)
 
+type KV k a = FKV k FTB a
 
 relSortL :: Ord k  =>  Rel k  -> RelSort k
 relSortL = relSort 
@@ -523,11 +525,13 @@ instance (NFData k, NFData j) => NFData (FExpr k j)
 type TBAttr k v = (Rel k, AValue k v)
 
 
-data AValue k a
-  = APrim {_aprim :: FTB a }
-  | ARef {_aref :: FTB (KV k a)}
-  | ARel { _arel :: KV k a  , _aref :: (FTB (KV k a))}
-  deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
+type AValue k a = FAValue k FTB a
+
+data FAValue k f a
+  = APrim {_aprim :: f a }
+  | ARef {_aref :: f (FKV k f a)}
+  | ARel { _arel :: FKV k f a  , _aref :: (f (FKV k f a))}
+  deriving(Functor,Foldable,Traversable,Generic)
 
 recoverAttr ::  Ord k => TBAttr k a -> TB k a
 recoverAttr (Inline i,APrim v) = Attr i v
@@ -593,9 +597,9 @@ data TB k a
      { _tbref :: KV k a
      , _fkrelation :: [Rel k]
      , _ifkttable :: FTB (KV k a) }
-  deriving (Functor, Foldable, Traversable, Generic, Eq, Ord, Show)
+  deriving (Functor, Foldable, Traversable, Generic )
 
-newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Show,Eq,Ord,Functor)
+newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Functor)
 
 _fkttable (IT _ i) = i
 _fkttable (FKT _ _ i) = i
@@ -734,16 +738,17 @@ addDefault = def
       FKT (kvlist $ addDefault <$> unkvlist at) rel (LeftTB1 Nothing)
 
 
-recoverFK :: Ord k => [k] -> [Rel k] -> FTB (TBRef k s) -> Column k s
+recoverFK :: (Show s,Show k ,Ord k) => [Rel k] -> [Rel k] -> FTB (TBRef k s) -> Column k s
+--recoverFK i l j | traceShow (i,l,j ) False = undefined
 recoverFK ori rel i
  =
   FKT
     (kvlist . catMaybes $
      (\k ->
-        Attr k <$>
+        Attr (_relOrigin k) <$>
         (fmap join .
          traverse
-           (fmap _aprim . Map.lookup (relSort $ Inline k) . _kvvalues . fst.unTBRef) $
+           (fmap _tbattr . kvLookup k . fst.unTBRef) $
          i)) <$>
      ori)
     rel
@@ -965,9 +970,25 @@ renderRel (Rel i Equals k)
 renderRel (Rel i op k) = "[" <> renderRel i <> " " <> renderBinary op <> " "<> renderRel k <> "]"
 
 
-makeLenses ''KV
+makeLenses ''FKV
 makeLenses ''TB
-makeLenses ''AValue
+makeLenses ''FAValue
+
+deriving instance (Show a , Show k) => Show (KV k a) 
+deriving instance (Show a , Show k) => Show (TB k a) 
+deriving instance (Show a , Show k) => Show (TBRef k a) 
+deriving instance (Show a , Show k) => Show (AValue k a) 
+
+deriving instance (Ord a , Ord k) => Ord (KV k a) 
+deriving instance (Ord a , Ord k) => Ord (TB k a) 
+deriving instance (Ord a , Ord k) => Ord (TBRef k a) 
+deriving instance (Ord a , Ord k) => Ord (AValue k a) 
+
+
+deriving instance (Eq a , Eq k) => Eq (KV k a) 
+deriving instance (Eq a , Eq k) => Eq (TB k a) 
+deriving instance (Eq a , Eq k) => Eq (TBRef k a) 
+deriving instance (Eq a , Eq k) => Eq (AValue k a) 
 
 
 recurseOverAttr ::

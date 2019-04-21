@@ -26,9 +26,8 @@ import TP.Account
 import TP.Browser
 import TP.Agenda
 import TP.Chart
-import Control.Lens (view,_1,_2,(^.))
+import Control.Lens (_1,_2,(^.))
 import TP.Map
-import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
 import Step.Common
 import Data.Time
@@ -49,7 +48,6 @@ import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Graphics.UI.Threepenny.Internal (wId,request)
-import Data.Monoid hiding (Product(..))
 import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
@@ -138,7 +136,7 @@ setup smvar bstate plugList w = void $ do
             return $ TrivialWidget  st widget),
           ("Agenda" ,do
             cliZone <- jsTimeZone
-            ((l,t),widget) <-  configExtension inf agendaDef (eventWidget calendarT (triding bset) inf cliZone)
+            ((l,t),widget) <-  configExtension inf agendaDefS (eventWidget calendarT (triding bset) inf cliZone)
             let st = (flip elem . fmap (^._2)) <$>  t
             return $ TrivialWidget (liftA2 (,) l st) widget),
           ("Chart" ,do

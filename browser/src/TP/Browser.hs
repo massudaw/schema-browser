@@ -13,7 +13,6 @@ import qualified Data.List as L
 import Reactive.Threepenny.PStream (toPStream)
 import qualified Data.Map as M
 import Data.Maybe
-import Data.Monoid hiding (Product(..))
 import qualified Data.Set as S
 import qualified Data.Text as T
 import qualified Graphics.UI.Threepenny as UI

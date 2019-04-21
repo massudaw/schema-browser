@@ -4,6 +4,8 @@ module TP.Widgets where
 import Reactive.Threepenny.PStream
 import Control.Monad.Writer hiding((<>))
 import Debug.Trace
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Diff as A
 import Data.Ord
 import qualified Types.Patch as P
 import Reactive.Threepenny hiding (apply)
@@ -565,6 +567,23 @@ sourceT change attr ini mel = do
   return (TrivialWidget t el)
 
 
+instance Patch A.Value where
+  type Index A.Value = A.Patch
+  applyUndo  i j =
+    case compute of 
+      A.Success i -> Right i
+      A.Error i -> Left i 
+    where 
+      compute = do 
+        o <- A.patch j i 
+        let u = A.diff o i
+        return (o,u)
+  diff i = Just . A.diff i 
+  patch = A.diff A.Null  
+  createIfChange i =
+    case A.patch i A.Null   of
+      A.Success i -> Just i 
+      A.Error i -> Nothing
 
 oitems = mkWriteAttr $ \i x -> void $ do
     return x # set children [] #+ map (\i -> UI.option # i) i

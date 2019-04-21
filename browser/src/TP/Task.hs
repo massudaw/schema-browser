@@ -43,32 +43,22 @@ import Utils
 
 
 taskWidgetMeta inf = do
-  fmap F.toList $ transactionNoLog (meta inf) $ dynPK (taskDef inf) ()
+    fmap F.toList $  join . fmap (currentValue .facts )  $ runMetaArrow inf taskDef
+  -- (fmap F.toList . currentValue .facts ) =<< transactionNoLog (meta inf) ( dynPK (taskDef inf) mempty)
+
 
 taskDef inf
-  = projectV
-     (innerJoinR
-        (leftJoinR
-          (innerJoinR
-            (innerJoinR
-              (fromR "tables" `whereR` schemaPred)
-              (fromR "planner" ) (schemaI "planner"))
-            (fromR "event" ) (schemaI "event"))
-          (fromR "table_description" ) descRel  )
-        (fromR "pks" ) pkRel  ) fields
-
+  = projectS
+    (innerJoinS
+      (innerJoinS
+         (tableDef inf `whereS` schemaPred)
+         (fromS "planner") (schemaI "planner"))
+      (fromS "event" ) (schemaI "event")) fields
   where
       schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
       schemaI t = [Rel "oid" Equals (NInline t "table")]
-      pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
-      descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
       fields =  irecord $ proc t -> do
-        SText tname <-
-            ifield "table_name" (ivalue (readV PText))  -< ()
-        desc <- iforeign descRel (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-        pks <- iforeign pkRel (ivalue $ irecord 
-          (iforeign [Rel "pks" Equals "column_name"] 
-              (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+        (tname,desc,dir,pks) <- tableProj inf -< ()
         efields <- iforeign (schemaI "event") (ivalue $ irecord 
             (iforeign [ Rel "column" (AnyOp Equals) "ordinal_position"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
@@ -82,7 +72,6 @@ taskDef inf
               to (STime (SDate i )) = STime $ SDate i
           convField (IntervalTB1 i) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime) $ unFinite $ Interval.upperBound i]
           convField v = [("start",toLocalTime $v)]
-          convField i = error (show i)
           scolor =  "#" <> renderPrim color
           renderTitle t = L.intercalate "," $ renderShowable <$> F.toList t
           lkRel i r=  unSOptional =<< recLookupInf inf tname (indexerRel i) r
@@ -90,7 +79,7 @@ taskDef inf
           lkProjectProperties r = do
             TB1 (STime (STimestamp date)) <- lkRel (unText $  NonS.head efields) r
             pkfields <- mapM (\(SText i) -> lkRel  i r) pks
-            fields <- mapM (\(SText i) -> lkRel i r) (fromMaybe pks desc)
+            fields <- mapM (\(SText i) -> lkRel i r) (fromMaybe pks (toListTree <$> desc))
             return (ProjectProperties
                       (Just (renderTitle fields))
                       Nothing

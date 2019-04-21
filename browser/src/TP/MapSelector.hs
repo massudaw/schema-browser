@@ -74,24 +74,17 @@ setPosition el (i,j) = runFunctionDelayed el $ ffi "setPosition(%1,%2,%3)"  el i
 
 
 mapDef inf
-  = projectV
-     (innerJoinR
-        (leftJoinR
-          (leftJoinR
-            (innerJoinR
-              (fromR "tables" `whereR` schemaPred)
-              (fromR "geo") (schemaI "geo"))
-            (fromR "event") (schemaI "event"))
-          (fromR "table_description"  ) descRel )
-        (fromR "pks" ) pkRel  ) fields
+  = projectS
+      (leftJoinS
+        (innerJoinS
+          (tableDef inf `whereS` schemaPred)
+          (fromS "geo") (schemaI "geo"))
+        (fromS "event") (schemaI "event")) fields
   where
-    pkRel = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"] 
-    descRel = [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
     schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
     schemaI t = [Rel "oid" Equals (NInline t "table")]
     fields =  irecord $ proc t -> do
-      SText tname <-
-          ifield "table_name" (ivalue (readV PText))  -< ()
+      (tname,desc,dir,pks) <- tableProj inf -< ()
       evfields  <- iforeign (schemaI "event") 
             (iopt $ ivalue $ irecord (iforeign [Rel "column" (AnyOp Equals) "oid"] 
               (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
@@ -99,23 +92,20 @@ mapDef inf
                  <$> (ivalue $ irecord (iinline "features" (imap $ ivalue $ irecord (ifield  "geo" ( ivalue $  readV PText)))))
                  <*> (ivalue $ irecord (iinlineR "features" (imap $ ivalue (readR ("metadata","style_options"))))) 
                  <*> (ivalue $ irecord (ifield "color" (ivalue $ readV PText)))) -<  ()
-      desc <- iforeign descRel  (iopt $  ivalue $ irecord (ifield "description" (imap $ ivalue $  readV PText))) -< ()
-      pks <- iforeign pkRel (ivalue $ irecord (iforeign [Rel "pks" (AnyOp Equals) "column_name"] 
-          (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
       let
         table = lookTable inf tname
-        projfT ::  (Showable , TBData Text Showable) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () A.Object 
+        projfT ::  (Showable , TBData Text Showable) -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () (Maybe A.Object )
         projfT (efield@(SText field),features) = irecord $ proc _ -> do
-          i <- convertRel inf tname field  -< ()
+          i <- convertRelM inf tname field  -< ()
           pkfields <- mapA (\(SText i) -> (Inline (lookKey inf tname i), ) <$> convertRel inf tname i)  pks -<  ()
-          fields <- mapA (\(SText i) ->  convertRel inf tname i) (fromMaybe pks desc) -< ()
-          returnA -< HM.fromList [("label", A.toJSON (HM.fromList
+          fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ).  NonS.fromList. explodeTree   <$> desc) ) -< ()
+          returnA -< (\i -> HM.fromList [("label", A.toJSON (HM.fromList
                                      [("position" :: Text,i)
                                      ,("id" :: Text, txt $ writePK' tname pkfields (TB1 efield))
-                                     ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                                     ,("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> catMaybes (F.toList fields)))
                                      ]))
-                                 ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]
-        proj =  fmap (fmap Just ) . mapA projfT  $ zip (F.toList efields) (F.toList features)
+                                 ,("style",A.toJSON (TRow (liftTable' (meta inf) "style_options" features)))]) <$> i
+        proj =   mapA projfT  $ zip (F.toList efields) (F.toList features)
         pred predi positionB calT = WherePredicate $ AndColl $ predicate inf table (fmap  fieldKey <$>efields' ) (fmap fieldKey <$> Just   gfields' ) (positionB,Just calT) : maybeToList (unPred <$> predi)
           where
             gfields' = fmap TB1 ( Non.fromList . F.toList $ efields)
@@ -127,7 +117,7 @@ mapDef inf
 
 
 mapWidgetMeta  inf =  do
-    fmap F.toList $ ui $ transactionNoLog (meta inf) $ dynPK (mapDef inf) ()
+    fmap F.toList . currentValue . facts  =<<  ui ( transactionNoLog (meta inf) $ dynPK (mapDef inf) ())
 
 
 legendStyle dashes lookDesc table b = traverse render item
@@ -190,7 +180,7 @@ mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
         fin <- traverseUIInt (\pred-> do
           let 
             selection = projectFields inf tb (fst $ staticP proj) mempty $ allFields inf tb
-          reftb <- ui $ refTablesProj inf tb Nothing pred selection
+          reftb <- ui $ refTablesProj inf tb Nothing (liftPredicateF lookupKeyName  inf (tableName tb ) $ mapPredicate (fmap keyValue)  pred )selection
           let v = primary <$> reftb ^. _2
           traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v
           let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc

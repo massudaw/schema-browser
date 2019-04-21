@@ -3,16 +3,11 @@
 
 module SchemaQuery.Arrow
   (
-    fromR
-  , fromS
-  , whereR
+    fromS
   , whereS
-  , innerJoinR
   , innerJoinS
-  , leftJoinR
-  , fixLeftJoinR
+  , leftJoinS
   , fixLeftJoinS
-  , projectV
   , projectS
   , runMetaArrow
   ) where
@@ -52,10 +47,6 @@ import SchemaQuery.Store
 
 type InputType = (WherePredicateK T.Text , KV Key ())
 
-fromR
-  :: T.Text
-  -> DatabaseM (View T.Text T.Text)  InputType (G.GiST (TBIndex Showable) (TBData Key Showable))
-fromR m  = P (FromV m ) (Kleisli (\e -> currentValue  =<< (fmap primary . psvalue . fst) <$>  uncurry (fromTable m)  e))
 
 fromS
   :: T.Text
@@ -66,17 +57,12 @@ whereS
   :: DatabaseM (View T.Text T.Text)  (PStream InputType)  (PStream (TableRep  Key Showable))
   -> [(Rel T.Text , AccessOp Showable)]
   -> DatabaseM (View T.Text T.Text)  (PStream InputType) (PStream (TableRep  Key Showable)) 
-whereS (P i@(FromV t) k) m  = P (WhereV i m) (proc i -> k -< constV (first (tablePredicate' m <>) ) i)
+whereS (P i k) m  = P (WhereV i m) (proc i -> k -< constV (first (tablePredicate' m <>) ) i)
 
 constV f (PStream b e) = PStream ( f  <$> b) e
 
+emptyP inp = PStream (pure inp) never
 
-
-whereR
-  :: DatabaseM (View T.Text T.Text)  InputType  (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> [(Rel T.Text , AccessOp Showable)]
-  -> DatabaseM (View T.Text T.Text)  InputType  (G.GiST (TBIndex Showable) (TBData Key Showable))
-whereR (P i@(FromV t) k) m  = P (WhereV i m) (proc i -> k -< (first (tablePredicate' m <>) i))
 
 
 sourceTable inf table = evalState (sourceTableM table) inf
@@ -113,10 +99,12 @@ sourceTableM (FromV i) = do
   return $ lookTable inf i
 sourceTableM (WhereV i j) = sourceTableM i
   
-instance Patch (WherePredicateK v) where
+instance Show v => Patch (WherePredicateK v) where
   type Index (WherePredicateK v) = WherePredicateK v
   applyUndo (WherePredicate (AndColl i)) (WherePredicate (AndColl j)) = Right $ (WherePredicate (AndColl (i <> j)),WherePredicate (AndColl i))
   applyUndo (WherePredicate (OrColl i)) (WherePredicate (OrColl j)) = Right $ (WherePredicate (OrColl (i <> j)), WherePredicate (OrColl (i )))
+  applyUndo i j = Right ( i <> j  , i )
+  applyUndo i j = error (show (i,j))
   diff i j = Nothing
   patch i = i 
   
@@ -129,18 +117,22 @@ pmap f fp  = Kleisli (\(PStream b e )->  lift $ do
   accumS (f ini) (filterJust $ trace "partial pmap".  fp <$> e))
 
 pmapA :: (KV Key Showable -> TransactionM b) 
-      -> (PrimaryRep  Key Showable -> RowPatch Key Showable -> TransactionM (TBIndex Showable, Editor (Maybe b -> b))) 
       -> PStream (PrimaryRep  Key Showable) 
       -> TransactionM  (Tidings (G.GiST (TBIndex Showable ) b))
-pmapA f fp   (PStream b e ) =  mdo
+pmapA f (PStream b e ) =  mdo
   inf <- askInf
+  let fp (PrimaryRep (m ,g)) (RowPatch (k,d)) = 
+                (k,) <$> case d of 
+                  CreateRow d -> Diff . fromMaybe <$> f d
+                  PatchRow p -> (maybe Keep (\i -> Diff $ maybe i (const i) )<$> traverse f  (flip applyIfChange p =<< G.lookup k g))
+                  DropRow -> return Delete 
   fre <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge right" ) (fp <$> b <@> e )
   PrimaryRep (_,ini) <- currentValue b
   fini <- traverse f  ini
   o <- lift $ accumT fini ((\(k,i) j -> case i of 
                                           Keep -> j 
                                           Diff f -> G.alterWith f  k  j 
-                                          Delete -> G.delete  k (8,8) j) <$> fre)
+                                          Delete -> traceStack ("deleting: " ++ show k ++ show (G.keys j )) $ G.delete  k (8,8) j) <$> fre)
   return o 
 
 
@@ -162,15 +154,15 @@ pmerge fun fr fl (PStream br er, PStream bl el) = mdo
 instance Compact () where
   compact _  = [()] 
 
-pmapPredicateK :: (View T.Text T.Text) -> Rel Key -> Kleisli TransactionM (PStream InputType , PStream (TableRep Key Showable))   (PStream InputType)
-pmapPredicateK inner cindex 
+pmapPredicateK ::  Rel Key -> Kleisli TransactionM (PStream InputType , PStream (TableRep Key Showable))   (PStream InputType)
+pmapPredicateK cindex 
   = Kleisli (pmerge tconvert  predicate projection  )
   where 
     tconvert (p,i) v = do
-      return $ (fromMaybe p $ fkPredicateIx (fmap keyValue cindex) (mapKey' keyValue <$> G.toList (primary v)) 
+      return $ (maybe mempty (mapPredicate (fmap keyValue)) $ fkPredicateIx cindex (G.toList (primary v)) 
                       , kvLookupMeta  cindex i :: KV Key ())
     predicate _ _ (RowPatch (i,CreateRow j ))  = do
-      return $ (,[] :: [TBIdx Key ()]) . pure <$> fkPredicateIx (fmap keyValue cindex) [mapKey' keyValue j]
+      return $ (,[] :: [TBIdx Key ()]) . pure . mapPredicate (fmap keyValue)<$> fkPredicateIx (cindex) [j]
     predicate _ _ (RowPatch (i,PatchRow  j ))  = return $ Nothing 
     predicate _ _ (RowPatch (i,DropRow ))  = return Nothing 
     projection _ _ i  = return Nothing -- Just (mempty,i)
@@ -217,21 +209,6 @@ mapPatch f (RowPatch (ix,PatchRow i) ) = RowPatch (ix, PatchRow $ f i )
 
 primaryRep (TableRep (m,s,p)) = PrimaryRep (m,p)
 
-innerJoinR
-  :: DatabaseM (View T.Text T.Text) InputType (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text) InputType (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> [Rel T.Text]
-  -> DatabaseM (View T.Text T.Text)  InputType  (G.GiST (TBIndex Showable) (TBData Key Showable))
-innerJoinR (P j k) (P l n) srel 
-  = P  inner 
-    (proc i -> do
-      preinf <- Kleisli (const askInf) -< ()
-      let (origin ,inf) = updateTable preinf  inner  
-      kv <- k -< i
-      nv <- n -< (maybe (fst i )(<> fst i) $ fkPredicate srel (mapKey' keyValue <$> G.toList kv ) , kvLookupMeta (liftRel inf (tableName origin) $ relCompS srel) $ snd i)
-      Kleisli (fmap primary <$> innerJoin j l srel )-< (kv,nv))
-    where inner = (JoinV j l InnerJoin srel)
-
 innerJoin j l srel (emap,amap) = do
         preinf <- askInf
         let 
@@ -276,22 +253,6 @@ leftJoinS (P j k) (P l n) srel
   where 
     joinS = JoinV j l LeftJoin srel
 
-
-leftJoinR
-  :: DatabaseM (View T.Text T.Text)  (InputType) (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text)  (InputType) (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> [Rel T.Text]
-  -> DatabaseM (View T.Text T.Text)  (InputType) (G.GiST (TBIndex Showable) (TBData Key Showable))
-leftJoinR (P j k) (P l n) srel 
-  = P  joinS
-    (proc p -> do
-      kv <- k -< p
-      preinf <- Kleisli (const askInf) -< ()
-      let (origin ,inf) = updateTable preinf  joinS
-      nv <- n -< (maybe (fst p) (<> fst p) $ fkPredicate srel ( mapKey' keyValue <$> G.toList kv ), kvLookupMeta (liftRel inf (tableName origin) $ relComp srel) $ snd p)
-      Kleisli (fmap primary . leftJoin joinS ) -< (kv,nv))
-    where joinS = JoinV j l LeftJoin srel
-
 leftJoin joinPred@(JoinV j l LeftJoin srel) (emap,amap)= do
         preinf <- askInf
         let
@@ -324,7 +285,7 @@ fixLeftJoinS (P j k) (P l n) srel index
           target = sourceTable inf l
           srelc = relComp $ (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
       kv <- k -< p
-      Kleisli (\(srelc ,p, kv ) -> go (0 ::Int) srelc p kv) -< (srelc , p  , kv))
+      Kleisli (\(srelc ,p, kv ) -> go (0 ::Int) srelc p kv) -< (srelc , pmap' (\i -> (mempty, snd i)) id p , kv))
     where 
       joinS = JoinV j l LeftJoin srel 
       go ix _ _ _ | ix > 5 = error "max recursion"
@@ -338,8 +299,7 @@ fixLeftJoinS (P j k) (P l n) srel index
           consIndex = relAppend index srelc
           unConsIndex (RelAccess i j )= j 
           unConsIndex i = i 
-          -- predS :: PStream (InputType)
-        predS <- runKleisli (pmapPredicateK joinS cindex) (p,kv)
+        predS <- runKleisli (pmapPredicateK cindex) (p,kv)
         isEmpty <- lift $ calmT ( fmap ((== mempty).fst) (toTidings predS))
 
         lift $  joinP =<<  mapTidingsDyn (\empty-> if empty
@@ -349,7 +309,7 @@ fixLeftJoinS (P j k) (P l n) srel index
               out <- (runKleisli n) predS 
               result <- pmerge 
                 (\j i ->  do
-                  let joined = joinRelation inf joinS sindex (primary i )
+                  let joined = joinRelation inf joinS cindex (primary i )
                   return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $ 
                       (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) 
                 (\_ last i -> do 
@@ -361,50 +321,23 @@ fixLeftJoinS (P j k) (P l n) srel index
 
 traceShowIdPrefix p f i = trace (p ++ "-" ++ f i) i 
 
-fixLeftJoinR 
-  :: DatabaseM (View T.Text T.Text) (InputType) (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> DatabaseM (View T.Text T.Text) (InputType) (G.GiST (TBIndex Showable) (TBData Key Showable))
-  -> [Rel T.Text]
-  -> Maybe (Rel T.Text)
-  -> DatabaseM (View T.Text T.Text) (InputType)(G.GiST (TBIndex Showable) (TBData Key Showable))
-fixLeftJoinR (P j k) (P l n) srel index 
-  = P  join 
-    (proc p -> do
-      kv <- k -< p
-      Kleisli (\(p,kv) -> go srelc  (0 ::Int) p kv ) -< (p,kv))
-    where 
-      srelc = relComp srel
-      join = JoinV j l LeftJoin srel 
-      go _  ix _ _ | ix > 5 = error "max recursion"
-      go cindex ix  (toppred,proj) kv = do
-          -- liftIO $ print ("Fix Left Index",ix,cindex)
-          let predM = fkPredicateIx cindex (mapKey' keyValue <$> G.toList kv )
-          case predM of 
-            Nothing -> do
-              -- liftIO $ do
-                -- putStrLn $  "## Fix Last " <> show l <> renderRel cindex <> show ix <> " " <> show (G.keys kv)  
-                -- mapM (putStrLn. ident .renderTable) (mapKey' keyValue <$> G.toList kv )
-              return kv 
-            Just pred -> do  
-              preinf <- askInf 
-              let (origin ,inf) = updateTable preinf  join 
-              -- liftIO $ putStrLn $  "## Fix Start " <> show ix <> " " <> show l <> renderPredicateWhere pred
-              out <- (runKleisli n) (pred ,proj)
-              -- liftIO $  putStrLn $  "## Fix End " <> show ix <> " " <> show l <> renderRel cindex <> " " <> show (G.keys out) 
-              let joined = joinRelation inf join cindex out
-                  consIndex = maybe srelc (flip relAppend srelc) index
-              go (relAppend cindex  consIndex) (ix+1)  (pred,proj) ((\i -> apply i (joined i)) <$> kv) 
-
+joinRelation
+  :: InformationSchema
+     -> View T.Text T.Text
+     -> Rel Key 
+     -> G.GiST (TBIndex Showable) (KV Key Showable)
+     -> TBData Key Showable
+     -> [PathAttr Key  Showable]
 joinRelation preinf join@(JoinV j l LeftJoin _ ) index amap =  do
     let
       origin = sourceTable preinf join 
       target = sourceTable preinf l
-      targetPK = fmap keyValue <$> rawPK target
-      joinFK :: TBData Key Showable ->  PathAttr T.Text Showable
+      targetPK = rawPK target
+      joinFK :: TBData Key Showable ->  PathAttr Key Showable
       joinFK m  = result
         where
-          result = justError ("cant index: "  ++ renderRel index ++  "\n" ++ (ident $ render m) ) (indexRelation  indexTarget index (mapKey' keyValue m))
-          findRef i v = maybe  Nothing Just $ patch . mapKey' keyValue <$> G.lookup pk  amap
+          result = justError ("cant index: "  ++ renderRel index ++  "\n" ++ (ident $ render m) ) (indexRelation  indexTarget index m)
+          findRef i v = maybe  Nothing Just $ patch  <$> G.lookup pk  amap
             where targetRel = (L.sortOn (\ i -> L.elemIndex (simplifyRel $ _relTarget i) (fmap simplifyRel targetPK ))  i )
                   pk = G.getUnique targetRel (kvlist v)
 
@@ -413,7 +346,7 @@ joinRelation preinf join@(JoinV j l LeftJoin _ ) index amap =  do
                   checkLength tb rel v 
                     | L.length rel == L.length v = v
                     | otherwise = error $ "missing parameters : " ++ show  (rel,v,index,tb)
-      joined i = [liftPatchAttr preinf (tableName origin) $ joinFK i]
+      joined i = [ joinFK i]
      in joined 
 
 
@@ -444,7 +377,6 @@ indexRelation f n@(RelAccess nk nt )  r
    PFK (relUnComp nk) [] . fmap pure <$> indexContainer allRefs i
   where
     allRefs (TBRef (i,v))=  indexRelation f nt v
--- indexRelation f n@(RelComposite l) = filter (S.null . relOutputSet )
 indexRelation f a  r
   =  f a r
 
@@ -457,17 +389,12 @@ projectS  (P i (Kleisli j))  p@(P (k,_) _ ) = P  projection
     (proc i -> do 
       set <- (Kleisli $  \_ -> do 
            inp <- projectMeta i k projection
-           j (empty inp ) ) -< ()
+           j (emptyP inp ) ) -< ()
       let setp = pmap' primaryRep id set
-      Kleisli (pmapA convertState applyChanges) -< setp)
-        where empty inp = PStream (pure inp) never
-              convertState = evalEnv p . (,mempty). Atom . mapKey' keyValue
-              projection = ProjectV i (foldl mult one k)
-              applyChanges (PrimaryRep (m ,g)) (RowPatch (k,d)) = 
-                (k,) <$> case d of 
-                  CreateRow d -> Diff . fromMaybe <$> convertState  d
-                  PatchRow p -> (\i -> Diff $ maybe i (const i) ) <$> (convertState $ fromJust (flip applyIfChange p =<< G.lookup k g))
-                  DropRow -> return Delete 
+      Kleisli (pmapA convertState ) -< setp)
+        where
+          convertState = evalEnv p . (,mempty). Atom . mapKey' keyValue
+          projection = ProjectV i (foldl mult one k)
 
 projectMeta i k  projection  = do
     preinf <- askInf
@@ -478,17 +405,4 @@ projectMeta i k  projection  = do
     return (mempty,fields)
 
 
-projectV
-  :: (Traversable t2) =>
-    DatabaseM  (View T.Text T.Text) (InputType ) (t2 (KV Key c))
-     -> PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom ((TBData T.Text c)))  TransactionM () b
-     -> DatabaseM (View T.Text T.Text) () (t2 b)
-projectV  (P i (Kleisli j))  p@(P (k,_) _ ) = P projection  (Kleisli $  \_ -> do
-      inp <- projectMeta i k projection
-      (j inp)  >>= (\a -> traverse (evalEnv p . (,mempty) . Atom .  mapKey' keyValue) a))
-    where projection = ProjectV i (foldl mult one k)
-
 runMetaArrow inf fun = transactionNoLog (meta inf) $ dynPK (fun inf) ()
-
-runMetaArrowS inf fun = transactionNoLog (meta inf) $ dynPK (fun inf) ()
-

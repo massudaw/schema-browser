@@ -1,3 +1,4 @@
+{-# LANGUAGE Arrows #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
@@ -7,7 +8,11 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Control.Arrow
+import Control.Monad (join)
 import Utils
+import SchemaQuery.Arrow 
+import qualified Data.Sequence.NonEmpty as NonS
 import qualified Data.Aeson.Diff as AP
 import qualified Data.Aeson.Pointer as AP
 import Safe
@@ -276,3 +281,59 @@ convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i
 execTable project =  runIdentity .evalEnv project . (,[]) . Atom .  mapKey' keyValue
 
 columnName name = ivalue $ irecord $ iforeign [ Rel name Equals "ordinal_position"] (ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText)))
+
+
+tableDef inf = 
+  innerJoinS
+    (fixLeftJoinS
+      (fromS "tables")
+      (fromS "table_description") [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]  indexDescription  )
+    (fromS "pks") [Rel "schema_name"  Equals "schema_name", Rel "table_name" Equals "table_name"]
+    where 
+      indexDescription = liftRel (meta inf) "table_description" $ RelAccess (Rel "description" Equals "column_name")
+                            (RelAccess (Inline "col_type")
+                                (RelAccess (Inline "composite")
+                                    (RelComposite [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"])))  
+
+
+tableProj inf =  fields
+  where
+      pkjoin = [Rel "schema_name" Equals "schema_name", Rel "table_name" Equals "table_name"]
+      descjoin= [Rel "schema_name" Equals "table_schema", Rel "table_name" Equals "table_name"]
+      compdescjoin = [Rel "schema_name" Equals "schema_name", Rel "data_name" Equals "table_name"]
+      eitherDescription = isum [nestedDescription, directDescription] 
+      directDescription = fmap (fmap Leaf) $ iforeign descjoin (iopt . ivalue $ irecord (ifield "description" (imap . ivalue $  readV PText)))
+      nestedDescription = fmap (fmap (\(i,j) -> Tree $ NonS.zipWith (,) i j)) . iforeign descjoin  . iopt . ivalue $ irecord 
+              (liftA2 (,) 
+                (ifield "description" (imap . ivalue $  readV PText))
+                (iforeign (relUnComp $ fmap keyValue $ liftRel (meta inf ) "table_description" $ relComp $ [Rel "description" Equals "column_name"] )
+                (imap . ivalue . irecord $ (iinline "col_type" 
+                  (ivalue . irecord . iinline "composite" . fmap join . iopt . ivalue $ irecord 
+                    (iforeign compdescjoin 
+                       . ivalue . irecord $ eitherDescription 
+                        ))))))
+      fields =  proc t -> do
+          SText tname <-
+              ifield "table_name" (ivalue (readV PText))  -< ()
+          desc <-  eitherDescription -< ()
+          dir <- directDescription -< ()
+          pks <- iforeign pkjoin (ivalue $ irecord (iforeign [ Rel "pks" Equals "column_name"] (imap $ ivalue $ irecord (ifield  "column_name" (ivalue $  readV PText))))) -< ()
+          returnA -< (tname,desc,dir,pks)
+ 
+
+toListTree (Tree i ) = fst <$> i 
+toListTree (Leaf i ) = i
+
+data Tree f a 
+  = Leaf { unLeaf :: f a}
+  | Tree (f (a,Maybe (Tree f a)))
+
+instance (Show a) => Show (Tree NonS.NonEmptySeq a ) where
+  show (Leaf i) = show i 
+  show (Tree i) = L.intercalate "\n" . F.toList $ fmap (\(i,j) -> show i <> maybe "" (\ j ->" - \n" <> (show j) ) j )  i
+
+explodeTree (Tree f) = concat $ fmap ((\(SText i,  j) -> maybe [ Inline i]  (fmap (RelAccess (Inline i)) ) j). fmap (fmap explodeTree)) (F.toList f)
+explodeTree (Leaf i) = (\(SText t) -> Inline t) <$> F.toList i
+
+
+

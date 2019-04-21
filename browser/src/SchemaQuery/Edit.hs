@@ -16,7 +16,6 @@ module SchemaQuery.Edit
 import Control.Exception (throw)
 import Control.Monad.Catch
 import Control.Monad.RWS
-import qualified Data.Foldable as F
 import qualified Data.HashMap.Strict as HM
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -224,11 +223,17 @@ tbInsertEdit m f@(FKT pk rel2 t2) = do
   let
     ptable = lookTable inf $ _kvname m
     m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey ptable rel2
-    pkrel = fmap (_relOrigin ) . kvkeys  $ pk
+    pkrel =  L.nub $ (kvkeys  $ pk)<> (_relAccess <$> filterReflexive rel2)
   recoverFK  pkrel rel2 <$> tbInsertRef (tbRefFun rel2) m2 (liftFK f)
 
 tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
-tbRefFun rel2 = (snd.unTBRef,(\(PTBRef i j k)  -> compact (j <> k) ),(\i -> PTBRef [] i [] ), (\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb)),fullDiffEdit,recInsert)
+tbRefFun rel2 
+  = (snd.unTBRef
+    ,(\(PTBRef i j k)  -> compact (j <> k) )
+    ,(\i -> PTBRef (maybe [] patch (reflectFK rel2 =<< createIfChange (i :: TBIdx Key Showable) :: Maybe (TBData Key Showable)) :: TBIdx Key Showable) i [])
+    ,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb))
+    ,fullDiffEdit
+    ,recInsert)
 
 tbInsertRef ::Show b => RelOperations b -> KVMetadata Key ->  FTB b -> TransactionM (FTB b)
 tbInsertRef (funi,_ ,_,funo,edit,insert) m2 = mapInf m2 . traverse (fmap funo . insert m2 .funi)

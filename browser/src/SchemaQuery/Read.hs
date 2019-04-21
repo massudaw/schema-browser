@@ -678,27 +678,47 @@ convertChanEvent inf table fixed select bres chan = do
   (e,h) <- newEvent
   dynFork . forever $ catchJust notException (do
     ml <- atomically $ takeMany chan
+      
     TableRep (_,_,v) <- currentValue bres
     let
+      
       meta = tableMeta table
+      check r j  = if G.checkPred i (fst fixed) 
+                  then do
+                    liftIO . putStrLn $ "patch: \n" ++ (ident . render $ j )
+                    case recComplement inf meta select mempty i  of
+                      Just c ->  do 
+                        when ( tableName table == "table_description" )$  do
+                          liftIO $ putStrLn $ "match raw:\n" ++ show c
+                          liftIO $ putStrLn $ "match pretty:\n" ++ ident (render c)
+                        return $ Just [] -- Just . concat .maybeToList . snd <$> getFrom  table select i 
+                      Nothing -> return $ Just []
+                  else return Nothing
+            where 
+                i = apply r j 
       deltas  =  tableDiff <$> concat  ml
-      match :: RowPatch Key Showable -> Bool
-      match (RowPatch (i,PatchRow j)) = case G.lookup i v  of
-                  Just r -> G.checkPred (apply r j ) (fst fixed )
-                  Nothing -> False
-      match (RowPatch (i,CreateRow j)) = G.checkPred j (fst fixed ) ||  check
-        where
-          check = case G.lookup i v  of 
-            Just r -> G.checkPred r (fst fixed)
-            Nothing ->  False
-      match (RowPatch (i,DropRow)) = isJust (G.lookup i v)
-      match (BatchPatch i j) = maybe False (const True ) $ nonEmpty (filter (\ix -> match (RowPatch (ix,j)) ) i ) 
-      filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
-      newRows =  filter match deltas 
-      oldRows = filterPredNot v deltas 
-      patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> (oldRows <> nonEmpty newRows)
-      mapPatch r (RowPatch (ix,j)) = (ix,patchType j ,match r)
-      mapPatch r i = error (show i)
+      match :: RowPatch Key Showable -> TransactionM (Maybe [RowPatch Key Showable])
+      match r@(RowPatch (i,PatchRow j)) 
+            = case G.lookup i v  of
+              Just r ->  do
+                 delta <- check r j 
+                 return $ pure .(\ d -> RowPatch (i,PatchRow (compact (j <> d ) )))  <$> delta
+              Nothing -> return Nothing 
+      match (RowPatch (i,CreateRow j)) = do
+                  if G.checkPred j  (fst fixed) 
+                  then return $ Just [RowPatch (i,CreateRow j ) ]
+                  else return Nothing
+      match (BatchPatch i j) = nonEmpty . concat . catMaybes <$>  mapM (\ix -> match (RowPatch (ix,j)) ) i 
+      -- filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
+    (newRows,_) <- runDynamic .transactionNoLog inf $ concat .catMaybes <$> mapM match deltas 
+      -- oldRows = filterPredNot v deltas 
+    let
+      patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> ({-oldRows <> -} nonEmpty newRows)
+    --when (tableName table == "table_description")  $
+      --void $ traverse (\v -> do
+        --putStrLn $ "Logging new patches: " ++ renderPredicateWhere (fst fixed)
+       -- mapM_ (putStrLn . ident . render ) v) patches
+
     traverse h patches
     
     return ()) (\e -> atomically (takeMany chan) >>= (\d -> putStrLn $  show ("error convertChanEvent"  ,e :: SomeException,d)<>"\n"))

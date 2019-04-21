@@ -38,7 +38,8 @@ data RowModifier
 
 mapA f a = F.foldr (liftA2 (:))  (pure []) (f <$> a)
 
-convertRel inf tname = fmap (justError $ "cannot convert" ++ show tname ). buildRel . splitRel inf tname
+convertRelM inf tname  = buildRel . splitRel inf tname 
+convertRel inf tname  i = fmap (justError $ "cannot convert: " ++ show (tname ,i)). convertRelM inf tname  $ i
 
 splitRel inf tname = liftRel inf tname . indexerRel 
 
@@ -378,7 +379,7 @@ projectFields inf table l w v = projectFields' inf table (validateAttributePath 
 projectFields' :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
 -- projectFields' _ _ l  w _ | traceShow ("projectFields",l,w) False = undefined
 projectFields' inf t s (WherePredicate pred) l 
-  =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList <> fkAttrList ))
+  =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList ))
   where 
     attrList = fst <$> F.toList pred 
     fkAttrList = concat $ fmap mappath  (F.toList  =<< s )  

@@ -262,7 +262,7 @@ applyGiSTChange ::
   -> RowPatch k (Index a)
   -> Either String ((KVMetadata k,G.GiST (TBIndex a) (TBData k a)),RowPatch k (Index a))
 applyGiSTChange (m,l) (RowPatch (patom,DropRow))=
-  maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
+  traceStack ("dropping" ++ show (patom , G.keys l))  $ maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
     ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch .  RowPatch . (create <$> patom ,) . CreateRow <$> G.lookup (create <$> patom) l
 applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
   first (m,) <$>case  flip G.lookup l =<< (G.notOptionalM i)  of
@@ -275,7 +275,7 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
                  G.delete (G.notOptional i) G.indexParam) l
           Nothing -> G.update (G.notOptional i) (flip apply patom) l, RowPatch (ipa,PatchRow u))
     Nothing -> do
-      el <-maybe (Left $ "cant create row" ++ show patom) Right $ createIfChange patom
+      el <-maybe (Left $ "cant create row" ++ show patom ++ show  (i,G.keys l )) Right $ createIfChange patom
       return $ (G.insert (el, i ) G.indexParam l,RowPatch (ipa,DropRow ))
   where
     i = fmap create ipa
@@ -290,7 +290,7 @@ applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow elp)) =
 
 getIndexWithTrace 
   :: (Show k, Show a,Ord k)
-  =>  Rel k
+  =>  Rel k 
   -> TBData k a
   -> [(Union (AttributePath k ()),TBIndex a)]
 getIndexWithTrace un row = maybeToList $ do
@@ -310,9 +310,12 @@ getIndexWithTrace un row = maybeToList $ do
       | L.all isRel v = [(PathForeign v (isOpt attrs $ TipPath (Many $ (\i -> (PathAttr (_relOrigin i) (TipPath ())) ) <$> v )), Idex attrs )]
       | otherwise = concat $ lookupRel <$>  v
       where attrs = fmap _tbattr . unkvlist . justError ("No rel comp " ++ show (l,kvkeys row)) $ _tbref  <$> kvLookup (relComp v) row 
-    lookupRel r@(Rel (Inline i) j k) = [(PathForeign [r] (TipPath (Many $ pure (PathAttr i (TipPath ())))), Idex . fmap _tbattr . unkvlist .justError ("No rel " ++ show (r,row)) $  _tbref <$> kvLookup r row)]
+    lookupRel r@(Rel (Inline i) j k) = [(PathForeign [r] (( if isLeft (_fkttable value) then NestedPath PIdOpt  else id ) $ TipPath (Many $ pure (PathAttr i (TipPath ())))), Idex . fmap _tbattr . unkvlist $ _tbref value )]
+      where value =  justError ("No rel " ++ show (r,row)) $  kvLookup r row
     lookupRel (RelAccess i j ) = fmap (first (PathInline (_relOrigin i)))   $ ftbToPathIndex $  getIndexWithTrace j <$> justError ("cant find: " ++ show (i,row)) (refLookup  i row)
-    lookupRel i@(Inline k ) = [(PathAttr k $ TipPath (),Idex . pure . justError ("No attribute path "  ++ show ( un,k,row)) $ _tbattr <$> (kvLookup i row)) ]
+    lookupRel i@(Inline k ) = [(PathAttr k $ ( if isLeft attr  then NestedPath PIdOpt  else id ) $TipPath (),Idex . pure $ attr  )]
+      where attr = justError ("No attribute path "  ++ show ( un,k,row)) $ _tbattr <$> (kvLookup i row)
+
     unIndex (Idex v ) = v
 
 ftbToPathIndex (ArrayTB1 l) = join $ F.toList $ NonS.imap (\ix v -> first (NestedPath (PIdIdx ix)) <$> ftbToPathIndex  v) l 
@@ -534,7 +537,7 @@ mapModification f (AsyncTableModification d e ) = AsyncTableModification  (fmap 
 mapModification f (BatchedAsyncTableModification  d e ) = BatchedAsyncTableModification (fmap f d) (mapModification f <$> e)
 mapModification f (FetchData d e) = FetchData (fmap f d) (firstPatchRow f e)
 
-putPatchSTM m =  writeTChan m -- . force
+putPatchSTM m =  writeTChan m . fmap (fmap force)
 putIdx m = liftIO .atomically . putIdxSTM m
 putIdxSTM m =  writeTChan m  -- . force
 
@@ -759,6 +762,9 @@ liftAccessU inf t = fmap (liftAccess inf t )
 lookAccess :: InformationSchema -> Text -> (Rel Text , [(Rel Text,AccessOp Showable )]) -> (Rel Key, [(Rel Key,AccessOp Showable )])
 lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (fmap (lookKey inf tname)) <$> l2 )
 
+lookAccessM :: InformationSchema -> Text -> (Rel Text , [(Rel Text,AccessOp Showable )]) -> Maybe (Rel Key, [(Rel Key,AccessOp Showable )])
+lookAccessM inf tname (l1,l2) = (,) <$> liftRelM inf tname l1 <*>  traverse (fmap swap . traverse (traverse (lookKeyM inf tname)) .swap ) l2 
+
 genPredicateFull'
   :: (Ord a,Show a)
   => t
@@ -843,10 +849,12 @@ recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
             current <- L.find (isJust . unLeftItens) (unkvlist e)
             kvlist . pure <$>  ((\v -> go top r m (index current ) current v) =<< kvLookup (index current) v)
       | otherwise 
-        = fmap kvmap . join . fmap notPKOnly . notEmpty . M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go top r m)) (unKV e) . unKV $ v
+        = fmap kvmap . join . fmap notPKOnly . notEmpty $ zipNonRef 
       where notPKOnly k =   if (relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets (_kvpk m <> r ) && not top  )
                                || (relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets attrList  && top)
                                     then Nothing else Just k
+            zipAll = M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go top r m)) (unKV e) . unKV $ v
+            zipNonRef = M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go top r m)) (unKV (tableNonRef e))    $ zipAll
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
     go top r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
@@ -937,7 +945,7 @@ createUn m un = G.fromList  (justError ("empty: " ++ show un) . transPred) . L.f
   where transPred = G.notOptionalM . G.getUnique un
 
 
-tablePredicate inf t p = (WherePredicate . andColl $ fmap (lookAccess inf t). PrimColl .fixrel <$> p)
+tablePredicate inf t p = (WherePredicate . andColl $ fmap PrimColl $ catMaybes $  lookAccessM inf t. fixrel <$> p)
 tablePredicate' p = (WherePredicate . andColl $ PrimColl .fixrel <$> p)
 
 lookRef k = _fkttable . lookAttrs' k
