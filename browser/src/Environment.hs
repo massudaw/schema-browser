@@ -373,10 +373,10 @@ validateAttributePath inf table l
               (ninf,nt) = lookInfTable inf nst 
     liftRelation  inf t l = relUnComp $ liftASch (lookKeyNested $tableMap inf ) (schemaName inf ) (tableName t)  $ relComp (l)
 
-projectFields :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
+projectFields :: InformationSchema -> Table -> [Union (G.AttributePath Text MutationTy)] -> WherePredicate -> KVMeta Key -> KVMeta Key
 projectFields inf table l w v = projectFields' inf table (validateAttributePath inf table l ) w v
 
-projectFields' :: Show a=> InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> TBData Key a -> TBData Key a
+projectFields' :: InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> KVMeta Key  -> KVMeta Key
 -- projectFields' _ _ l  w _ | traceShow ("projectFields",l,w) False = undefined
 projectFields' inf t s (WherePredicate pred) l 
   =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList ))
@@ -390,7 +390,7 @@ projectFields' inf t s (WherePredicate pred) l
             explodeRel (RelComposite l ) = concat $ explodeRel <$> l
 
     -- pattr v i | traceShow ("pattr",i , kvkeys v) False = undefined
-    pattr :: forall a. Show a => TBData Key a -> G.AttributePath Key MutationTy -> Maybe [TB Key a]
+    pattr :: KVMeta Key  -> G.AttributePath Key MutationTy -> Maybe [TBMeta Key ]
     pattr v (G.PathAttr key  _) 
       = fmap pure $  kvLookup (Inline key ) v
         <|> (findRef =<< kvFind (\v -> _relOutputs v == Just [key]) v )
@@ -403,9 +403,9 @@ projectFields' inf t s (WherePredicate pred) l
               nt = lookSTable inf nst 
     pattr v (G.PathForeign rel n ) 
       =  nonEmpty $ concat . catMaybes $ 
-            (pure. pfun (\n ->  Le.over ifkttable (fmap (projectFields' inf nt [n,relAttrs] mempty)))  n  <$> kvLookup (relComp rel) v  :: Maybe [TB Key a]) :  (attrs <$> rel )
+            (pure. pfun (\n ->  Le.over ifkttable (fmap (projectFields' inf nt [n,relAttrs] mempty)))  n  <$> kvLookup (relComp rel) v  :: Maybe [TBMeta Key ]) :  (attrs <$> rel )
         where 
-          attrs :: Rel Key -> Maybe [TB Key a]
+          attrs :: Rel Key -> Maybe [TBMeta Key ]
           attrs (Rel (Inline i ) _ r ) = pattr v $ G.PathAttr i (G.TipPath (Mutation True False (_keyAtom $ keyType i )))
           attrs (Rel (RelAccess i ti )  _ r ) | L.all isRel (relUnComp i) 
               = nonEmpty $ concat $ catMaybes $ pattr v (G.PathForeign (relUnComp i) (TipPath $ Many $ [target  ti] )) : (attrs <$> relUnComp  i)

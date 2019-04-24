@@ -989,6 +989,8 @@ checkInterM (PInter b o) inter =
     then (Left "ilegal interval bounds")
     else Right inter
 
+instance Patch (KVMeta Key) where
+
 createUndoFTBM ::
      forall a. (Patch a, Show a, Ord a) => PathFTB (Index a) -> Either String (FTB a)
 createUndoFTBM a@(POpt (Just i@(POpt _))) = traceStack (show (createUndoFTBM a :: Either String (FTB a)) ) $ createUndoFTBM i

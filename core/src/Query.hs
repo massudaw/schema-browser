@@ -107,7 +107,7 @@ isKOptional _ = False
 
 
 
-labelTable :: Table ->  TBData Key ()
+labelTable :: Table ->  KVMeta Key 
 labelTable i = kvlist $ kname <$> rawAttrs i
 
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
@@ -174,7 +174,7 @@ type TableMap = HM.HashMap Text (HM.HashMap Text Table)
 allRec'
   :: TableMap
   -> Table
-  -> TBData Key ()
+  -> KVMeta Key 
 allRec' invSchema r = recurseTB invSchema [] r
 
 
@@ -183,19 +183,19 @@ pathToRel (FunctionField i _ _ )  = [Inline i]
 pathToRel (FKJoinTable ks _  ) = ks
 
 
-findRefFK ::  [Key] -> KV Key ()  -> KV Key ()
+findRefFK ::  [Key] -> KVMeta Key   -> KVMeta Key 
 findRefFK fks ksbn = kvlist $ fmap (\i -> findRefIT i ksbn ) fks
   where
-    findRefIT ::  Key -> KV Key () -> TB Key ()
+    findRefIT ::  Key -> KVMeta Key  -> TBMeta Key 
     findRefIT ifk = justError ("cant find ref" <> show ifk) . findAttr  ifk
 
 recursePath
   :: RecState Key
-  -> [(Set (Rel Key), TB Key ())]
-  -> KV Key ()
+  -> [(Set (Rel Key), TBMeta Key )]
+  -> KVMeta Key 
   -> TableMap
   -> SqlOperation
-  -> TB Key ()
+  -> TBMeta Key 
 recursePath  isRec vacc ksbn invSchema p@(FKInlineTable ifk reft)
   =  IT ifk (recBuild p tb)
   where
@@ -216,22 +216,19 @@ recursePath  isRec vacc ksbn invSchema jo@(FKJoinTable  ks reft)
 recursePath  isRec vacc ksbn invSchema (RecJoin l f)
   = recursePath  (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema f
 recursePath  isRec vacc ksbn invSchema (FunctionField k l f)
-  = (Fun k  (l,f) (TB1 () ))
+  = (Fun k  (l,f) (keyType k))
 
 
-recBuild :: SqlOperation -> (a -> FTB a)
+recBuild :: SqlOperation -> (a -> KType a)
 recBuild p =
   case mergeFKRef (keyType . _relOrigin<$> ks) of
-    Primitive l _ ->  F.foldl' (.) id (effect <$> l) . TB1
+    Primitive l _ ->  Primitive l -- F.foldl' (.) id (effect <$> l) . TB1
   where
     ks = pathToRel p
-    effect :: KTypePrim  -> FTB a -> FTB a
-    effect KOptional = LeftTB1 . pure
-    effect KArray = ArrayTB1 .pure
 
 lkSTable invSchema (s,t) = justError ("recursepath lookIT: "  <> show (s,t) <> " " <> show (HM.keys invSchema, HM.lookup s invSchema)) (HM.lookup t =<< HM.lookup s invSchema)
 
-recurseTB :: TableMap -> RecState Key  -> Table ->  TBData Key ()
+recurseTB :: TableMap -> RecState Key  -> Table ->  KVMeta Key 
 recurseTB invSchema isRec table =
   let
     m = tableMeta table
@@ -272,8 +269,8 @@ tbPK kv = kvFilter (\k -> S.isSubsetOf (relOutputSet k) (S.unions $ relOutputSet
 
 -- Combinators
 
-kname :: Key -> TB Key ()
-kname i = Attr i (TB1 ())
+kname :: Key -> TBMeta Key 
+kname i = Attr i (keyType i) 
 
 
 alterKeyType f  = Le.over keyTypes f

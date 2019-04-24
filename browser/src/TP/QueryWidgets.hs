@@ -1,10 +1,8 @@
 {-# LANGUAGE
     OverloadedStrings
-   ,BangPatterns
    ,ScopedTypeVariables
    ,TypeFamilies
    ,FlexibleContexts
-   ,GADTs
    ,RecursiveDo
  #-}
 
@@ -70,21 +68,16 @@ import Utils
 
 type ColumnTidings = Map (Rel CoreKey) (Tidings (Editor (Index(Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable)))
 
-genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
+genAttr :: InformationSchema -> CoreKey -> TBMeta CoreKey 
 genAttr inf k =
   case keyType k of
     Primitive ty p ->
        case p of
-         AtomicPrim l -> Attr k (kfold ty $ TB1 ())
+         AtomicPrim l -> Attr k (Primitive ty p)
          RecordPrim (s,t) ->
            let table =  lookTable sch t
                sch = fromMaybe inf (HM.lookup s (depschema inf))
-            in IT k $ kfold ty $  TB1 $ allFields sch table
-  where
-    kfold l = F.foldl' (.) id (kgen <$> l)
-    kgen :: KTypePrim -> FTB a -> FTB a
-    kgen KOptional = LeftTB1 . pure
-    kgen KArray = ArrayTB1 . pure
+            in IT k . Primitive ty $ allFields sch table
 
 execute
   :: InformationSchema
@@ -199,7 +192,7 @@ checkAccessFull inf  t (inp,out) oldItems = (tdInput,tdOutput,liftAccessU inf t 
 
 
 indexPluginAttrDiff
-  :: Column Key ()
+  ::  TBMeta Key 
   -> [(Union (Access Key), Tidings (Editor (Index (TBData Key Showable))))]
   -> [(Union (Access Key), Tidings (Editor (Index (Column Key Showable))))]
 indexPluginAttrDiff a@(Attr i _ )  plugItems =  evs
@@ -207,17 +200,17 @@ indexPluginAttrDiff a@(Attr i _ )  plugItems =  evs
     match (IProd _ l) ( IProd _ f) = l == f
     match i f = False
     thisPlugs = filter (hasProd (`match` IProd Nothing i) . fst)  plugItems
-    evs  = fmap (fmap (join . fmap (maybe Keep  Diff . F.find ((== index a)  . index )  ))) <$>  thisPlugs
+    evs  = fmap (fmap (join . fmap (maybe Keep  Diff . F.find ((== keyattr a)  . index )  ))) <$>  thisPlugs
 indexPluginAttrDiff i plugItems = pfks
   where
     prodRef = IProd Nothing
     thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (relUnComp $ keyattr i) )) .  fst) plugItems
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (relUnComp $ keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  index i)  . index ) ))) <$>  thisPlugs
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (relUnComp $ keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  keyattr i)  . index ) ))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
 --
-attrSize :: Column CoreKey b -> (Int,Int)
+attrSize :: TBF CoreKey f b -> (Int,Int)
 attrSize FKT{} = (12,4)
 attrSize (IT _ _ ) = (12,4)
 attrSize (Attr k _ ) = goAttSize  (keyType k)
@@ -251,15 +244,15 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
       KArray  -> let (i1,i2) = go l in (i1,i2*8)
       KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
-getRelOrigin :: Ord k => [Column k () ] -> [k ]
+getRelOrigin :: Ord k => [TBF k f b ] -> [k ]
 getRelOrigin =  fmap _relOrigin .  concatMap (relUnComp .keyattr)
 
-attributeLabel :: Column CoreKey () -> String
-attributeLabel =  renderRel .  index
+attributeLabel :: TBMeta Key -> String
+attributeLabel i =  renderRel (keyattr i)
 
 labelCaseDiff
   ::  InformationSchema
-  -> Column CoreKey ()
+  -> TBMeta Key
   -> Tidings (Maybe (Column CoreKey Showable))
   -> Tidings (Editor (Index (Column CoreKey Showable)))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
@@ -290,7 +283,7 @@ tbCaseDiff
   :: InformationSchema
   -> Table
   -> SelPKConstraint
-  -> Column CoreKey ()
+  -> TBMeta Key
   -> ColumnTidings
   -> PluginRef (Column CoreKey Showable)
   -> Tidings (Maybe (Column CoreKey Showable))
@@ -363,7 +356,7 @@ anyColumns
    -> Table
    -> ColumnTidings
    -> PluginRef (TBData CoreKey Showable)
-   -> TBData Key ()
+   -> KVMeta Key
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> [(Rel Key)]
    ->  UI (LayoutWidget  (Editor (TBIdx CoreKey Showable)))
@@ -391,7 +384,7 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
             defaultInitial old new
               = case safeHead old of
                   Nothing -> case unLeftItens (create new  :: TB Key Showable) of
-                    Just n -> Diff $ compact $ (patch <$> (addDefault <$> filter ((/= index n ) . index) (unkvlist fields) :: [TB Key Showable])) ++ [new]
+                    Just n -> Diff $ compact $ (patch <$> (addDefault' <$> filter ((/= keyattr n ) . keyattr) (unkvlist fields) :: [TB Key Showable])) ++ [new]
                     Nothing -> Keep
                   Just ini -> if index ini == index new
                      then maybe Delete (const (Diff  [new])) (unLeftItensP new)
@@ -422,7 +415,7 @@ buildFKS
    -> Table
    -> ColumnTidings
    -> PluginRef (TBData CoreKey Showable)
-   -> TBData Key ()
+   -> KVMeta Key
    -> Map (Rel Key) Plugins
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> [(Rel Key)]
@@ -464,10 +457,10 @@ buildFKS inf hasLabel el constr table refs plugmods ftb plugs oldItems = fmap fs
                 then do
                   (\i -> LayoutWidget (triding wn) i (getLayout wn)) <$> el # set children [getElement wn]
                 else do
-                  v <- labelCaseDiff inf m oldref (diff' <$> facts oldref <#> checkDefaults inf table  (index m) (wn,oldref))
+                  v <- labelCaseDiff inf m oldref (diff' <$> facts oldref <#> checkDefaults inf table  (keyattr m) (wn,oldref))
                   out <- el # set children [getElement v,getElement  wn]
                   return $ LayoutWidget (triding wn) out (getLayout wn)
-              return (w <> [(index m,(lab,oldref))] ,oplug)
+              return (w <> [(keyattr m,(lab,oldref))] ,oplug)
       justError ("could not find attr: " <> show l <> "\n plugs "<> unlines (show <$> M.keys plugs ) <> "\nattrs " <> unlines (show <$> kvkeys ftb) ) $ (matchPlug <$> M.lookup l plugs) <|>  (matchAttr <$> kvLookup l ftb )
 
 
@@ -486,7 +479,7 @@ tableConstraints
   :: Foldable f =>
      (KVMetadata Key,
       Tidings (TableRep Key Showable))
-     -> Tidings (f (TBData Key Showable)) -> KV Key a -> SelPKConstraint
+     -> Tidings (f (TBData Key Showable)) -> KVMeta Key  -> SelPKConstraint
 tableConstraints (m ,gist) preoldItems ftb = constraints
   where
     constraintPred :: [Rel Key]
@@ -506,7 +499,7 @@ batchUITable
    -> RefTables
    -> ColumnTidings
    -> PluginRef (TBData CoreKey Showable)
-   -> TBData CoreKey ()
+   -> KVMeta CoreKey 
    -> Tidings [TBData CoreKey Showable]
    -> UI (TrivialWidget [Editor (TBIdx CoreKey Showable)])
 batchUITable inf table reftb@(_, gist ,tref) refs pmods ftb  preoldItems2 = do
@@ -536,13 +529,13 @@ batchUITable inf table reftb@(_, gist ,tref) refs pmods ftb  preoldItems2 = do
 
 
 rowTableHeaders
-  :: TBData CoreKey () -> UI Element
+  :: KVMeta Key -> UI Element
 rowTableHeaders  ftb = do
   ixE <- UI.div # set UI.class_ "col-xs-1" # set text "#"
   operation <- UI.div # set UI.class_ "col-xs-1"# set text "Action"
   let
     label (k,x) = do
-      l <- detailsLabel (set UI.text (attributeLabel x )) (UI.div # set text (show $ index x))
+      l <- detailsLabel (set UI.text (attributeLabel x )) (UI.div # set text (show $ keyattr x))
       UI.div # set children [l] # set UI.class_ ("col-xs-" <> show (fst (attrSize x)))
     srefs = sortedFields ftb
   els <- mapM label srefs
@@ -585,7 +578,7 @@ applyDefaults inf table k i j =
 plugKeyToRel
   :: InformationSchema
   -> Table
-  -> TBData CoreKey ()
+  -> KVMeta Key
   -> (Union (Access Text),Union (Access Text))
   -> (Rel Key)
 plugKeyToRel inf table ftb (i,o) = relComp (inp <> out)
@@ -601,7 +594,7 @@ rowTableDiff
   -> SelPKConstraint
   -> ColumnTidings
   -> PluginRef (TBData CoreKey Showable)
-  -> TBData CoreKey ()
+  -> KVMeta Key
   -> Int
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
@@ -638,7 +631,7 @@ eiTableDiff
   -> SelPKConstraint
   -> ColumnTidings
   -> PluginRef (TBData CoreKey Showable)
-  -> TBData CoreKey ()
+  -> KVMeta Key
   -> Tidings (Maybe (TBData CoreKey Showable))
   -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 eiTableDiff inf table constr refs plmods ftb@k preoldItems = do
@@ -675,7 +668,7 @@ loadItems
   :: (Eq (t (TBIndex Showable)),Show (t (KV Key Showable)) , Traversable t) =>
      InformationSchema
      -> Table
-     -> TBData CoreKey ()
+     -> KVMeta Key
      -> Tidings (t (TBData CoreKey Showable))
      -> Dynamic (Tidings (t (TBData CoreKey Showable)))
 loadItems inf table tbf preoldItems
@@ -695,7 +688,7 @@ crudUITable
    -> RefTables
    -> ColumnTidings
    -> PluginRef (TBData CoreKey Showable)
-   -> TBData CoreKey ()
+   -> KVMeta Key
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (LayoutWidget (Editor (TBIdx CoreKey Showable)))
 crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
@@ -1291,7 +1284,7 @@ inlineTableUI inf constr pmods oldItems (RecordPrim na) = do
     let
       tablefields = allFields inf table
       convertConstr (pk,j) 
-        = (\rel  -> (relUnComp rel , C.contramap (\v -> kvlist (fmap addDefault (L.delete (lkTB (relCurrent rel) ) attrs) ++ v)) <$> j )) 
+        = (\rel  -> (relUnComp rel , C.contramap (\v -> kvlist (fmap addDefault' (L.delete (lkTB (relCurrent rel) ) attrs) ++ v)) <$> j )) 
          . unRelAccess <$> pk
         where 
           lkTB i = justError (show (i,i,tablefields)) $ kvLookup i tablefields 
@@ -1314,7 +1307,7 @@ iUITableDiff
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
-  -> Column CoreKey ()
+  -> TBMeta Key
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline na)) <$> buildUIDiff (inlineTableUI inf constr) (const True) (keyType na) (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
@@ -1541,7 +1534,7 @@ fkUITableGen
   -- Relation Event
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
-  -> Column CoreKey ()
+  -> TBMeta Key
   -> UI (LayoutWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkref)
   = fmap (join. fmap (maybe Keep Diff . recoverPFK setattr rel )) <$> buildUIDiff 
@@ -1557,7 +1550,10 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
       where patchChange (PAttr i k ) = fmap (const []) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
-    emptyFKT = FKT  mempty rel (const mempty <$> fkref)
+    def KArray  = ArrayTB1 . pure 
+    def KOptional = LeftTB1 .Just 
+    defKType (Primitive l i ) = foldr (.) TB1 (def <$> l ) $ i
+    emptyFKT = FKT  mempty rel (const mempty <$> defKType fkref)
     mergeRef (FKT r rel v) i = FKT (foldl' addAttrO r (nonRefTB i)) rel v
     addAttrO  i v = if isNothing (unSOptional (_tbattr v)) then i else  (addAttr v i)
     (targetSchema,target) = findRefTableKey table rel

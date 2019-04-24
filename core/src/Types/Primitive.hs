@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving#-}
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -82,8 +83,16 @@ data Order
 data KType a = Primitive
   { _keyFunc :: [KTypePrim]
   , _keyAtom :: a
-  } deriving (Eq, Ord, Functor, Generic, Foldable, Show)
+  } deriving (Eq, Ord, Functor, Generic, Foldable, Traversable,Show)
 
+instance Applicative KType where
+  pure = Primitive [] 
+  Primitive k i  <*> Primitive l j  = Primitive (k ++ l ) (i  j)
+
+instance Monad KType where
+  return = pure
+  Primitive k i >>= f = case f i  of
+                          Primitive l i -> Primitive (k <> l) i
 
 makeLenses ''KType
 
@@ -130,6 +139,26 @@ instance NFData DiffShowable
 type CorePrim = Prim KPrim (Text, Text)
 
 type KVMeta k = FKV k KType CorePrim
+type TBMeta k = TBF k KType CorePrim
+type AValueMeta k = FAValue k KType CorePrim
+
+
+deriving instance (Show k) => Show (KVMeta k) 
+deriving instance (Show k) => Show (TBMeta k) 
+--deriving instance (Show a , Show k) => Show (TBRef k a) 
+deriving instance (Show k) => Show (AValueMeta k ) 
+
+deriving instance (Ord k) => Ord (KVMeta k ) 
+deriving instance (Ord k) => Ord (TBMeta k ) 
+--deriving instance (Ord a , Ord k) => Ord (TBRef k a) 
+deriving instance (Ord k) => Ord (AValueMeta k ) 
+
+
+deriving instance (Eq k) => Eq (KVMeta k ) 
+deriving instance (Eq k) => Eq (TBMeta k ) 
+--deriving instance (Eq a , Eq k) => Eq (TBRef k a) 
+deriving instance (Eq k) => Eq (AValueMeta k ) 
+
 
 type CoreKey = FKey (KType CorePrim)
 
@@ -1007,6 +1036,16 @@ splitIndexPKB (PrimColl (p, op)) pk =
     then Just (PrimColl (p, op))
     else Nothing
 splitIndexPKB i pk = Just i
+
+addDefault' :: Ord d => TBMeta d  -> TB d b
+addDefault' = def
+  where
+    def (Attr k i) = Attr k (LeftTB1 Nothing)
+    def (Fun k i _) = Fun k i (LeftTB1 Nothing)
+    def (IT rel j) = IT rel (LeftTB1 Nothing)
+    def (FKT at rel j) =
+      FKT (kvlist $ addDefault' <$> unkvlist at) rel (LeftTB1 Nothing)
+
 
 
 relAccesGen' :: Access k -> [Rel k]

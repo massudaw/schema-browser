@@ -179,20 +179,20 @@ asNewTable meta action = do
   t <- atTable meta (action tidx)
   return $ SQLRRename t tidx
 
-aliasKeys :: Text -> TB Key a -> Codegen SQLAttr
+aliasKeys :: Text -> TBF Key f a -> Codegen SQLAttr
 aliasKeys ref (Attr n    _ )  =  do
   SQLARename (SQLAIndexAttr (SQLAReference Nothing ref) (keyValue n)) <$> newAttr n
 aliasKeys ref (IT n _ )  =
   SQLARename (SQLAIndexAttr (SQLAReference Nothing ref) (keyValue n)) <$> newIT n
 
-expandInlineTable :: KVMetadata Key -> TBData  Key () -> Text -> Codegen SQLRow
+expandInlineTable :: KVMetadata Key -> KVMeta Key -> Text -> Codegen SQLRow
 expandInlineTable meta tb@( _) pre = asNewTable meta (\t->  do
   let
     name =  tableAttr tb
   cols <- mapM (aliasKeys ("i" <> pre))  name
   return $ SQLRSelect cols Nothing Nothing)
 
-expandInlineArrayTable ::  KVMetadata Key -> TBData  Key  () -> Text -> Codegen SQLRow
+expandInlineArrayTable ::  KVMetadata Key -> KVMeta Key -> Text -> Codegen SQLRow
 expandInlineArrayTable meta tb pre = asNewTable meta  (\t -> do
   let
     rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
@@ -201,7 +201,7 @@ expandInlineArrayTable meta tb pre = asNewTable meta  (\t -> do
   return $ SQLRSelect (cols <> [rowNumber]) (Just $ SQLRRename (SQLRFrom (SQLRUnnest (SQLAReference Nothing  ("i" <> pre)))) t) Nothing)
 
 
-expandBaseTable ::  KVMetadata Key -> TBData  Key  () -> Codegen SQLRow
+expandBaseTable ::  KVMetadata Key -> KVMeta Key -> Codegen SQLRow
 expandBaseTable meta tb = asNewTable meta (\t -> do
   let
     name = tableAttr tb
@@ -221,15 +221,15 @@ codegen l =
   case runRWS l [] ((0,M.empty),(0,M.empty)) of
     (q,s,_) -> (q,s)
 
-extendTable :: [Rel Key ] -> TBData Key () -> TBData Key () 
-extendTable rel  f = kvlist (flip Attr (TB1 ()) <$> F.toList (S.difference n p) ) <> f 
+extendTable :: [Rel Key ] -> KVMeta Key -> KVMeta Key 
+extendTable rel  f = kvlist ((\ i -> Attr i (keyType i )) <$> F.toList (S.difference n p) ) <> f 
   where p = S.unions $ relOutputSet . keyattr <$> unkvlist f
         n = S.unions $ relOutputSet <$> rel
 
 selectQuery
   :: InformationSchema
   -> KVMetadata Key
-  -> TBData Key ()
+  -> KVMeta Key
   -> Maybe [FTB Showable]
   -> [(Rel Key, Order)]
   -> WherePredicate
@@ -283,12 +283,12 @@ expandJoin
   :: InformationSchema
   -> KVMetadata Key
   -> JoinDirection
-  -> [Column Key ()]
-  -> Column Key ()
+  -> [TBMeta Key ]
+  -> TBMeta Key 
   -> Codegen (SQLRow -> SQLRow)
-expandJoin inf meta left env (IT i (LeftTB1 (Just tb) ))
-  = expandJoin inf meta JDLeft env $ (IT i tb)
-expandJoin inf meta left env (t@(IT a (ArrayTB1 (TB1 tb :| _ ) ))) = do
+expandJoin inf meta left env (IT i (Primitive (KOptional:xs ) tb))
+  = expandJoin inf meta JDLeft env $ (IT i (Primitive xs tb))
+expandJoin inf meta left env t@(IT a (Primitive (KArray:xs) tb )) = do
     l <- lkTB t
     let nmeta = lookSMeta inf r
         r = _keyAtom $ keyType a
@@ -299,7 +299,7 @@ expandJoin inf meta left env (t@(IT a (ArrayTB1 (TB1 tb :| _ ) ))) = do
     return $ (\row -> SQLRJoin row JTLateral jt joinc Nothing)
         where
           jt = left
-expandJoin inf meta left env (t@(IT a (TB1 tb))) =  do
+expandJoin inf meta left env (t@(IT a (Primitive _ tb))) =  do
   l <- lkTB t
   let nmeta = lookSMeta inf r
       r =_keyAtom $ keyType a
@@ -338,7 +338,7 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 
-projectTree :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
+projectTree :: InformationSchema -> KVMetadata Key -> KVMeta Key -> Codegen Text
 projectTree inf m t = atTable m $ T.intercalate "," <$> (traverse (projectColumn inf) $ snd <$> sortedFields  t)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
@@ -365,7 +365,7 @@ projectColumn inf t@(IT  k tb  )
 
 printPred :: InformationSchema 
           -> KVMetadata Key 
-          -> TBData  Key ()
+          -> KVMeta Key
           -> BoolCollection (Rel Key ,[(Rel Key,AccessOp Showable )]) 
           -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred inf m t (PrimColl (a,e)) = do
@@ -388,7 +388,7 @@ indexFieldL
     -> [(Rel Key,AccessOp Showable)]
     -> [Text]
     -> Rel Key
-    -> TBData Key ()
+    -> KVMeta Key
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 indexFieldL inf m e c p@(Inline l) v =
   case findAttr l (restrictTable nonFK v) of
@@ -397,10 +397,10 @@ indexFieldL inf m e c p@(Inline l) v =
 indexFieldL inf m e c n@(RelAccess l nt) v =
   case kvLookup l v of
     Just a -> case a of
-        t@(IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  do
+        t@(IT k (Primitive (KOptional:KArray:xs) fk )) ->  do
           l <- lkTB t
           return [(Just ("i" <> l <> " is not null"), Nothing)]
-        t@(IT k (ArrayTB1 (fk :| _))) ->  do
+        t@(IT k (Primitive (KArray:xs) fk )) ->  do
           l <- lkTB t
           return [(Just ("i" <> l <> " is not null"), Nothing)]
         (IT k fk) -> indexFieldL inf m e c nt  $ head (F.toList fk )
@@ -472,7 +472,7 @@ recurseOp i o k | isJust rw =  justError "rw" rw
 recurseOp i o k = renderBinary o
 
 tlabel' ::
-     TB Key a
+     TBMeta Key 
      -> Codegen (Key, Text)
 tlabel' t@(Attr k _) =  do
   l <- lkTB t
@@ -484,7 +484,7 @@ tlabel'  t@(IT k tb ) =  do
 getFromQuery
   :: InformationSchema
      -> KVMetadata Key
-     -> TBData Key ()
+     -> KVMeta Key
      -> RWST [Address Key] String NameMap Identity Text
 getFromQuery inf m delayed= do
   tq <- expandBaseTable m delayed

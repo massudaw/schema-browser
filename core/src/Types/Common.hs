@@ -12,10 +12,11 @@
 
 module Types.Common
   ( TB(..)
+  , TBF(..)
   , AValue(..)
   , FAValue(..)
   , TBRef(..)
-  , FKV
+  , FKV(..)
   , _fkttable
   , _tbattr
   , ifkttable
@@ -209,8 +210,8 @@ simplifyRel i = i
 
 sortedFields
   :: (Show a,Show k,Ord k)
-  => KV k a
-  -> [(Rel k , TB k a)]
+  => FKV k f a
+  -> [(Rel k , TBF k f a)]
 sortedFields (KV map)=  (\i -> (i,) . recoverAttr . (i,) . justError"noField" $  Map.lookup  (relSort i) map ) <$>  srels
   where srels = sortRels (originalRel <$> Map.keys map)
 
@@ -290,7 +291,7 @@ topSortRels l = ((l!!) <$> sorted,sorted)
     findDep ix c = []
 
 
-kvlist,kvlistMerge :: Ord k => [TB k a] -> KV k a
+kvlist,kvlistMerge :: (Applicative f, Ord k )=> [TBF k f a] -> FKV k f a
 kvlist = KV . mapFromTBList
 
 kvlistMerge = KV .mapFromTBListMerge
@@ -298,20 +299,20 @@ kvlistMerge = KV .mapFromTBListMerge
 kvToMap :: Ord k => KV k a -> Map.Map (Rel k) (FTB a)
 kvToMap = fmap _aprim . Map.fromList .fmap (first originalRel).  Map.toList . _kvvalues
 
-kvkeys :: Ord k => KV k a -> [Rel k]
+kvkeys :: Ord k => FKV k f a -> [Rel k]
 kvkeys = fmap originalRel . Map.keys . _kvvalues
 
-unkvlist :: Ord k => KV k a -> [TB k a]
+unkvlist :: Ord k => FKV k f a -> [TBF k f a]
 unkvlist = fmap (recoverAttr . first originalRel). Map.toList . _kvvalues
 
 
-kvmap :: Ord k => Map.Map (Rel k) (TB k a) -> KV k a
+kvmap :: Ord k => Map.Map (Rel k) (TBF k f a) -> FKV k f a
 kvmap = KV . Map.fromList . fmap (first relSort . fmap valueattr). Map.toList
 
-unKV :: Ord k => KV k a -> Map.Map (Rel k) (TB k a)
+unKV :: Ord k => FKV k f a -> Map.Map (Rel k) (TBF k f a)
 unKV =  Map.fromList . fmap (\i ->  (originalRel (fst i),) . recoverAttr . first originalRel $ i ) . Map.toList . _kvvalues
 
-mapBothKV :: (Ord a,Ord b) => (a -> b) -> (TB a c -> TB b d) -> KV a c -> KV b d
+mapBothKV :: (Ord a,Ord b) => (a -> b) -> (TBF a f c -> TBF b f d) -> FKV a f c -> FKV b f d
 mapBothKV k f (KV n) = KV (Map.mapKeys (relSortMap k) $ Map.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) )  n)
 
 mapKV f (KV n) = KV (Map.mapWithKey (\k ->  valueattr . f . recoverAttr . (originalRel k ,) ) n)
@@ -335,10 +336,10 @@ traverseKVWith
 traverseKVWith f (KV n) = KV <$> Map.traverseWithKey (\i -> f (originalRel i) )  n
 
 traverseKV
-  :: (Ord k ,Applicative f)
-    => (TB k a1 -> f (TB k a2)) 
-    -> KV k a1 
-    -> f (KV k a2)
+  :: (Ord k ,Applicative g,Applicative f)
+    => (TBF k g a1 -> f (TBF k l a2)) 
+    -> FKV k g a1 
+    -> f (FKV k  l a2)
 traverseKV f (KV n) = KV . fmap valueattr <$> traverse f (Map.mapWithKey (curry (recoverAttr . first originalRel )) n ) 
 
 
@@ -522,7 +523,7 @@ instance (Binary k, Binary j) => Binary (FExpr k j)
 
 instance (NFData k, NFData j) => NFData (FExpr k j)
 
-type TBAttr k v = (Rel k, AValue k v)
+type TBAttr k f v = (Rel k, FAValue k f v)
 
 
 type AValue k a = FAValue k FTB a
@@ -533,13 +534,13 @@ data FAValue k f a
   | ARel { _arel :: FKV k f a  , _aref :: (f (FKV k f a))}
   deriving(Functor,Foldable,Traversable,Generic)
 
-recoverAttr ::  Ord k => TBAttr k a -> TB k a
+recoverAttr ::  Ord k => TBAttr k f a -> TBF k f a
 recoverAttr (Inline i,APrim v) = Attr i v
 recoverAttr (RelFun (Inline i) j k  ,APrim v) = Fun i (j,k) v
 recoverAttr (Inline i ,ARef v) = IT i v
 recoverAttr (i,ARel l v) = FKT l  (relUnComp i) v
 
-valueattr :: TB k a -> AValue k a
+valueattr :: TBF k f a -> FAValue k f a
 valueattr (Attr i j) = APrim j
 valueattr (Fun _ _ v) = APrim v
 valueattr (IT _ v) = ARef v
@@ -582,22 +583,25 @@ _tbattr (Attr _ v ) = v
 _tbattr (Fun _ _ v) = v
 _tbattr i = error "not a attr"
 
-data TB k a
+
+data TBF k f a
   = Attr -- Primitive Value
      { _tbattrkey :: k
-     , _tbattrvalue :: FTB a }
+     , _tbattrvalue :: f a }
   | Fun -- Function Call
      { _tbattrkey :: k
      , _fundata :: (Expr, [Rel k])
-     , _tbattrvalue :: FTB a }
+     , _tbattrvalue :: f a }
   | IT -- Inline Table
      { _tbattrkey :: k
-     , _ifkttable :: FTB (KV k a) }
+     , _ifkttable :: f (FKV k f a) }
   | FKT -- Foreign Table
-     { _tbref :: KV k a
+     { _tbref :: FKV k f a
      , _fkrelation :: [Rel k]
-     , _ifkttable :: FTB (KV k a) }
+     , _ifkttable :: f (FKV k f a) }
   deriving (Functor, Foldable, Traversable, Generic )
+
+type TB k a = TBF k FTB a
 
 newtype TBRef k s = TBRef { unTBRef :: (KV k s,KV k s)}deriving(Functor)
 
@@ -628,14 +632,14 @@ mapFValue f k = KV . fmap (valueattr . traMap traFAttr f). Map.mapWithKey (curry
 
 
 
-mapKey',firstKV :: (Ord c,Ord k) => (c -> k) -> KV c a -> KV k a
+mapKey',firstKV :: (Functor f, Ord c,Ord k) => (c -> k) -> FKV c f a -> FKV k f a
 firstKV f (KV m) = KV . Map.mapKeys (relSortMap f). Map.mapWithKey (curry (valueattr . firstTB f. recoverAttr . first originalRel))   $ m
 mapKey' = firstKV 
 mapKey f = fmap (mapKey' f)
 
 secondKV f (KV m) = KV . fmap (fmap f) $ m
 
-firstTB :: (Ord c,Ord k) => (c -> k) -> TB c a -> TB k a
+firstTB :: (Functor f,Ord c,Ord k) => (c -> k) -> TBF c f a -> TBF k f a
 firstTB f (Attr k i) = Attr (f k) i
 firstTB f (Fun k i l) = Fun (f k) (fmap (fmap f) <$> i) l
 firstTB f (IT k i) = IT (f k) (mapKey f i)
@@ -703,10 +707,10 @@ instance Fractional a => Fractional (FTB a) where
   fromRational = TB1 . fromRational
   recip = fmap recip
 
-mapFromTBList :: Ord k => [TB k a] -> Map (RelSort k) (AValue k a)
+mapFromTBList :: Ord k => [TBF k f a] -> Map (RelSort k) (FAValue k f a)
 mapFromTBList = Map.fromList . fmap (\i -> (relSort $ keyattr i, valueattr i))
 
-mapFromTBListMerge :: Ord k => [TB k a] -> Map (RelSort k) (AValue k a)
+mapFromTBListMerge :: (Applicative f, Ord k) => [TBF k f a] -> Map (RelSort k) (FAValue k f a)
 mapFromTBListMerge = Map.fromListWith mergeAttr . fmap (\i -> (relSort $ keyattr i, valueattr i))
 
 mergeAttr (APrim _) a@(APrim _) =  a
@@ -714,7 +718,7 @@ mergeAttr (ARef j)  (ARef  m) =  ARef $ (\ j m -> KV $ mapFromTBListMerge (unkvl
 mergeAttr (ARel i j)  (ARel  l m) =  ARel (KV $ mapFromTBListMerge (unkvlist i ++ unkvlist l)) $ (\ j m -> KV $ mapFromTBListMerge (unkvlist j ++ unkvlist m)) <$> j <*> m
 
 
-keyattr :: Ord k => TB k a -> Rel k
+keyattr :: Ord k => TBF k f a -> Rel k
 keyattr (Attr i _) = Inline i
 keyattr (Fun i l _) = RelFun (Inline i) (fst l) (snd l)
 keyattr (FKT i rel _) = relComp rel
@@ -727,6 +731,8 @@ alterFTB f (TB1 i) = TB1 <$> f i
 alterFTB f (ArrayTB1 i) = ArrayTB1 <$> traverse (alterFTB f) i
 alterFTB f (LeftTB1 i) = LeftTB1 <$> traverse (alterFTB f) i
 alterFTB f (IntervalTB1 i) = IntervalTB1 <$> traverse (alterFTB f) i
+
+
 
 addDefault :: Ord d => TB d a -> TB d b
 addDefault = def
@@ -768,12 +774,12 @@ instance IsString (Rel String ) where
       (t,_:v) -> NInline  t v
 
 
-restrictTable :: Ord k => (TB k a  -> [TB k a]) -> KV k a -> KV k a
+restrictTable :: (Applicative f , Ord k) => (TBF k f a  -> [TBF k f a]) -> FKV k f a -> FKV k f a
 restrictTable f n =  (rebuildTable . unkvlist) n
   where
     rebuildTable n = kvlist . concat . F.toList $ f <$> n
 
-tableNonRef :: Ord k => KV k a -> KV k a
+tableNonRef :: (Applicative f ,Ord k) => FKV k f a -> FKV k f a
 tableNonRef = restrictTable nonRefTB
 
 isRelAccess (RelAccess i _ ) = isRelAccess i
@@ -781,13 +787,13 @@ isRelAccess (RelComposite i ) = L.any isRelAccess i
 isRelAccess (Rel _ _ _) = True
 isRelAccess _ = False
 
-nonFK :: Ord k => TB k a -> [TB k a]
+nonFK :: (Applicative f, Ord k) => TBF k f a -> [TBF k f a]
 nonFK (FKT i _ _) = concat (nonFK <$> unkvlist i)
 nonFK (IT j k) = [IT j (restrictTable nonFK <$> k)]
 nonFK (Fun _ (_,l)  _) | L.any isRelAccess  l = []
 nonFK i = [i]
 
-nonRefTB :: Ord k => TB k a -> [TB k a]
+nonRefTB :: (Applicative f,Ord k) => TBF k f a -> [TBF k f a]
 nonRefTB (FKT i _ _) = concat (nonRefTB <$> unkvlist i)
 nonRefTB (IT j k) = [IT j (restrictTable nonRefTB <$> k)]
 nonRefTB (Fun _ _ _) = []
@@ -824,10 +830,10 @@ aattr (IT _ i) = go i
 instance Ord a => Ord (Interval.Interval a) where
   compare i j = compare (Interval.upperBound i) (Interval.upperBound j)
 
-instance Ord k => Semigroup (KV k a) where
+instance Ord k => Semigroup (FKV k f a) where
   (KV i) <> (KV j) = KV (Map.union i j)
 
-instance Ord k => Monoid (KV k a) where
+instance Ord k => Monoid (FKV k f a) where
   mempty = KV Map.empty
 
 
@@ -845,15 +851,14 @@ findFK l v =
        ARef  _  -> True
        i -> False
 
-findAttr :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
+findAttr :: (Show k, Ord k, Show a) => k -> (FKV k f a) -> Maybe (TBF k f a)
 findAttr l v = kvLookup ( Inline  l) v <|> findFun l v
-
 
 
 addAttr :: Ord k => TB k v -> KV k v -> KV k v
 addAttr v (KV i) = KV $ Map.insert (relSort $ keyattr v) (valueattr v) i
 
-findFun :: (Show k, Ord k, Show a) => k -> (TBData k a) -> Maybe (TB k a)
+findFun :: (Show k, Ord k, Show a) => k -> (FKV k f a) -> Maybe (TBF k f a)
 findFun l v =
   fmap (recoverAttr .first originalRel ).
   L.find (((Inline  l) ==) . mapFunctions  . originalRel . fst) $
@@ -883,13 +888,13 @@ recLookup' p@(RelComposite i) v = join $ maybeToList $ nonEmpty (join $ traverse
         explodeAttr (FKT i _ _ ) = join $ explodeAttr <$> unkvlist i 
 recLookup' p@(Rel i _ _) v = maybeToList $ _tbattr <$> kvLookup i  v 
 
-recLookupKV :: (Show k ,Ord k) => Rel k -> TBData k v -> Maybe (FTB (TB k v))
+recLookupKV :: (Traversable f, Show k ,Ord k,Monad f) => Rel k -> FKV k f v -> Maybe (f (TBF k f v))
 -- recLookupKV i j | traceShow (i,kvkeys j )  False = undefined
 recLookupKV n@(RelAccess l nt) v =
   join $ fmap join . traverse (recLookupKV nt) <$> refLookup  l v
-recLookupKV p@(RelComposite i) v = TB1 <$> kvLookup p  v 
-recLookupKV p@(Rel _ _ _) v = TB1 <$> kvLookup p  v 
-recLookupKV p@(Inline l) v = TB1 <$> kvLookup p v
+recLookupKV p@(RelComposite i) v = return <$> kvLookup p  v 
+recLookupKV p@(Rel _ _ _) v = return <$> kvLookup p  v 
+recLookupKV p@(Inline l) v = return <$> kvLookup p v
 
 
 recLookup :: Ord k => Rel k -> TBData k v -> Maybe (FTB v)
@@ -899,11 +904,11 @@ recLookup n@(RelAccess l nt) v =
 recLookup p@(RelComposite i) v = _tbattr <$> kvLookup p  v 
 recLookup p@(Rel i _ _) v = _tbattr <$> kvLookup i  v 
 
-kvLookup :: Ord k => Rel k -> KV k a -> Maybe (TB k a)
+kvLookup :: Ord k => Rel k -> FKV k f a -> Maybe (TBF k f a)
 kvLookup rel (KV i) = recoverAttr . (rel,) <$> Map.lookup (relSort $ rel) i
 
 
-refLookup :: Ord k => Rel k -> KV k a -> Maybe (FTB (KV k a))
+refLookup :: Ord k => Rel k -> FKV k f a -> Maybe (f (FKV k f a))
 refLookup rel i = _fkttable <$> kvLookup rel i
 
 attrLookup :: Ord k => Rel k -> KV k a -> Maybe (FTB a)
@@ -971,7 +976,7 @@ renderRel (Rel i op k) = "[" <> renderRel i <> " " <> renderBinary op <> " "<> r
 
 
 makeLenses ''FKV
-makeLenses ''TB
+makeLenses ''TBF
 makeLenses ''FAValue
 
 deriving instance (Show a , Show k) => Show (KV k a) 
@@ -1039,16 +1044,16 @@ kvSize (KV i) = Map.size i
 kvNonEmpty :: Ord k => KV k a ->  Maybe (KV k a)
 kvNonEmpty i = if kvNull i then Nothing else Just i
 
-kvNull :: Ord k => KV k a ->  Bool
+kvNull :: Ord k => FKV k f a ->  Bool
 kvNull (KV i) = Map.null i
 
-kvFind :: Ord k =>  (Rel k -> Bool) -> KV k a ->  Maybe (TB k a)
+kvFind :: Ord k =>  (Rel k -> Bool) -> FKV k f a ->  Maybe (TBF k f a)
 kvFind pred (KV item) = fmap (recoverAttr .first originalRel).  safeHead . Map.toList $ Map.filterWithKey (\k _ -> pred (originalRel k) ) item
 
-kvFilter :: Ord k =>  (Rel k -> Bool) -> KV k a ->  KV k a
+kvFilter :: Ord k =>  (Rel k -> Bool) -> FKV k f a ->  FKV k f a
 kvFilter pred = kvFilterWith (\i _ -> pred i)
 
-kvFilterWith :: Ord k =>  (Rel k -> TB k a -> Bool) -> KV k a ->  KV k a
+kvFilterWith :: Ord k =>  (Rel k -> TBF k f a -> Bool) -> FKV k f a ->  FKV k f a
 kvFilterWith pred (KV item) = KV $ Map.filterWithKey (\i -> pred (originalRel i) . recoverAttr . (originalRel i,) ) item
 
 tbUn :: Ord k => Set (Rel k) -> KV k a -> KV k a

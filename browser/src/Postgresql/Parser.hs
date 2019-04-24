@@ -228,23 +228,23 @@ parseAttrJSON inf (Attr i _ )  v = do
 parseAttrJSON inf (Fun i rel _ )v = do
   s<- parseShowableJSON parsePrimitiveJSON (keyType  i) v
   return $  (Fun i rel s)
-parseAttrJSON inf (IT na j) v = do
-  mj <- parseShowableJSON  (parseRecordLoad inf (head . F.toList $ j)) (keyType na) v
+parseAttrJSON inf (IT na (Primitive _ j)) v = do
+  mj <- parseShowableJSON  (parseRecordLoad inf j) (keyType na) v
   return $ IT  na mj
 parseAttrJSON inf i v = error (show ("ParserAttrJSON",i,v))
 
-parseRecordLoad :: InformationSchema -> TBData Key () -> Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB (TBData Key Showable))
+parseRecordLoad :: InformationSchema -> KVMeta Key -> Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB (TBData Key Showable))
 parseRecordLoad inf proj (RecordPrim r) v=
   fmap TB1 $ parseRecordJSON inf (tableMeta tb) proj v
   where tb = lookSTable inf r
 
 
-parseRecordJSON :: InformationSchema -> KVMetadata Key -> TBData Key () -> A.Value -> JSONParser (TBData Key Showable)
+parseRecordJSON :: InformationSchema -> KVMetadata Key -> KVMeta Key -> A.Value -> JSONParser (TBData Key Showable)
 parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   let try1 i v = do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
-  traverseKV ((\ i -> parseAttrJSON  inf i =<<  try1 i v))$   m
+  traverseKV (\i -> parseAttrJSON  inf i =<<  try1 i v)$   m
 
 decodeDynamic :: String -> BSL.ByteString  -> Showable
 decodeDynamic "row_index" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: [TBIndex Showable])
@@ -481,7 +481,7 @@ fromShowable k f = case A.parseEither (fmap fst.codegent. parseShowableJSON  par
                  Right i -> i
                  Left i -> error (show i)
 
-fromRecordJSON :: InformationSchema -> KVMetadata Key -> TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
+fromRecordJSON :: InformationSchema -> KVMetadata Key -> KVMeta Key -> NameMap ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON inf m foldable namemap = do
   let
     parser f

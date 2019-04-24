@@ -45,7 +45,7 @@ import Utils
 import SchemaQuery.Read
 import SchemaQuery.Store
 
-type InputType = (WherePredicateK T.Text , KV Key ())
+type InputType = (WherePredicateK T.Text , KVMeta Key )
 
 
 fromS
@@ -151,6 +151,8 @@ pmerge fun fr fl (PStream br er, PStream bl el) = mdo
   res <-  lift $ accumS ini  (fmap (trace "PMerge#----------------------------" ) ev)
   return res
 
+instance Patch CorePrim where
+
 instance Compact () where
   compact _  = [()] 
 
@@ -160,9 +162,9 @@ pmapPredicateK cindex
   where 
     tconvert (p,i) v = do
       return $ (maybe mempty (mapPredicate (fmap keyValue)) $ fkPredicateIx cindex (G.toList (primary v)) 
-                      , kvLookupMeta  cindex i :: KV Key ())
+                      , kvLookupMeta  cindex i :: KVMeta Key )
     predicate _ _ (RowPatch (i,CreateRow j ))  = do
-      return $ (,[] :: [TBIdx Key ()]) . pure . mapPredicate (fmap keyValue)<$> fkPredicateIx (cindex) [j]
+      return $ (,[] :: [Index (KVMeta Key)] ) . pure . mapPredicate (fmap keyValue)<$> fkPredicateIx (cindex) [j]
     predicate _ _ (RowPatch (i,PatchRow  j ))  = return $ Nothing 
     predicate _ _ (RowPatch (i,DropRow ))  = return Nothing 
     projection _ _ i  = return Nothing -- Just (mempty,i)
@@ -175,10 +177,10 @@ pmapPredicate inner cindex
       preinf <- askInf 
       let (origin ,inf) = updateTable preinf  inner  
       return $ (fromMaybe p $ fkPredicateIx cindex (mapKey' keyValue <$> G.toList (primary v)) 
-                      , kvLookupMeta  (liftRel inf (tableName origin) cindex) i :: KV Key ())
+                      , kvLookupMeta  (liftRel inf (tableName origin) cindex) i :: KVMeta Key )
     predicate _ _ (RowPatch (i,CreateRow j ))  = do
       inf <- askInf
-      return $ (,[] :: [TBIdx Key ()]) . pure <$> fkPredicateIx cindex [mapKey' keyValue j]
+      return $ (,[] :: [Index (KVMeta Key )]) . pure <$> fkPredicateIx cindex [mapKey' keyValue j]
     predicate _ _ (RowPatch (i,PatchRow  j ))  = return $ Nothing 
     predicate _ _ (RowPatch (i,DropRow ))  = return Nothing 
     projection _ _ i  = return Nothing -- Just (mempty,i)

@@ -65,7 +65,25 @@ import Utils
 
 estLength page size est = fromMaybe 0 page * size  +  est
 
-projunion :: Show a=>InformationSchema -> Table -> TBData Key a -> TBData Key a
+projunionMeta :: InformationSchema -> Table -> KVMeta Key  -> KVMeta Key
+projunionMeta inf table = res
+  where
+    res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
+    transformTable = mapKV transformAttr . kvFilter (\k -> S.isSubsetOf (S.map keyString $ relOutputSet k) attrs)
+      where
+        attrs = S.fromList $ keyValue <$> rawAttrs table
+        transformAttr (Fun k l i) = Fun k l (keyType nk) 
+          where nk = lkKey table (keyValue k)
+        transformAttr (Attr k i ) = Attr k (keyType nk)
+          where nk = lkKey table (keyValue k)
+        transformAttr (IT k i ) = IT k i
+          where nk = lkKey table (keyValue k)
+        transformAttr (FKT r rel v) = FKT (transformTable r ) rel v
+          where ok = mergeFKRef (keyType. _relOrigin <$> rel)
+                nk = mergeFKRef (keyType. lkKey table . keyValue . _relOrigin <$> rel)
+
+
+projunion :: Show a=>InformationSchema -> Table -> KV Key  a -> KV Key  a
 projunion inf table = res
   where
     res =  liftTable' inf (tableName table) . mapKey' keyValue. transformTable
@@ -131,6 +149,7 @@ selectFrom t a d = do
   let tb = lookTable inf t
   tableLoader tb a d (allFields inf tb)
 
+-- getFrom :: Table -> KVMeta Key -> KV Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
 getFrom table allFields b = mdo
   inf <- askInf
   let 
@@ -338,14 +357,14 @@ getFKS
      -> TBPredicate Key Showable
      -> TableK Key
      -> [TBData Key Showable]
-     -> KV Key ()
+     -> KVMeta Key 
      -> TransactionM
         (TBData Key Showable -> Either
               ([TB Key Showable],[Rel Key])
               (TBData Key Showable))
 getFKS inf predtop table v tbf = fmap fst $ F.foldl' (\m f  -> m >>= (\i -> maybe (return i) (getFKRef inf predtop i v f  . head . F.toList )  (pluginCheck  f tbf) )) (return (return ,S.empty )) sorted
   where
-    pluginCheck i@(PluginField _) tbf = Just mempty
+    pluginCheck i@(PluginField _) tbf = Just (Primitive [] mempty) 
     pluginCheck i tbf  = refLookup (relComp $ pathRelRel i) tbf
     sorted =  sortValues (relComp . pathRelInputs inf (tableName table)) $ rawFKS table <> functionRefs table <> pluginFKS table
 
@@ -359,7 +378,7 @@ tableLoader
     :: Table
     -> Maybe Int
     -> WherePredicate
-    -> TBData Key ()
+    -> KVMeta Key 
     -> TransactionM DBVar
 tableLoader (Project table  (Union l)) page fixed  tbf = do
   liftIO . putStrLn $ "start loadTable " <> show (tableName table)
@@ -368,7 +387,7 @@ tableLoader (Project table  (Union l)) page fixed  tbf = do
     m = tableMeta table
     dbvarMerge i = foldr mergeDBRefT  ([],pure (IndexMetadata M.empty)  ,pure ( M.fromList $ (,G.empty)<$> _kvuniques m,G.empty )) (mapDBVar inf table <$>i )
     dbvar (l,i,j) = DBVar2 (justError "head5" $ safeHead l) i ((\(i,j) -> TableRep (m, i,j) :: TableRep Key Showable) <$> j)
-  i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunion inf t tbf)) l
+  i <- mapM (\t -> tableLoader t page (rebaseKey inf t  fixed) (projunionMeta inf t tbf)) l
   return $ dbvar (dbvarMerge i)
 tableLoader  table page fixed tbf = do
   liftIO . putStrLn $ "start loadTable " <> show (tableName table)
@@ -382,7 +401,7 @@ tableLoader'
   :: Table
    -> Maybe Int
    -> WherePredicate
-   -> TBData Key ()
+   -> KVMeta Key 
    -> TransactionM (DBRef Key Showable,(IndexMetadata Key Showable,TableRep Key Showable ))
 tableLoader' = do
   pageTable (\table page token size presort predicate tbf reso -> do
@@ -614,7 +633,7 @@ convertChan
   :: InformationSchema
   -> TableK Key
      -> (TBPredicate Key Showable, [Rel Key])
-     -> TBData Key ()
+     -> KVMeta Key 
      -> DBRef Key Showable
      -> Dynamic
       (Tidings (IndexMetadata Key Showable ),Tidings (TableRep Key Showable))
@@ -624,7 +643,7 @@ convertChan inf table fixed tbf dbvar = do
   (,) <$> convertChanStepper0 inf table ini (idxChan cloneddbvar)
       <*> convertChanTidings0 inf table fixed tbf result (patchVar cloneddbvar)
 
-restrictAttr :: TB Key () -> TB Key Showable -> Maybe (TB Key Showable)
+restrictAttr :: TBMeta Key -> TB Key Showable -> Maybe (TB Key Showable)
 restrictAttr (Attr _ _ ) i@(Attr _ _) =  Just i  
 restrictAttr (Fun _ _ _ ) i@(Fun _ _ _ ) =  Just i  
 restrictAttr (IT l n ) (IT i k) = fmap (IT i ) $ traverse (restrictRow t) k 
@@ -632,7 +651,7 @@ restrictAttr (IT l n ) (IT i k) = fmap (IT i ) $ traverse (restrictRow t) k
 restrictAttr (FKT l m n ) (FKT i j k) = fmap (FKT i j ) $ traverse (restrictRow t) k 
   where t = head (F.toList n)
 
-restrictPAttr :: TB Key () -> PathAttr Key Showable -> Maybe (PathAttr Key Showable)
+restrictPAttr :: TBMeta Key -> PathAttr Key Showable -> Maybe (PathAttr Key Showable)
 restrictPAttr (Attr _ _ ) a@(PAttr _ _) =  Just a 
 restrictPAttr (Fun _ _ _ ) a@(PFun _ _ _ ) =  Just a 
 restrictPAttr (IT l n ) (PInline i k) = fmap (PInline i ) $ traverse (restrictPatch t) k 
@@ -640,24 +659,24 @@ restrictPAttr (IT l n ) (PInline i k) = fmap (PInline i ) $ traverse (restrictPa
 restrictPAttr (FKT l m n ) (PFK i j k) = fmap (PFK i j ) $ traverse (restrictPatch t) k 
   where t = head (F.toList n)
 
-restrictPatch :: TBData Key () -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
+restrictPatch :: KVMeta Key -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
 restrictPatch v = nonEmpty . mapMaybe (\i -> flip restrictPAttr i =<<  kvLookup (index i) v )
 
 
 -- NOTE : When we have a foreign key and only want the field we need to restrict the fields by using tableNonRef
-restrictRow :: TBData Key () -> KV Key Showable -> Maybe (KV Key Showable)
+restrictRow :: KVMeta Key -> KV Key Showable -> Maybe (KV Key Showable)
 restrictRow v n = kvNonEmpty (directMatch <> nonRefMatch )  -- (\i -> F.foldl' (<|> ) (restrictField i) (restrictField <$> nonRefTB i) )
     where restrictField i = flip restrictAttr i =<< kvLookup (index i) v
           directMatch = mapKVMaybe restrictField  n 
           nonRefMatch = mapKVMaybe restrictField (tableNonRef $ kvFilterWith (\k _ -> isNothing (kvLookup k directMatch) ) $ n )
 
-restrictOp :: TBData Key () -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
+restrictOp :: KVMeta Key -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
 restrictOp tbf v = case v of
     CreateRow j -> CreateRow <$> restrictRow tbf j
     PatchRow j -> PatchRow <$> restrictPatch tbf j
     i-> Just i  
 
-restrict :: TBData Key () -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
+restrict :: KVMeta Key -> RowPatch Key Showable -> Maybe (RowPatch Key Showable)
 restrict tbf (RowPatch (i,v)) = RowPatch . (i,) <$> restrictOp tbf v  
 restrict tbf (BatchPatch i v) =  BatchPatch  i <$> (restrictOp tbf v)
     
@@ -669,7 +688,7 @@ convertChanEvent
   ::
     InformationSchema -> TableK Key
      -> (TBPredicate Key Showable, [Rel Key])
-     -> TBData Key ()
+     -> KVMeta Key
      -> Behavior (TableRep Key Showable)
      -> TChan [TableModificationU Key Showable]
      -> Dynamic
@@ -737,7 +756,7 @@ convertChanTidings0
   :: InformationSchema
   -> TableK Key
   -> (TBPredicate Key Showable, [Rel Key])
-  -> (TBData Key ())
+  -> (KVMeta Key)
   -> TableRep Key Showable
   -> TChan [TableModificationU Key Showable]
   -> Dynamic (Tidings (TableRep Key Showable))

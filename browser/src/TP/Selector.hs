@@ -188,7 +188,7 @@ paginateList
      -> t ([Rel Key],
            Tidings
              (C.Predicate (TBData Key Showable)))
-     -> TBData Key ()
+     -> KVMeta Key
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (Tidings [TBData Key Showable], Element)
 paginateList inf table itemListEl predicate (vpt,gist,_) constr proj tdi =  do
@@ -232,7 +232,7 @@ multiSelectListUI
   -> Tidings (Maybe WherePredicate)
   -> RefTables
   -> SelTBConstraint
-  -> KV Key ()
+  -> KVMeta Key
   -> Tidings [TBData Key Showable]
   -> UI (Tidings [TBData Key Showable], Element)
 multiSelectListUI inf table itemListEl predicate ref@(_,vpt,_) constr proj tdi = do
@@ -250,7 +250,7 @@ selectListUI
    -> Tidings (Maybe WherePredicate)
    -> RefTables
    -> SelTBConstraint
-   -> KV Key ()
+   -> KVMeta Key
    -> Tidings (Maybe (TBData Key Showable))
    -> UI (Tidings (Maybe (TBData Key Showable)), Element)
 selectListUI inf table itemListEl predicate ref@(_,vpt,_)  constr proj tdi = do
@@ -273,7 +273,7 @@ multiSelector
      -> TableK Key
      -> RefTables
      -> Tidings (Maybe WherePredicate)
-     -> KV Key ()
+     -> KVMeta Key
      -> Tidings [TBData Key Showable]
      -> UI (TrivialWidget [TBData Key Showable])
 multiSelector inf table reftb@(vptmeta,vpt,var) predicate proj tdi = mdo
@@ -288,7 +288,7 @@ selector
      -> TableK Key
      -> RefTables
      -> Tidings (Maybe WherePredicate)
-     -> KV Key ()
+     -> KVMeta Key
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 selector inf table reftb@(vptmeta,vpt,var) predicate proj tdi = mdo

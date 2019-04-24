@@ -40,6 +40,19 @@ import qualified Data.Text as T
 class PrettyRender  a where
   render :: a ->  [(Int,String)]
 
+class PrettyRender1  f  where
+  render1 :: PrettyRender a => f a ->  [(Int,String)]
+
+instance PrettyRender1 FTB where
+  render1 = renderFTB render
+
+instance PrettyRender1 KType where
+  render1 = renderPrimitive 
+
+instance (Show i , Show j ) => PrettyRender (Prim i j ) where
+  render i = [(0,show i)]
+renderPrimitive l= [(0,showTy (ident . render) l)]
+
 instance PrettyRender () where
   render _ = []
 
@@ -54,6 +67,9 @@ ident = explode '\n' " " . compressClosingBrackets
 noident :: Char ->  [(Int,String)] -> String
 noident sep = explode sep " " 
 
+  
+instance PrettyRender i => PrettyRender (KType i ) where
+  render  p =  [(0,showTy (ident. render) p)]
 
 
 compressClosingBrackets :: [(Int,String)] -> [(Int,String)]
@@ -84,16 +100,20 @@ instance (Ord a,Show a, Show b, PrettyRender a , PrettyRender b) =>  PrettyRende
 renderRowPatch :: (PrettyRender b,Show a) => TBIdx a b-> [(Int,String)]
 renderRowPatch i =  concat $ renderPatch  <$> i
 
-instance  (Ord a , Show a ,PrettyRender b) => PrettyRender (TBData a b ) where
+instance  (Ord a , Show a ,PrettyRender1 f, PrettyRender b) => PrettyRender (FKV a f b ) where
   render = renderTable
 
-renderTable :: (Ord a , Show a,PrettyRender b) => TBData a b ->  [(Int,String)]
+renderTable :: (Ord a , Show a,PrettyRender1 f,PrettyRender b) => FKV a f b ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
 wrapBrackets i l 
-  | length l > 3 = [(0,i ++ "{")]  ++ offset 1 l ++  [(0,"}")]
+  | nextLength > 3 = [(0,i ++ "{")]  ++ offset 1 l ++  [(0,"}")]
+  | nextLength > 1 = [(0,i)] ++ offset 1 l 
+  | nextLength == 1 = [(0,i ++ snd (head next) )]  ++ offset 1 (L.filter ((/=0).fst)  l)
   | length l > 1 = [(0,i)] ++ offset 1 l 
   | otherwise = [(0, i  ++ maybe "" snd (safeHead l) )]
+  where nextLength  =  L.length next 
+        next = L.filter ((==0).fst) l
 
 offset ix =  fmap (first (+ix))
 renderPatch :: (PrettyRender b ,Show a) => PathAttr a b ->  [(Int,String)]
@@ -111,18 +131,18 @@ renderPredicate (AndColl l  ) = "(" <> L.intercalate " AND "  (renderPredicate <
 renderPredicate (OrColl l )= "(" <> L.intercalate " OR "  (renderPredicate <$> l ) <> ")"
 renderPredicate (PrimColl (_,l) )= L.intercalate " AND " $ fmap (\(i,j)-> renderRel i <> either (\(s,o) -> renderBinary o <> (renderShowable s )) renderUnary  j ) l  
 
-renderAttr :: (Ord k, Show k,PrettyRender b) => TB k b->  [(Int,String)]
+renderAttr :: (Ord k, Show k,PrettyRender1 f,PrettyRender b) => TBF k f b->  [(Int,String)]
 renderAttr (FKT k rel v )
   =
     ref
     ++ [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ (first (+1) <$> renderFTB renderTable v)
+  ++ (first (+1) <$> render1 v)
   where ref = concat $ renderAttr <$> unkvlist k
-renderAttr (Attr k v ) = breakLine  (renderFTB render v)
+renderAttr (Attr k v ) = breakLine  (render1 v)
   where breakLine i 
           | L.length i > 1 =  [(0,show k ++ " => ")]  ++ offset 1 i
           |  otherwise = [(0,show k ++ " => " ++ ident i)]
-renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ i  )  (first (+1) <$> renderFTB renderTable v)
+renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ i  )  (first (+1) <$> render1 v)
 renderAttr (Fun i k v) = renderAttr (Attr i v)
 
 

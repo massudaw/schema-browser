@@ -62,7 +62,7 @@ insertPatch  inf conn table row  = liftIO $ if not (kvNull serialTB)
       attrs = unkvlist row
       testSerial (Attr k v) = (isSerial (keyType k)) && (isNothing.unSSerial $ v)
       testSerial _ = False
-      serialTB = kvlist (flip Attr (LeftTB1 Nothing) <$> filter (isSerial.keyType) (_kvattrs table))
+      serialTB = kvlist $ ((\k -> Attr k (keyType k )) <$> filter (isSerial.keyType) (_kvattrs table))
       directAttr :: [TB Key Showable]
       directAttr = filter (not.testSerial) attrs
       directAttrProj = projKey directAttr 
@@ -184,7 +184,7 @@ sqlPatchFTB f k call (Primitive l c ) s = go k call l s
 paginate
   :: InformationSchema
   -> KVMetadata Key
-  -> TBData Key ()
+  -> KVMeta Key
   -> [(Rel Key, Order)]
   -> Int
   -> Int
@@ -258,7 +258,7 @@ patchMod m pk patch = do
       applyPatch inf m (pk, firstPatch (recoverFields inf) i)) (nonEmpty (patchNoRef $ filterWritablePatch patch))
     return $ rebuild  pk (PatchRow patch)
 
-getRow  :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
+getRow  :: Table -> KVMeta Key -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
 getRow table  delayed (Idex idx) = do
   inf <- askInf
   liftIO $ check inf (filterReadable delayed)
@@ -300,7 +300,7 @@ filterWritableRow (DropRow) = DropRow
 selectAll
   ::
      KVMetadata Key
-     -> TBData Key ()
+     -> KVMeta Key 
      -> Maybe Int
      -> Maybe PageToken
      -> Maybe Int

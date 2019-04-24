@@ -150,7 +150,6 @@ data BrowserState
   ,rowpk :: Maybe (Non.NonEmpty (Text,Text))
   }
 
-type TBF  k v = (KVMetadata k ,KV k v)
 
 instance Show (InformationSchemaKV k v ) where
   show i = show $ schemaName i
@@ -185,7 +184,7 @@ data DBVar2 v =
   , collectionTid :: R.Tidings (TableRep Key Showable )
   }
 
-type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KV k (),PageTokenF v)
+type IndexMetadataPatch k v = (WherePredicateK k, Int, Int, KVMeta k ,PageTokenF v)
 
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = GiST (TBIndex v) (M.Map (TBIndex v) [AttributePath k ()])
@@ -454,7 +453,7 @@ type PageToken = PageTokenF Showable
 deriving instance (Binary v) => Binary (PageTokenF  v)
 deriving instance (NFData v) => NFData (PageTokenF  v)
 
-newtype IndexMetadata k v =  IndexMetadata {unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (KV k (),PageTokenF v)))} deriving(Show)
+newtype IndexMetadata k v =  IndexMetadata {unIndexMetadata :: (Map (WherePredicateK k) (Int,Map Int (KVMeta k ,PageTokenF v)))} deriving(Show)
 
 newtype TableRep k v = TableRep (KVMetadata k, M.Map [Rel k] (SecondaryIndex k v), TableIndex k v) deriving(Show)
 
@@ -478,8 +477,8 @@ data SchemaEditor
   , insertEd :: KVMetadata Key -> TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , deleteEd :: KVMetadata Key ->TBData Key Showable ->TransactionM (RowPatch Key Showable)
   , batchedEd :: KVMetadata Key -> [RowPatch Key Showable] -> TransactionM [RowPatch Key Showable]
-  , listEd :: KVMetadata Key -> TBData Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Rel Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
-  , getEd :: Table -> TBData Key () -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
+  , listEd :: KVMetadata Key -> KVMeta Key  -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Rel Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],PageToken,Int)
+  , getEd :: Table -> KVMeta Key  -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
   , typeTransform :: PGKey -> CoreKey
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , undo :: forall m . MonadIO m => InformationSchema -> RevertModification Table (RowPatch Key Showable)  -> m ()
@@ -592,13 +591,13 @@ type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
 
 
-liftTableF ::  (Show k ,Show a,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
+liftTableF ::  (Applicative f,Show k ,Show a,Ord k) => LookupKey k -> InformationSchema ->  Text -> FKV k f a -> FKV Key f a
 liftTableF f inf  tname i  =  kvlist $ liftFieldF  f inf  tname <$> unkvlist i
   where
     ta = lookTable inf tname
 
 
-liftTable' :: Show a => InformationSchema -> Text -> TBData Text a -> TBData Key a
+liftTable' :: (Applicative f ,Show a) => InformationSchema -> Text -> FKV Text f a -> FKV Key f a
 liftTable' = liftTableF lookupKeyName
 
 
@@ -614,10 +613,10 @@ findRefTable inf tname rel =  tname2
   where   (FKJoinTable  _ (_,tname2) )  = unRecRel $ justError ("no fk ref2" <> show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
-liftFieldF :: (Show k ,Show a,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
+liftFieldF :: (Applicative f,Show k ,Show a,Ord k) => LookupKey k -> InformationSchema -> Text -> TBF k f  a -> TBF Key f a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
 liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (liftFieldF (f,p) inf tname) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
-  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError ("no fk ref3" <> show (tname,ref,rel2 ,pathRelRel <$> rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList  rel2)  (rawFKS  ta)
+  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError ("no fk ref3" <> show (tname,rel2 ,pathRelRel <$> rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList  rel2)  (rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (IT rel tb) = IT (f inf tname  rel) (liftTableF (f,p) inf tname2 <$> tb)
@@ -838,16 +837,16 @@ mergeCreate Nothing Nothing = Nothing
 -- TODO: Does not handle RelAccess predicates
 -- TODO: Evaluate if should have two functions one for plain complement and one for auxiliary data for querying 
 --  does filterTBData gives all we want?
-recComplement :: forall a . Show a => InformationSchema -> KVMetadata Key ->  TBData Key () -> WherePredicate -> TBData Key  a -> Maybe (TBData Key ())
+recComplement :: forall f a . (Foldable f,Applicative f,Show a) => InformationSchema -> KVMetadata Key ->  KVMeta Key  -> WherePredicate -> FKV Key f a -> Maybe (KVMeta Key )
 recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
   where
     attrList  = fst <$> F.toList i
-    filterAttrs :: Bool -> [Rel Key] -> KVMetadata Key  -> TBData Key  a -> TBData Key () -> Maybe (TBData Key ())
+    filterAttrs :: Applicative f => Bool -> [Rel Key] -> KVMetadata Key  -> FKV Key f  a -> KVMeta Key  -> Maybe (KVMeta Key )
     filterAttrs top r m e v
-      | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) 
-        = do
-            current <- L.find (isJust . unLeftItens) (unkvlist e)
-            kvlist . pure <$>  ((\v -> go top r m (index current ) current v) =<< kvLookup (index current) v)
+      -- | _kvIsSum m && L.any (isJust . unLeftItens) (unkvlist e) 
+      --  = do
+      --      current <- L.find (isJust . unLeftItens) (unkvlist e)
+       --     kvlist . pure <$>  ((\v -> go top r m (index current ) current v) =<< kvLookup (index current) v)
       | otherwise 
         = fmap kvmap . join . fmap notPKOnly . notEmpty $ zipNonRef 
       where notPKOnly k =   if (relOutputSets (M.keys k) `S.isSubsetOf` relOutputSets (_kvpk m <> r ) && not top  )
@@ -857,19 +856,21 @@ recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
             zipNonRef = M.merge M.dropMissing M.preserveMissing (M.zipWithMaybeMatched (go top r m)) (unKV (tableNonRef e))    $ zipAll
     notEmpty i = if M.null readable then Nothing else Just readable
       where readable = M.filterWithKey (\k _ -> F.any (L.elem FRead . keyModifier ._relOrigin) (relUnComp k)) i
+    --mergeMetaRow ;: (TB Key Showable -> TBMeta Key -> Maybe (TBMeta Key))
+    mergeMetaRow f j (Primitive l i) =  Primitive l . kvlistMerge . concatMap unkvlist <$> (nonEmpty . catMaybes $ flip f i <$> F.toList j )
     go top r m _ (FKT l rel tb) (FKT l1 rel1 tb1)
       | isNothing hasJoin = Nothing
       | S.isSubsetOf (relOutputSets ( concatMap (fmap relAccessSafe. relUnComp )  rel)) (relOutputSets $ if not top then _kvpk m <> r else r ) =  Just (FKT l1 rel1 tb1)
       | otherwise =  result
       where
-        result = FKT l1 rel1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
-        merged = filterAttrs  False (_relTarget <$> rel) m2 <$> tb <*> tb1
+        result = FKT l1 rel1 <$>  merged
+        merged = mergeMetaRow (filterAttrs  False (_relTarget <$> rel) m2 ) tb tb1
         hasJoin = L.find (\r-> pathRelRel r  == S.fromList rel)  (_kvjoins m)
         FKJoinTable _ ref = unRecRel $ justError ("cant find fk rec complement: " ++ show (_kvname m ) ++ " - "++ renderRel (relComp rel) <> show (_kvjoins m ))  $  hasJoin
         m2 = lookSMeta inf (RecordPrim ref)
-    go top _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> if merged == LeftTB1 Nothing then Nothing else (sequenceA merged)
+    go top _ m _ (IT  it tb) ( IT it1 tb1) = IT it1 <$> merged
       where
-        merged = filterAttrs False [] ms <$> tb <*> tb1
+        merged = mergeMetaRow (filterAttrs False [] ms) tb tb1
         ms = lookSMeta inf  k
         k = _keyAtom $ keyType it
     go top r m _ _ v@(Attr k a) = if L.elem (Inline k) (if not top then _kvpk m <> r else r ) then Just v else Nothing
@@ -903,7 +904,7 @@ recPKDesc inf = filterTBData pred inf
                 pkdesc = S.unions $ relOutputSet <$> (_kvpk m <> _kvdesc m)
             in not . S.null $ relOutputSet k `S.intersection` pkdesc)
 
-filterTBData :: (KVMetadata Key -> Rel Key -> TB Key a -> Bool) ->  InformationSchema -> KVMetadata Key -> TBData Key  a -> TBData Key a
+filterTBData :: Functor f => (KVMetadata Key -> Rel Key -> TBF Key f a -> Bool) ->  InformationSchema -> KVMetadata Key -> FKV Key  f a -> FKV Key f a
 filterTBData  pred inf =  filterAttrs S.empty
   where
     filterAttrs l m = mapKV (go m) . kvFilterWith (\i v -> pred m i v || not (S.null (relOutputSet i `S.intersection` l)))
