@@ -1,12 +1,14 @@
 {-# LANGUAGE
-  UndecidableInstances,FlexibleInstances,FlexibleContexts,TupleSections #-}
+  UndecidableInstances,
+  FlexibleInstances,
+  FlexibleContexts,
+  TupleSections #-}
 module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
 import Types hiding (Parser,double)
 import Postgresql.Types
 import Data.Dynamic
-import Debug.Trace
 import Control.Exception(throw,SomeException,catch)
 import Text
 import Types.Patch
@@ -38,7 +40,6 @@ import qualified Data.ByteString.Base16 as B16
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import           Data.Attoparsec.ByteString.Char8 as C hiding (Result)
-import Data.Traversable (traverse)
 import Data.Time.LocalTime
 import qualified Data.List as L
 import qualified Data.Vector as Vector
@@ -221,12 +222,13 @@ instance TF.ToField Showable where
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
 
-parseAttrJSON inf (Attr i _ )  v = do
-  let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
+parseAttrJSON :: InformationSchema -> TBMeta Key -> A.Value -> JSONParser (TB Key Showable)
+parseAttrJSON inf (Attr i j )  v = do
+  let tyun = fromMaybe j  $ ktypeRec ktypeUnLift j  
   s<- parseShowableJSON  parsePrimitiveJSON tyun  v
   return $  Attr i s
-parseAttrJSON inf (Fun i rel _ )v = do
-  s<- parseShowableJSON parsePrimitiveJSON (keyType  i) v
+parseAttrJSON inf (Fun i rel j )v = do
+  s<- parseShowableJSON parsePrimitiveJSON j v
   return $  (Fun i rel s)
 parseAttrJSON inf (IT na (Primitive _ j)) v = do
   mj <- parseShowableJSON  (parseRecordLoad inf j) (keyType na) v
@@ -244,7 +246,7 @@ parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   let try1 i v = do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
-  traverseKV (\i -> parseAttrJSON  inf i =<<  try1 i v)$   m
+  traverseKV (\i -> parseAttrJSON  inf i =<<  try1 i v)  m
 
 decodeDynamic :: String -> BSL.ByteString  -> Showable
 decodeDynamic "row_index" i = SDynamic . HDynamic . toDyn $ ( B.decode i :: [TBIndex Showable])

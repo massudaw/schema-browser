@@ -37,7 +37,6 @@ import qualified Data.Set as S
 import Data.String
 import qualified Data.Text as T
 import Data.Text (Text)
-import Data.Sequence.NonEmpty (NonEmptySeq(..))
 import Postgresql.Sql.Printer
 import Postgresql.Sql.Types
 import Postgresql.Types
@@ -96,23 +95,16 @@ lkKey i = do
   return $ M.lookup (path ++ [i]) m
 
 
-lkTB (Attr k _) = do
-  a<- lkAttr k
-  v <- get
-  return $ case a of
-    Just a -> "k" <> T.pack (show a)
-    Nothing ->
-      keyValue k -- error $ "no value: " <> (show (keyValue  k,v))
--- error (show k)
-
-lkTB (Fun k _ _ ) = do
-  a <-lkAttr k
-  return $ case a of
-    Just a -> "k" <> T.pack (show a)
-    Nothing -> error (show k)
-
+lkTB 
+  :: Monad m 
+  => TBF Key f a  
+  -> RWST [Address Key] String NameMap m Text
+lkTB (Attr k _) =
+  lkAttr k 
+lkTB (Fun k _ _ ) =
+  lkAttr k
 lkTB (IT k _ ) = do
-  a <-lkIT k
+  a <- lkIT k
   return $ case a of
     Just a -> "k" <> T.pack (show a)
     Nothing -> error (show k)
@@ -123,7 +115,16 @@ lkTB (FKT  _ rel _ ) = do
     Just a -> "k" <> T.pack (show a)
     Nothing -> error (show rel)
 
-lkAttr k = lkKey (AttributeReference k)
+lkAttr k = do
+  a <- lkKey (AttributeReference k)
+  v <- get 
+  return $ case a of
+    Just a -> "k" <> T.pack (show a)
+    -- NOTE: Fall back to the name if there is no alias defined
+    --  This cause problems when a bug exist where there is missing columns 
+    --  Should add a option to enforce the name as alias storing the name directly instead of an Int
+    Nothing ->  keyValue k -- error $ "no value: " <> (show (keyValue  k,v))
+
 lkIT k = lkKey (TableReference $ RelInline k)
 lkFK k = lkKey (TableReference $ RelFK k)
 
@@ -209,6 +210,12 @@ expandBaseTable meta tb = asNewTable meta (\t -> do
   return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing)
 
 
+expandBaseTableNoAlias ::  KVMetadata Key -> KVMeta Key -> Codegen SQLRow
+expandBaseTableNoAlias meta tb = asNewTable meta (\t -> do
+  let
+    name = tableAttr tb
+  cols <- mapM (aliasKeys t)  name
+  return $ SQLRSelect  cols (Just $ SQLRRename (SQLRFrom (SQLRReference (Just $ _kvschema meta) (_kvname meta))) t ) Nothing)
 
 
 codegent l =
@@ -250,7 +257,7 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
       customPredicate = atTable m $ printPred inf m t wpred
       singleOutput = justError "non unique" . safeHead . F.toList . relOutputSet 
       orderBy = atTable m $ mapM (\(i,j) -> do
-          l <- lkTB (Attr (singleOutput i) (TB1 ()))
+          l <- lkAttr (singleOutput i) 
           return $ l <> " " <> showOrder j ) order
       ordquery =  atTable m $ do
         let
@@ -260,7 +267,7 @@ selectQuery inf m t koldpre order (WherePredicate wpred) = codegen tableQuery
           koldPk =  fmap (fmap (first relType )) preds
           pkParam =  koldPk <> (tail .reverse <$> koldPk)
         oq <- traverse (traverse (\(i,v) ->  do
-          l <- lkTB (Attr (singleOutput i) (TB1 ()))
+          l <- lkAttr (singleOutput i)
           return $ (l,v))) orderpreds
         return (pure .generateComparison <$> oq,pkParam)
 
@@ -491,7 +498,7 @@ getFromQuery inf m delayed= do
   tquery <- expandQuery' inf m JDNormal delayed
   rq <- projectTree inf m delayed
   out <- atTable m $ mapM (\i-> do
-    v <- lkTB (Attr (_relOrigin i) (TB1 ()))
+    v <- lkAttr (_relOrigin i) 
     return $   v  <>  " = ?") (_kvpk m)
   let whr = T.intercalate " AND " out
   return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow (tquery tq )<> " WHERE " <> whr <> ") as q "

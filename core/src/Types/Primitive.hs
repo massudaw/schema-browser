@@ -397,6 +397,20 @@ showTy f (Primitive l i) = f i ++ join (showT <$> l)
     showT KInterval = "()"
     showT KSerial = "*"
 
+showPrim (RecordPrim i ) = show i
+showPrim (AtomicPrim i ) 
+  = case i of
+      PText -> "text"
+      PInt ix -> "int" <> show ix
+      PDouble  -> "double"
+      PColor -> "color"
+      PTime i -> case  i of 
+                   PTimestamp _ -> "timestamp"
+                   PDayTime  -> "time"
+                   PDate  -> "date"
+                   PInterval -> "interval"
+      PBoolean -> "bool"
+      i -> show i
 instance Eq (FKey a) where
   k == l = keyPosition k == keyPosition l && keyTable k == keyTable l 
   {-# INLINE (==)#-}

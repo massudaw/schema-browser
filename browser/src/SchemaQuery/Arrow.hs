@@ -114,7 +114,7 @@ pmap' f fp  (PStream b e ) = PStream (f <$> b) (fp <$> e)
    
 pmap f fp  = Kleisli (\(PStream b e )->  lift $ do
   ini <- currentValue b
-  accumS (f ini) (filterJust $ trace "partial pmap".  fp <$> e))
+  accumS (f ini) (filterJust $  fp <$> e))
 
 pmapA :: (KV Key Showable -> TransactionM b) 
       -> PStream (PrimaryRep  Key Showable) 
@@ -126,7 +126,7 @@ pmapA f (PStream b e ) =  mdo
                   CreateRow d -> Diff . fromMaybe <$> f d
                   PatchRow p -> (maybe Keep (\i -> Diff $ maybe i (const i) )<$> traverse f  (flip applyIfChange p =<< G.lookup k g))
                   DropRow -> return Delete 
-  fre <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge right" ) (fp <$> b <@> e )
+  fre <- lift $ mapEventDyn (transactionNoLog inf) (fp <$> b <@> e )
   PrimaryRep (_,ini) <- currentValue b
   fini <- traverse f  ini
   o <- lift $ accumT fini ((\(k,i) j -> case i of 
@@ -142,13 +142,13 @@ pconst  b  = PStream (pure b) never
 pmerge :: (Patch c, Patch a , Patch b) => (a -> b -> TransactionM c ) -> (a -> c -> Index b -> TransactionM (Maybe (Index c))) ->  (b -> c -> Index a -> TransactionM (Maybe (Index c))) -> (PStream a , PStream b) -> TransactionM (PStream c)
 pmerge fun fr fl (PStream br er, PStream bl el) = mdo
   inf <- askInf
-  fre <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge right" ) (fr <$> br <*> psvalue res <@> el )
-  fle <- lift $ mapEventDyn (transactionNoLog inf. trace "pmerge left" ) ( fl <$> bl <*> psvalue res<@> er )
+  fre <- lift $ mapEventDyn (transactionNoLog inf) (fr <$> br <*> psvalue res <@> el )
+  fle <- lift $ mapEventDyn (transactionNoLog inf) ( fl <$> bl <*> psvalue res<@> er )
   let ev = filterJust $ unionWith const  fre fle
   bri <- currentValue  br
   bli <- currentValue  bl
-  ini <- (fun . trace "pmerge total" ) bri bli 
-  res <-  lift $ accumS ini  (fmap (trace "PMerge#----------------------------" ) ev)
+  ini <- fun  bri bli 
+  res <-  lift $ accumS ini  ev
   return res
 
 instance Patch CorePrim where

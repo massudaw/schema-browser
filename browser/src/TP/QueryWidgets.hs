@@ -698,6 +698,10 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   preoldItems <-  ui $ loadItems inf table ftb  
   -- FIXME : this kvNonEmpty was not necessary before somewhere is leaking empty tables
       =<< mapTidingsDyn (pure . join . traverse kvNonEmpty) preoldItems2
+
+  title <- UI.h5
+        # sink text (facts $ maybe "" (attrLine inf  (tableMeta table)) <$> preoldItems)
+        # set UI.class_ "header"
   let
     constraints = tableConstraints (m,gist) preoldItems ftb
   -- liftIO $ print ("Table Constraints",fst <$> constraints,_kvuniques (tableMeta table))
@@ -714,7 +718,7 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
       ,("Indexes", emptyLayout $ tableIndexes reftb table)
       ,("Schema", emptyLayout $ tableSchema table)])
   
-  out <- UI.div # set children [listBody,panelItems,getElement navMeta,getElement info]
+  out <- UI.div # set children [title,listBody,panelItems,getElement navMeta,getElement info]
   return $ LayoutWidget tablebdiff out layout
 
 emptyLayout i = (\i -> LayoutWidget (pure Nothing) i (pure (10,10)))  <$> i 

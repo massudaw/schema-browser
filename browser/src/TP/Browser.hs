@@ -91,7 +91,7 @@ chooserTable six inf bset cliTid cli = do
   iniTable <- currentValue (facts cliTid)
   el <- ui $ accumDiffCounterIni  (maybe 0 (length .table_selection)  iniTable) (\ix -> runUI w . (\table-> do
     header <- UI.h4
-        # set UI.class_ "header"
+        # set UI.class_ "header col-xs-10"
         # sink0 text (facts $ T.unpack . lookDesc inf table .primary <$> collectionTid translationDb)
     let viewer t = viewerMode six inf t ix cli (indexTable inf (ix,table) <$> cliTid)
     body <-
@@ -121,7 +121,6 @@ viewerMode
       Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe ClientTableSelection) -> UI Element
 viewerMode six inf table tix cli cliTid = do
   let desc = recPKDescIndex inf (tableMeta table) (allRec' (tableMap inf) table)
-  liftIO $ print ("Loaded Fields",desc)
   reftb@(_,trep,_) <- ui $ refTablesProj inf table Nothing mempty  desc
   let
     vpt = primary <$> trep
@@ -140,24 +139,19 @@ viewerMode six inf table tix cli cliTid = do
         selection = const <$> rumors (triding itemList)
         tds = triding itemList
         tds2 = (\i j -> join $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> triding itemList  <*> vpt
-      title <- UI.h5
-        # sink text (facts $ maybe "" (attrLine inf  (tableMeta table)) <$> tds)
-        # set UI.class_ "header col-xs-12"
       edit <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
-      element edit # set UI.class_ "col-xs-12"
-      TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,title,getElement edit]
+      element itemList # set UI.class_ "col-xs-6"
+      element edit # set UI.class_ "col-xs-6"
+      TrivialWidget (maybeToList <$> tds) <$> UI.div # set children [ getElement itemList,getElement edit]
     ),
     ("Table",do
       itemList <- multiSelector inf table reftb (pure Nothing) desc tdi
       let
           tds = triding itemList
           tds2 = (\i j -> catMaybes  $ flip G.lookup j . G.getIndex (tableMeta table) <$> i) <$> triding itemList  <*> vpt
-      title <- UI.h5
-        # sink text (facts $ L.intercalate "," . fmap (attrLine inf  (tableMeta table)) <$> tds)
-        # set UI.class_ "header col-xs-12"
       TrivialWidget tdf ev <- batchUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds2
       element ev # set UI.class_ "col-xs-12"
-      TrivialWidget tds <$> UI.div # set children [getElement itemList,title,ev]
+      TrivialWidget tds <$> UI.div # set children [getElement itemList,ev]
     )]
 
   w  <- askWindow

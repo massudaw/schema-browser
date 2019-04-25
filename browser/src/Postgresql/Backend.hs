@@ -281,6 +281,7 @@ filterMetadataReadable i@KVMetadata{..} =i {_kvattrs = filter (\k -> L.elem FRea
   where isPlugin (PluginField _  ) = True
         isPlugin _ = False
 
+
 filterReadable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FRead (keyModifier k)) 
 

@@ -78,10 +78,9 @@ setup smvar bstate plugList w = void $ do
   cliZone <- jsTimeZone
   cliTidIni <- currentValue (facts cliTid)
   selschemas <- ui $ accumDiffCounterIni (maybe 0 L.length cliTidIni)  (\six -> runUI w . (\inf -> do
-    reset <- UI.button  # set text "Reset"
-    resetE <- UI.click reset
-    ui $ onEventIO resetE (\_ -> resetCache inf)
+    
     menu <- checkedWidget (pure True)
+    element menu # set UI.class_ "col-xs-05"
     body <- UI.div# set UI.class_ "row"
     ui $ addSchemaIO (fromIntegral $ wId w) metainf inf six
     metadataNav <- sequenceA $  M.fromList
@@ -91,13 +90,11 @@ setup smvar bstate plugList w = void $ do
                ,("Account",fmap (^._2) <$> ui (accountWidgetMeta inf))
                ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf )]
     let checkNav i =  maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav
-    element menu # set UI.class_ "col-xs-1"
-    element reset # set UI.class_ "col-xs-1"
     nav  <- buttonDivSet  (filter checkNav ["Browser","Map","Account","Task", "Agenda","Chart","Metadata"] ) (pure  Nothing) (\i ->
         UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" )
-    element nav # set UI.class_ "col-xs-5 pull-right"
+    element nav # set UI.class_ "col-xs-2 pull-right"
     chooserDiv <- UI.div
-        # set children  [getElement menu,getElement reset,getElement nav ]
+        # set children  [getElement nav ]
         # set UI.style [("align-items","flex-end")]
         # set UI.class_ "row"
         # set UI.style (("align-items","flex-end") : borderSchema inf)
@@ -197,11 +194,11 @@ setup smvar bstate plugList w = void $ do
                        # sink0 UI.class_ (facts $ expand <$> triding menu)
       element body # set children [tbChooser,bd]
       return tfilter
-    return container ))  (S.fromList <$> evDB)
+    return (getElement menu,container) ))  (S.fromList <$> evDB)
   (edbl,hdbl) <- ui newEvent
 
   headers <- ui $ accumDiff (\inf -> runUI w $ do
-    h <- UI.h3 # set text (T.unpack $ schemaName inf) # set UI.class_ "header"
+    h <- UI.h3 # set text (T.unpack $ schemaName inf) # set UI.class_ "col-xs-9 header"
     ch <- UI.click h
     onEvent ch $ (\_ -> liftIO $ hdbl True)
     return h ) (S.fromList <$> evDB)
@@ -209,7 +206,7 @@ setup smvar bstate plugList w = void $ do
     style True = UI.span # set UI.class_ "glyphicon glyphicon-collapse-up"
     style False = UI.span # set UI.class_ "glyphicon glyphicon-expand"
   header <- UI.div  # set  children chooserItens # set UI.class_ "col-xs-11"
-  merged <- ui $ accumDiffMapCounter (\ix (k,(i,j)) -> runUI w $ UI.div # set children [i,j])   (M.intersectionWith (,) <$>  headers <*>  selschemas)
+  merged <- ui $ accumDiffMapCounter (\ix (k,(i,(m,j))) -> runUI w $ UI.div # set children [m,i,j])   (M.intersectionWith (,) <$>  headers <*>  selschemas)
   (layouth,top) <- layoutSel' onShiftAlt  merged
   element layouth
     # set UI.class_ "col-xs-1"

@@ -68,11 +68,6 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
       chooser  = do
         map <-UI.div
         (eselg,hselg) <- ui newEvent
-        start <- ui$stepper Nothing (filterE (maybe False (not .snd.fst)) eselg)
-        let render = maybe "" (\((t,_),i) -> show $ G.getIndex (tableMeta t) i)
-        startD <- UI.div #  sink text (render <$> start)
-        end <- ui$stepper Nothing (filterE (maybe False (snd.fst) ) eselg)
-        endD <- UI.div #  sink text (render <$> end)
 
         (positionLocal,h) <- ui newEvent
         let positionE = unionWith const (rumors prepositionT) positionLocal
@@ -106,9 +101,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                     tdi <- ui $ stepperT Nothing (fmap snd <$> evsel)
                     el <- crudUITable inf tb reftb mempty [] (allRec' (tableMap inf) tb)  tdi
                     traverseUIInt (createLayers innermap tname . A.toJSON . catMaybes . concatMap (evalPlugin proj)) v
-                    stat <- UI.div # sink text (show . M.lookup pred . unIndexMetadata <$> facts (reftb ^. _1))
-                    edit <- UI.div # set children [getElement el] # sink UI.style (noneShow . isJust <$> facts tdi)
-                    UI.div # set children [stat,edit]
+                    UI.div # set children [getElement el] # sink UI.style (noneShow . isJust <$> facts tdi)
                   else
                     UI.div) pcal
               ) selected

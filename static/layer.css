@@ -1,3 +1,8 @@
+.col-xs-05 {
+  width: 4.166666%;
+
+  float: left;
+}
 .col-xs-3 .col-xs-3 {
   width:100%
 }

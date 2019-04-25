@@ -437,7 +437,7 @@ tableLoader' = do
       --putStrLn $ "PreResult: \n" <>  show preresult
       --putStrLn $ "Result: \n" <>  show res 
     liftIO $ putStrLn $ "Size "  <> show (tableName table) <> " " <> show (L.length (rights result))
-    return (rights  result,x,o ))
+    return (rights  result,x,o - L.length (lefts result )))
 
 
 -- TODO: Could we derive completeness information from bounds
@@ -559,7 +559,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
            then
             case L.null complements of
               True -> do
-                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table,  G.keys reso, renderPredicateWhere fixed)
+                liftIO $ putStrLn $ "Reusing existing complete predicate : " <> show (tableName table) <> " - " <>  renderPredicateWhere fixed
                 --readNew maxBound tbf
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
@@ -704,7 +704,7 @@ convertChanEvent inf table fixed select bres chan = do
       meta = tableMeta table
       check r j  = if G.checkPred i (fst fixed) 
                   then do
-                    liftIO . putStrLn $ "patch: \n" ++ (ident . render $ j )
+                    -- liftIO . putStrLn $ "patch: \n" ++ (ident . render $ j )
                     case recComplement inf meta select mempty i  of
                       Just c ->  do 
                         when ( tableName table == "table_description" )$  do

@@ -49,8 +49,8 @@ instance PrettyRender1 FTB where
 instance PrettyRender1 KType where
   render1 = renderPrimitive 
 
-instance (Show i , Show j ) => PrettyRender (Prim i j ) where
-  render i = [(0,show i)]
+instance (Show j ) => PrettyRender (Prim KPrim j ) where
+  render i = [(0,showPrim i)]
 renderPrimitive l= [(0,showTy (ident . render) l)]
 
 instance PrettyRender () where
