@@ -11,6 +11,7 @@ import Data.Functor.Apply
 import Data.Interval (Extended(..), upperBound)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.Map as M 
 import Data.Maybe
 import Data.String
 import qualified Data.Text as T
@@ -56,7 +57,7 @@ insertPatch  inf conn table row  = liftIO $ if not (kvNull serialTB)
         let
           iquery = T.unpack prequery
         executeLogged  inf table (fromString iquery) directAttr
-        return []
+        return mempty 
     where
       prequery = "INSERT INTO " <> kvMetaFullName table <> " (" <> T.intercalate "," (key <$> directAttrProj) <> ") VALUES (" <> T.intercalate "," (value <$> directAttrProj) <> ")"
       attrs = unkvlist row
@@ -114,7 +115,7 @@ updateQuery m (pks,skv) = (qstr,qargs,Nothing)
     equality k = k <> "="  <> "?"
     koldPk (Idex kold) = zip (fmap textToPrim . keyType . L.head . F.toList . relOutputSet <$> _kvpk m) (F.toList kold)
     pred   (Idex kold) =  T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (L.head  . F.toList . relOutputSet <$> _kvpk m) (F.toList kold))
-    inputs = execWriter $ mapM (attrPatchName Nothing) (patchNoRef skv)
+    inputs = execWriter $ mapM (attrPatchName Nothing) (unkvlistp $ patchNoRef skv)
     setter = " SET " <> T.intercalate "," (snd <$> inputs)
     paren i = "(" <> i <> ")"
     up = "UPDATE " <> kvMetaFullName m <> setter <> " WHERE " <> T.intercalate " OR " ( paren . pred  <$> pks)
@@ -127,7 +128,7 @@ attrPatchName pre (PAttr k p ) = sqlPatchFTB atom (maybe "" (\i -> i <> ".") pre
     atom k c ty i  = inpVariable  (ty,create i) ( k <> "=" <> c "?")
 attrPatchName pre (PInline k p ) = sqlPatchFTB atom (maybe "" (\i -> i <> ".") pre <> escapeReserved ( keyValue k)) id (keyType k) p
   where
-    atom k c ty (PAtom i)  = mapM_ (attrPatchName (Just k)) i
+    atom k c ty (PAtom i)  = mapM_ (attrPatchName (Just k)) (unkvlistp i)
 attrPatchName pre i = error $ show (pre,i)
 
 inpVariable :: (KType (Prim PGType (Text, Text)), FTB Showable) -> Text -> UpdateOperations
@@ -233,10 +234,10 @@ insertMod m j  = do
       let
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
-        ini = compact (defs ++  patch j)
-      d <- either error (maybe (return []) (insertPatch  inf (conn  inf) m) . kvNonEmpty . tableNonRef. filterWriteable ) (tableCheck m (create ini))
+        ini = L.head $ compact [defs , patch j]
+      d <- either error (maybe (return mempty) (insertPatch  inf (conn  inf) m) . kvNonEmpty . tableNonRef. filterWriteable ) (tableCheck m (create ini))
       l <- liftIO getCurrentTime
-      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (rawSchema table,rawName table)) (create $ ini ++ d))
+      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (rawSchema table,rawName table)) (create $ L.head $ compact [ini ,d]))
 
 
 deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))
@@ -255,7 +256,7 @@ patchMod m pk patch = do
   inf <- askInf
   liftIO $ do
     traverse (\i -> 
-      applyPatch inf m (pk, firstPatch (recoverFields inf) i)) (nonEmpty (patchNoRef $ filterWritablePatch patch))
+      applyPatch inf m (pk, firstPatch (recoverFields inf) i)) (nonEmptyM (patchNoRef $ filterWritablePatch patch))
     return $ rebuild  pk (PatchRow patch)
 
 getRow  :: Table -> KVMeta Key -> TBIndex Showable -> TransactionM (TBIdx Key Showable)
@@ -288,7 +289,7 @@ filterReadable = kvFilter (\k -> attr (relOutputSet k))
 filterWriteable = kvFilter (\k -> attr (relOutputSet k))
   where attr = F.all (\k -> L.elem FWrite (keyModifier k)) 
 
-filterWritablePatch = filter (\k -> F.all (L.elem FWrite . keyModifier) (relOutputSet $ index k)) 
+filterWritablePatch = M.filterWithKey (\k _ -> F.all (L.elem FWrite . keyModifier) (relOutputSet  k)) 
 
 filterWritableRowPatch (BatchPatch i j) = BatchPatch i (filterWritableRow j )
 filterWritableRowPatch (RowPatch (i,j ))= RowPatch (i,filterWritableRow j ) 

@@ -109,6 +109,8 @@ indexTID PIdOpt  (LeftTB1 l) = justError "no opt value" l
 
 -- indexTIDM (PIdIdx  ix )  (ArrayTB1 l) = l `Non.atMay` ix
 indexTIDM PIdOpt  (LeftTB1 l) = l
+-- WARNING: Error  after migrating to patch map
+indexTIDM PIdOpt  l@(TB1 _) = Just l
 indexTIDM i j = error $ show (i,j)
 
 liftTID (PIdIdx ix) l = PIdx ix (Just l)
@@ -222,8 +224,8 @@ ifield s (P (tidxi ,tidxo) (Kleisli op) )
     = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) 
         (Kleisli 
           (withReaderT4 
-            (\ v -> [PAttr s <$> v]) 
-            (concat . fmap (catMaybes .fmap pvalue) ) 
+            (\ v ->  [kvlistp $ PAttr s <$> v]) 
+            (concat . fmap (catMaybes .fmap pvalue. unkvlistp) ) 
             (fmap (value .(\v -> justError ("no field " ++ show (s,v) ) $  indexField (IProd Nothing s) (tableNonRef v)))) . op ))
   where pvalue (PAttr k v) | k == s = Just v
         pvalue i = Nothing
@@ -231,27 +233,30 @@ ifield s (P (tidxi ,tidxo) (Kleisli op) )
         value i = error (show (s,i))
 
 iinlineR ::
-       (Monad m ,Patch s ,Show s ,Show k ,Ord k) => k
+       (Monad m ,Patch s ,Show s ,Show k ,Show (Index s),Compact (Index s) ,Ord k) => k
        -> PluginM (PathIndex PathTID p)  (Atom (FTB (TBData k s))) m i a
        -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iinlineR s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli (withReaderT4 (\v -> [PInline s   <$> v]) (concat . fmap (fmap pvalue )) (fmap (\ v -> _fkttable .justError ( "no inline " ++ show (s,v)). indexField (IProd Nothing s) $v   )) . op ))
+iinlineR s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) 
+  (Kleisli (withReaderT4 (\v -> [kvlistp $ PInline s   <$> v]) (concat . fmap (fmap pvalue .unkvlistp)) (fmap (\ v -> _fkttable .justError ( "no inline " ++ show (s,v)). indexField (IProd Nothing s) $v   )) . op ))
   where pvalue (PInline _ v) = v
 
 iinline ::
-       (Monad m ,Patch s ,Show s ,Show k ,Ord k) => k
+       (Monad m ,Patch s ,Show s ,Show k ,Show (Index s),Compact (Index s) ,Ord k) => k
        -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) (Kleisli (withReaderT4 (\v -> [PInline s   <$> v]) (concat . fmap (fmap pvalue )) (fmap (\v -> _fkttable .justError ( "no inline " ++ show (s,v)). indexField (IProd Nothing s)  $v )) . op ))
+iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) 
+    (Kleisli (withReaderT4 (\v -> [kvlistp $ PInline s   <$> v]) (concat . fmap (fmap pvalue .unkvlistp)) (fmap (\v -> _fkttable .justError ( "no inline " ++ show (s,v)). indexField (IProd Nothing s)  $v )) . op ))
   where pvalue (PInline _ v) = v
 
 
 iforeign ::
-   (Monad m ,Patch s ,Show s ,Show (Index s) ,Show k ,Ord k)
+   (Monad m ,Patch s ,Show s ,Show (Index s) ,Show (Index s),Compact (Index s) ,Show k ,Ord k)
   => [Rel k]
   -> PluginM (PathIndex PathTID (Union (AttributePath k p)))  (Atom (FTB (TBData k s)))  m  i a
   -> PluginM (AttributePath k p)  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) (Kleisli (withReaderT4 (\v -> pure .PFK s [] <$> v ) (concat . fmap (catMaybes . fmap pvalue )) 
-  (fmap (\ i -> _fkttable . justError ("no foreign " ++ show (relComp s) ++ "\n" ++ show (kvkeys i)). indexField (Nested (Non.fromList (relUnComp $ relComp s)) (Many [])) $ i )). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (mapNonEmpty (PathForeign s) tidxi,mapNonEmpty (PathForeign s) tidxo) 
+  (Kleisli (withReaderT4 (\v -> [ kvlistp $ PFK s mempty <$> v] ) (concat . fmap (catMaybes . fmap pvalue . unkvlistp)) 
+     (fmap (\ i -> _fkttable . justError ("no foreign " ++ show (relComp s) ++ "\n" ++ show (kvkeys i)). indexField (Nested (Non.fromList (relUnComp $ relComp s)) (Many [])) $ i )). op ))
   where pvalue (PFK  rel _ v) | rel == s = Just v
         pvalue i = Nothing
 

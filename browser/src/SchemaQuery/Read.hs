@@ -173,7 +173,7 @@ getFrom table allFields b = mdo
       return delta )  (\comp -> do
       liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
-      let newRow = apply (apply b (fromMaybe [] delta)) v
+      let newRow = apply (apply b (fromMaybe mempty delta)) v
       resFKS  <- getFKS inf pred table  [newRow] comp
       let
         output = resFKS newRow
@@ -186,7 +186,7 @@ getFrom table allFields b = mdo
         --liftIO . putStrLn $ "Get\n" <> (show v)
         --liftIO . putStrLn $ "Result\n" <> (either show (ident.render) output)
         --liftIO . putStrLn $ "DiffResult\n" <> (maybe "" show  result)
-        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe [] delta) ) =<< result )
+        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe mempty delta) ) =<< result )
       return result) n)) comp
   return (dbvar,r)
 
@@ -654,7 +654,7 @@ restrictPAttr (FKT l m n ) (PFK i j k) = fmap (PFK i j ) $ traverse (restrictPat
   where t = head (F.toList n)
 
 restrictPatch :: KVMeta Key -> TBIdx Key Showable -> Maybe (TBIdx Key Showable)
-restrictPatch v = nonEmpty . mapMaybe (\i -> flip restrictPAttr i =<<  kvLookup (index i) v )
+restrictPatch v = fmap kvlistp . nonEmpty . mapMaybe (\i -> flip restrictPAttr i =<<  kvLookup (index i) v ) . unkvlistp
 
 
 -- NOTE : When we have a foreign key and only want the field we need to restrict the fields by using tableNonRef
@@ -704,8 +704,8 @@ convertChanEvent inf table fixed select bres chan = do
                         when ( tableName table == "table_description" )$  do
                           liftIO $ putStrLn $ "match raw:\n" ++ show c
                           liftIO $ putStrLn $ "match pretty:\n" ++ ident (render c)
-                        return $ Just [] -- Just . concat .maybeToList . snd <$> getFrom  table select i 
-                      Nothing -> return $ Just []
+                        return $ Just mempty -- Just . concat .maybeToList . snd <$> getFrom  table select i 
+                      Nothing -> return $ Just mempty 
                   else return Nothing
             where 
                 i = apply r j 
@@ -715,7 +715,7 @@ convertChanEvent inf table fixed select bres chan = do
             = case G.lookup i v  of
               Just r ->  do
                  delta <- check r j 
-                 return $ pure .(\ d -> RowPatch (i,PatchRow (compact (j <> d ) )))  <$> delta
+                 return $ pure .(\ d -> RowPatch (i,PatchRow (head $ compact [j ,d]  )))  <$> delta
               Nothing -> return Nothing 
       match (RowPatch (i,CreateRow j)) = do
                   if G.checkPred j  (fst fixed) 

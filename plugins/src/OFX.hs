@@ -28,7 +28,7 @@ i =: j = PAttr i (patch j)
 convertTrans Transaction {..}  =
     ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
-    ,PFK [Rel "trntype" Equals "trttype"] ["trntype" =: txt (tail $ show txTRNTYPE )]  (PAtom ["trttype" =: txt (tail $ show txTRNTYPE )])
+    ,PFK [Rel "trntype" Equals "trttype"] (kvlistp ["trntype" =: txt (tail $ show txTRNTYPE )])  (PAtom $ kvlistp ["trttype" =: txt (tail $ show txTRNTYPE )])
     ,"dtposted" =: tzone txDTPOSTED
     ,"dtuser" =:  opt tzone txDTUSER
     ,"dtavail" =: opt tzone txDTAVAIL

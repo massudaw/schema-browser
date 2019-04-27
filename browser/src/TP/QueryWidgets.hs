@@ -200,12 +200,13 @@ indexPluginAttrDiff a@(Attr i _ )  plugItems =  evs
     match (IProd _ l) ( IProd _ f) = l == f
     match i f = False
     thisPlugs = filter (hasProd (`match` IProd Nothing i) . fst)  plugItems
-    evs  = fmap (fmap (join . fmap (maybe Keep  Diff . F.find ((== keyattr a)  . index )  ))) <$>  thisPlugs
+    evs  = fmap (fmap (join . fmap (maybe Keep  (Diff . rebuild (keyattr a)) . M.lookup (keyattr a)  ))) <$>  thisPlugs
 indexPluginAttrDiff i plugItems = pfks
   where
     prodRef = IProd Nothing
     thisPlugs = filter (hasProd (isNested (fmap (prodRef . _relOrigin) (relUnComp $ keyattr i) )) .  fst) plugItems
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (relUnComp $ keyattr i) ))) . second (fmap (join . fmap (maybe Keep  Diff . F.find ((==  keyattr i)  . index ) ))) <$>  thisPlugs
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( prodRef . _relOrigin ) (relUnComp $ keyattr i) ))) 
+        . second (fmap (join . fmap (maybe Keep  (Diff . rebuild (keyattr i)) . M.lookup (keyattr i)  ))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
@@ -365,30 +366,32 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
       let
         projectAttr = ((L.filter (isJust .  unLeftItens) . unkvlist) =<<). maybeToList 
         initialAttr = projectAttr <$> oldItems
-        fks2 = M.fromList $ run <$> cols
+        fks2 = M.fromList  $ run <$> cols
         sumButtom itb =  do
           el <- UI.div
           let prev = join . fmap unLeftItens . join . fmap (kvLookup itb ) <$> oldItems
-              edit = ((maybe Delete Diff. unLeftItensP <=< maybe Keep Diff . L.find (\a -> index a == itb)) =<< ) <$> resei
+              edit = ((maybe Delete Diff. unLeftItensP <=< maybe Keep (Diff . rebuild itb) . M.lookup itb) =<< )<$> resei
               kb = justError "no sum column" $ kvLookup itb fields
           element =<< labelCaseDiff inf kb prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j)) <$> prev <*> edit)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk <- buttonDivSetO (kvkeys fields)  (fmap index . safeHead <$> initialAttr)  marker sumButtom
       fks <- switchManyLayout (triding chk) fks2
-      element chk # set UI.style [("display","inline-flex")]
+      -- element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
         resei = (\j i ->  defaultInitial j =<< i) <$>  facts initialAttr <#> triding fks
           where
+            defaultInitial :: [TB Key Showable] -> PathAttr Key Showable ->  Editor (TBIdx Key Showable)
             defaultInitial old new
               = case safeHead old of
                   Nothing -> case unLeftItens (create new  :: TB Key Showable) of
-                    Just n -> Diff $ compact $ (patch <$> (addDefault' <$> filter ((/= keyattr n ) . keyattr) (unkvlist fields) :: [TB Key Showable])) ++ [new]
+                    Just n -> Diff $ kvlistp $ compact $ 
+                          (patch <$> (addDefault' <$> filter ((/= keyattr n ) . keyattr) (unkvlist fields) :: [TB Key Showable])) ++ [new]
                     Nothing -> Keep
                   Just ini -> if index ini == index new
-                     then maybe Delete (const (Diff  [new])) (unLeftItensP new)
-                     else  Diff $ compact $ (patch  <$> ( addDefault <$> old :: [TB Key Showable]) )++ [new]
+                     then maybe Delete (const (Diff  (kvsingleton new))) (unLeftItensP new)
+                     else  Diff $ kvlistp $ compact $ (patch  <$> ( addDefault <$> old :: [TB Key Showable]) )++ [new]
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
       let computeResult i j = case (not $ L.null (projectAttr (apply i j)) ,not $ L.null (projectAttr i)) of
@@ -554,7 +557,7 @@ validateRow inf table fks =
   isValid fks
   where
     ifValid i j =
-      if isJust j
+      kvlistp <$> if isJust j
         then i
         else (if isDiff i then Keep else i)
     sequenceTable fks =
@@ -568,10 +571,9 @@ applyDefaults inf table k i j =
   join (applyIfChange i j) <|> join (createIfChange (def j)) <|> i
   where
     defTable = defaultTableType inf table
-    defField = L.find (\a -> index a == k) defTable
+    defField = rebuild k <$> M.lookup k defTable
     def (Diff i) =
-      Diff . maybe i (\a -> head $ compact [a, i]) $
-      L.find (\a -> index a == k) defTable
+      Diff . maybe i (\a -> head $ compact [rebuild k a, i]) $ M.lookup k defTable
     def Keep = maybe Keep Diff defField
     def Delete = maybe Delete (const Keep) defField
 
@@ -1344,7 +1346,8 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
         fields = allFields inf targetTable
         reflectRels = filter (isJust. _relOutputs) rel
         matchReflect k = isJust $ L.find (\(Rel i _ _ )-> i == k) reflectRels
-        filterReflect m = filter  (matchReflect.index) m
+        filterReflect :: TBIdx Key Showable -> TBIdx Key Showable 
+        filterReflect m = M.filterWithKey  (\k i -> matchReflect k ) m
         filterNotReflect m = kvFilter (not . matchReflect) m
         filterReflectKV m = kvFilter (matchReflect) m
         nonEmptyTBRef v@(TBRef n) = if  snd n  == mempty then Nothing else Just v
@@ -1372,11 +1375,11 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
       let
         merge :: Editor (TBIdx CoreKey Showable ) -> Editor (TBIdx CoreKey Showable) -> Editor (TBIdx CoreKey Showable) -> Editor (PTBRef CoreKey Showable)
         -- merge i j k | traceShow (i,j ,k ) False = undefined
-        merge (Diff i) (Diff j) (Diff k) = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j k)
-        merge (Diff i) (Diff j) Keep = if L.null (filterReflect i) && L.null j then Keep else Diff (PTBRef (filterReflect i) j [])
-        merge Keep (Diff i) Keep = Diff $ PTBRef [] i []
-        merge _ Keep (Diff i) = Diff $ PTBRef [] [] i
-        merge Keep  (Diff i) (Diff j) = Diff $ PTBRef []  i j
+        merge (Diff i) (Diff j) (Diff k) = if M.null (filterReflect i) && M.null j then Keep else Diff (PTBRef (filterReflect i) j k)
+        merge (Diff i) (Diff j) Keep = if M.null (filterReflect i) && M.null j then Keep else Diff (PTBRef (filterReflect i) j mempty)
+        merge Keep (Diff i) Keep = Diff $ PTBRef mempty i mempty
+        merge _ Keep (Diff i) = Diff $ PTBRef mempty mempty i
+        merge Keep  (Diff i) (Diff j) = Diff $ PTBRef mempty  i j
         merge _ Keep Keep = Keep
         merge _ Delete _ = Delete
         merge Delete _ _ = Delete
@@ -1550,8 +1553,10 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel fkre
   where
     liftRelation (Rel k (AnyOp i) t) = Rel k i t
     liftRelation o = o
-    replaceNonInj = (\(i,j) -> (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ join . fmap ( maybe Keep (\m -> Diff $ PFK rel [m] (patchChange m )).L.find ((== S.singleton (_relOrigin v)) .  relOutputSet . index) .  nonRefPatch) <$> fst j )<$> relUnComp i ) <$> M.toList nonInjRefs
-      where patchChange (PAttr i k ) = fmap (const []) k
+    replaceNonInj = (\(i,j) -> 
+      (\v -> (Many [(IProd Nothing (_relOrigin v))],) $ 
+        join . fmap ( maybe Keep (\m -> Diff $ PFK rel (kvsingleton m) (patchChange m )).L.find ((== S.singleton (_relOrigin v)) .  relOutputSet . index) .  unkvlistp .  nonRefPatch) <$> fst j )<$> relUnComp i ) <$> M.toList nonInjRefs
+      where patchChange (PAttr i k ) = fmap (const mempty) k
     mergeOrCreate (Just i) j = (mergeRef i <$> j) <|> Just i
     mergeOrCreate Nothing j =  mergeRef emptyFKT <$> j
     def KArray  = ArrayTB1 . pure 

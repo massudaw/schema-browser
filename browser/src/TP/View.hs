@@ -245,7 +245,7 @@ makePatch
     -> ( Key, Either (Interval UTCTime) UTCTime)
     -> TBIdx Key Showable
 makePatch zone (k,a) =
-  PAttr k <$> (typ (keyType k) a)
+  kvlistp $ PAttr k <$> (typ (keyType k) a)
   where
     typ (Primitive l a ) =  ty l
       where

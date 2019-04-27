@@ -38,6 +38,7 @@ module Types.Patch
   , checkPatch
   , indexFilterP
   , indexFilterR
+  ,kvsingleton
   , indexFilterPatch
   , PTBRef(..)
   --
@@ -47,6 +48,8 @@ module Types.Patch
   , unAtom
   , unLeftItensP
   --
+  , unkvlistp
+  , kvlistp
   , recoverPFK
   , liftPFK
   , PathFTB(..)
@@ -57,6 +60,7 @@ module Types.Patch
   , FPathAttr(..)
   , TBIdx
   , FTBIdx
+  , nonEmptyM
   , firstPatch
   , firstPatchAttr
   , PatchConstr
@@ -179,7 +183,10 @@ instance Patch b => Patch (Maybe b) where
 data PTBRef k s = PTBRef { sourcePRef :: TBIdx k s , targetPRef :: TBIdx k s , targetPRefEdit :: TBIdx k s }  deriving(Show,Eq,Ord,Functor,Generic)
 
 nonRefPatch (PFK rel i j) = i
-nonRefPatch i = [i]
+nonRefPatch i = Map.singleton (index i )  (content i)
+
+kvsingleton :: Address a => a -> Map (Idx a) (Content a)
+kvsingleton i = Map.singleton (index i)  (content i)
 
 data PathFTB a
   = PAtom a
@@ -275,7 +282,7 @@ instance (Ord k, Compact v, Show v, Show k, Patch v, Ord v, v ~ Index v) =>
       else [F.foldl' ops DropRow l]
     where
       ops (CreateRow i) (PatchRow j) = CreateRow $ apply i j
-      ops (PatchRow i) (PatchRow j) = PatchRow $ (compact $ i ++ j)
+      ops (PatchRow i) (PatchRow j) = PatchRow $ fromMaybe mempty $ safeHead $ compact  [i,j]
       ops i (CreateRow j) = CreateRow j
       ops i DropRow = DropRow
       ops DropRow j = j
@@ -288,7 +295,7 @@ instance (Ord k, Patch v, Compact v, Show v, Show k, v ~ Index v, Ord v) =>
       flipop i =
         (\(i, j) -> rebuild (concat j) i) <$> groupSplit2 content index i
       op i =
-        (uncurry rebuild) . fmap (head . compact) <$>
+        (uncurry rebuild) . fmap (justError "missing compact" . safeHead . compact) <$>
         groupSplit2 index content i
 
 instance Address (RowPatch k v) where
@@ -300,10 +307,9 @@ instance Address (RowPatch k v) where
   content (BatchPatch _ i ) = i
   rebuild i j = if L.length i > 1 then BatchPatch  i j else RowPatch (head i, j)
 
-type DeltaFKV k a = Map (RelSort k) [PValue k a]
 
 type TBIdx k a = FTBIdx k PathFTB a
-type FTBIdx k f a = [FPathAttr k f a]
+type FTBIdx k f a = Map (Rel k) (FPValue k f a)
 type PathAttr k a = FPathAttr k PathFTB a
 
 data FPathAttr k f a
@@ -315,7 +321,7 @@ data FPathAttr k f a
   | PInline k
         (f (FTBIdx k f a))
   | PFK [Rel k]
-        [FPathAttr k f a]
+        (FTBIdx k f a)
         (f (FTBIdx k f a))
   deriving ( Functor, Generic)
 
@@ -370,14 +376,10 @@ indexFilterPatch ::
   -> TBIdx k a
   -> Bool
 indexFilterPatch (ixl@(Inline _), ops) lo =
-  case L.find ((ixl==) . index) lo
-  -- case Map.lookup (Set.singleton (Inline l)) lo of
-        of
+  case Map.lookup ixl lo of
     Just i ->
-      case i
-        --  PPrim f -> G.match op (Right $ (create f :: FTB Showable))
-            of
-        PAttr k f -> matching f
+      case i of
+        PPrim f -> matching f 
         i -> True
     Nothing -> False 
   where
@@ -386,13 +388,11 @@ indexFilterPatch (ixl@(Inline _), ops) lo =
     matching f = G.match (G.getOp ixl ops) (Right (create' f))
 
 indexFilterPatch (RelAccess l n, op) lo =
-  case L.find ((l ==) . index) lo of
+  case Map.lookup l lo of
     Just i ->
       case i of
-        PInline k f -> L.any (indexFilterPatchU (n, op)) f
-        PFK _ _ f -> L.any (indexFilterPatchU (n, op)) f
-        -- PRef  f -> L.any (indexFilterPatchU (n,op)) f
-        -- PRel _   f -> L.any (indexFilterPatchU (n,op)) f
+        PRef  f -> L.any (indexFilterPatchU (n,op)) f
+        PRel _   f -> L.any (indexFilterPatchU (n,op)) f
         i -> True
     Nothing -> True
 indexFilterPatch i o = error (show (i, o))
@@ -425,7 +425,7 @@ unLeftItensP = unLeftTB
     unLeftTB (PInline na l) = PInline (unKOptional na) <$> unSOptionalP l
     unLeftTB (PFK rel ifk tb) =
       (\ik -> PFK (Le.over relOri unKOptional <$> rel) ik) <$>
-      traverse unLeftTB ifk <*>
+      Map.traverseWithKey (\k -> fmap content . unLeftTB. rebuild k ) ifk <*>
       unSOptionalP tb
     unLeftTB i = error (show i)
 
@@ -496,7 +496,7 @@ instance (Show a, Compact a) => Compact (PathFTB a) where
   compact = maybeToList . compactPatches
 
 instance (Show k, Show a, Compact a, Ord k) => Compact (TBIdx k a) where
-  compact i = L.transpose $ compact . snd <$> groupSplit2 index id (join i)
+  compact = pure . F.foldl' (Map.unionWith (\i j -> justError ("no item " ++ show i )$ safeHead (compact [i,j] )))  Map.empty
 
 instance Compact Showable where
   compact = id
@@ -505,7 +505,7 @@ instance PatchConstr k a => Patch (AValue k a) where
   type Index (AValue k a) = PValue k (Index a)
   diff (APrim i) (APrim j) = PPrim <$> diff i j  
   diff (ARef i) (ARef j)  = PRef <$> diff i j  
-  diff (ARel i l) (ARel j m) = PRel <$> (diff i j <|> pure [] ) <*>   diff l m
+  diff (ARel i l) (ARel j m) = PRel <$> (diff i j <|> pure mempty) <*>   diff l m
   applyUndo (APrim i) (PPrim j) = bimap APrim PPrim <$> applyUndo  i j 
   applyUndo (ARef i) (PRef j) = bimap ARef PRef <$> applyUndo  i j 
   applyUndo (ARel i j) (PRel l m) = (\(a,b) (c,d) -> (ARel a c , PRel b d)) <$> applyUndo  i l  <*> applyUndo j m 
@@ -525,9 +525,9 @@ instance PatchConstr k a => Patch (TB k a) where
   patch = patchAttr
 
 
-instance (Show a, Show k ,Ord k) => Address (PathAttr k a) where
-  type Idx (PathAttr k a) = Rel k
-  type Content (PathAttr k a ) = PValue k a
+instance Ord k => Address (FPathAttr k f a) where
+  type Idx (FPathAttr k f a) = Rel k
+  type Content (FPathAttr k f a ) = FPValue k f a
   index = pattrKey
   content (PAttr _ i ) =  PPrim i 
   content (PFun _ _ i ) =  PPrim i 
@@ -538,7 +538,7 @@ instance (Show a, Show k ,Ord k) => Address (PathAttr k a) where
   rebuild (Inline i) (PRef k ) =  PInline i k
   rebuild (RelComposite l) (PRel i k ) =  PFK l i k
   rebuild r@(Rel _ _ _ ) (PRel i k ) =  PFK [r] i k
-  rebuild i j = error ("missing pattern on rebuild" <> show (i,j))
+  -- rebuild i j = error ("missing pattern on rebuild" <> show (i,j))
 
 instance (Ord k) => Address (TB k a) where
   type Idx (TB k a) = Rel k
@@ -593,7 +593,7 @@ instance (Monoid a, Monoid b,Compact a , Compact b) => Compact (a,b) where
 instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
   compact i =  zipWith3 PTBRef f (defEmpty s)  (defEmpty t)
     where
-      defEmpty = maybe (pure []) id . nonEmpty
+      defEmpty = maybe (pure mempty) id . nonEmpty
       f = compact (sourcePRef <$> i)
       s = compact (targetPRef <$> i)
       t = compact (targetPRefEdit <$> i)
@@ -601,15 +601,15 @@ instance (Ord a,Show a,Show b,Compact b) => Compact (PTBRef a b) where
 instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = PTBRef Key Showable
   diff (TBRef (i, j)) (TBRef (k, l) )=
-    (PTBRef <$> dref <*> dtb <*> pure []) <|> (PTBRef <$> dref <*> pure [] <*> pure []) <|>
-    (PTBRef <$> pure [] <*> pure [] <*> dtb )
+    (PTBRef <$> dref <*> dtb <*> pure mempty) <|> (PTBRef <$> dref <*> pure mempty <*> pure mempty) <|>
+    (PTBRef <$> pure mempty <*> pure mempty <*> dtb )
     where
       dref = diff i k
       dtb = diff j l
-  patch (TBRef (i, j)) = PTBRef (patch i) (patch j) []
+  patch (TBRef (i, j)) = PTBRef (patch i) (patch j) mempty
   applyUndo (TBRef (i, j)) (PTBRef k l e) = do
-    (s,su) <- applyUndo i k <|> Right (i,[])
-    (t,tu) <- applyUndo j l <|> Right (j,[])
+    (s,su) <- applyUndo i k <|> Right (i,mempty)
+    (t,tu) <- applyUndo j l <|> Right (j,mempty)
     (t',tu') <- applyUndo t e <|> Right (t,tu)
     return (TBRef (s,t'),PTBRef su tu tu')
   createIfChange (PTBRef i j k ) = (do
@@ -647,6 +647,8 @@ data FPValue k f a
 deriving instance (Eq k , Eq a ) => Eq (PValue k a) 
 deriving instance (Ord k , Ord a ) => Ord (PValue k a) 
 deriving instance (Show k , Show a ) => Show (PValue k a) 
+instance (Binary k , Binary a ) => Binary (PValue k a) 
+instance (NFData k , NFData a ) => NFData (PValue k a) 
 
 patchvalue (PAttr _ v) = v
 patchvalue (PFun _ _ v) = v
@@ -667,9 +669,12 @@ instance (NFData k) => NFData (PathFTB k)
 
 instance (Binary k) => Binary (PathFTB k)
 
+traverseWithAttr f = Map.traverseWithKey (\k -> fmap content . f . rebuild k )
+mapWithAttr f = Map.mapWithKey (\k -> content . f . rebuild k )
+
 firstPatch ::
      (Ord a, Ord k, Ord (Index a), Ord j) => (k -> j) -> TBIdx k a -> TBIdx j a
-firstPatch f k = fmap (firstPatchAttr f) k
+firstPatch f k = Map.mapKeys (fmap f) $ mapWithAttr (firstPatchAttr f ) k
 
 firstPatchAttr ::
      (Ord k, Ord j, Ord a, Ord (Index a))
@@ -680,18 +685,23 @@ firstPatchAttr f (PAttr k a) = PAttr (f k) a
 firstPatchAttr f (PFun k rel a) = PFun (f k) (fmap (fmap f) <$> rel) a
 firstPatchAttr f (PInline k a) = PInline (f k) (fmap (firstPatch f) a)
 firstPatchAttr f (PFK rel k b) =
-  PFK (fmap (fmap f) rel) (fmap (firstPatchAttr f) k) (fmap (firstPatch f) $ b)
+  PFK (fmap (fmap f) rel) (firstPatch f k) (fmap (firstPatch f) $ b)
+
+nonEmptyM i | Map.null i = Nothing
+nonEmptyM i = Just i
+
 
 instance (Ord k ,Compact v,Show k ,Show v) => Compact (PValue k v) where
+  compact [] = []
   compact  l = [F.foldl' merge  (head l) (tail l)]
     where 
       merge (PPrim i) (PPrim j) = head $ PPrim <$> compact [i ,j]
       merge (PRef i) (PRef j) = head $ PRef <$> compact [i ,j]
-      merge (PRel i k) (PRel j l) = head $ PRel (concat $ compact [i ,j] ) <$> (compact [k ,l])
+      merge (PRel i k) (PRel j l) = head $ PRel (head $ compact [i ,j] ) <$> (compact [k ,l])
 
 compactAttr ::
      (Show a, Show b, Compact b, Ord a) => [PathAttr a b] -> [PathAttr a b]
-compactAttr i = (uncurry rebuild . fmap (head . compact)) <$>  groupSplit2 index content  i
+compactAttr i = (uncurry rebuild . fmap (justError "missing compact" . safeHead . compact)) <$>  groupSplit2 index content  i
 
 unPAtom (PAtom i) = i
 
@@ -717,7 +727,8 @@ compactPatches i =
 
 
 patchTB1 :: PatchConstr k a => TBData k a -> TBIdx k (Index a)
-patchTB1 k = patchAttr <$> unkvlist k
+patchTB1 k = kvlistp $ patchAttr <$> unkvlist k
+
 
 difftable ::
      (PatchConstr k a, Show a, Show k)
@@ -725,31 +736,31 @@ difftable ::
   -> TBData k a
   -> Maybe (Index (TBData k a))
 difftable v o =
-  if L.null attrs
+  if Map.null attrs
     then Nothing
     else Just attrs
   where
-    attrs = uncurry rebuild <$> (catMaybes $ sequenceA <$> (mergeKVWith diff (Just . patch) v o))
+    attrs = Map.fromList $ (catMaybes $ sequenceA <$> (mergeKVWith diff (Just . patch) v o))
 
-createTB1 :: PatchConstr d a => (TBIdx d (Index a)) -> Maybe (TBData d a)
+createTB1 :: PatchConstr d a => TBIdx d (Index a) -> Maybe (TBData d a)
 createTB1 k =
   kvlist <$>
   nonEmpty
     (catMaybes $
      fmap
-       createAttrChange
-       (concat $
-        maybe [] id . fmap compactAttr . nonEmpty . snd <$>
-        groupSplit2 index id k))
+       createAttrChange (unkvlistp k ))
 
-pattrKey :: Ord k => PathAttr k t -> Rel k
+pattrKey :: Ord k => FPathAttr k f t -> Rel k
 pattrKey (PAttr s _) = Inline s
 pattrKey (PFun s l _) = RelFun (Inline s) (fst l) (snd l)
 pattrKey (PInline s _) =  Inline s
 pattrKey (PFK s _ _) = relComp s
 
-kvlistp :: (Ord (Idx a) , Monoid (Content a)) => Address a => [a] -> Map (Idx a) (Content a)
-kvlistp v = Map.fromListWith mappend (fmap (\i -> (index i,content i )) v )
+kvlistp :: (Ord (Idx a) ,Compact (Content a)) => Address a => [a] -> Map (Idx a) (Content a)
+kvlistp v = Map.fromListWith (\i j -> justError "missing compact" $ safeHead (compact [i,j]))  (fmap (\i -> (index i,content i )) v )
+
+unkvlistp :: (Ord (Idx a) ,Address a) => Map (Idx a) (Content a) -> [a] 
+unkvlistp i = fmap (uncurry rebuild) . Map.toList $  i
 
 
 applyRecordChange ::
@@ -757,16 +768,17 @@ applyRecordChange ::
   => KV d a
   -> TBIdx d (Index a)
   -> Either String (KV d a, TBIdx d (Index a))
-applyRecordChange i [] = Right (i, [])
+applyRecordChange i l | Map.null l  = Right (i, mempty)
 applyRecordChange v k =
   add . swap <$> getCompose (traverseKVWith editAValue v)
   where
+    -- editAValue :: Rel d  -> AValue d a  ->  Compose (Either String)  ((,) (TBIdx d a )) ( AValue d a)
     editAValue key vi =
-        let edits = filter ((key ==). index) k
-        in Compose . fmap (swap . fmap (fmap (rebuild key))) $ foldUndo vi (content <$> edits)
+        let edits = Map.lookup key k
+        in Compose . fmap (swap. fmap (maybe mempty (Map.singleton key ). safeHead)) $ foldUndo vi (maybeToList edits)
     add (v, p) =
       (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
-        filter (isNothing . flip kvLookup v . index) k
+        filter (isNothing . flip kvLookup v . index) (unkvlistp k)
       , p)
 
 patchSetE i
@@ -814,24 +826,21 @@ diffAttr (Fun k rel i) (Fun l rel2 m) = fmap (PFun k rel) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k) (diff i l)
 diffAttr (FKT k _ i) (FKT m rel b) =
   PFK rel <$>
-  (Just $
-   catMaybes $
-   F.toList $
-     Map.intersectionWith (\i j -> diffAttr (i) (j)) (unKV k) (unKV m)) <*>
+  (Just $ fromMaybe mempty $ diff k m ) <*>
   diff i b
 
 patchAttr :: PatchConstr k a => TB k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k (patchFTB patch v)
 patchAttr a@(Fun k rel v) = PFun k rel (patchFTB patch v)
 patchAttr a@(IT k v) = PInline k (patchFTB patchTB1 v)
-patchAttr a@(FKT k rel v) = PFK rel (patchAttr <$> unkvlist k) (patch v)
+patchAttr a@(FKT k rel v) = PFK rel (kvlistp $ patchAttr <$> unkvlist k) (patch v)
 
 createAttrChange :: PatchConstr k a => PathAttr k (Index a) -> Maybe (TB k a)
 createAttrChange (PAttr k s) = Attr k <$> createIfChange s
 createAttrChange (PFun k rel s) = Fun k rel <$> createIfChange s
 createAttrChange (PInline k s) = IT k <$> createIfChange s
 createAttrChange (PFK rel k b) =
-  flip FKT rel <$> (kvlist <$> traverse createAttrChange k) <*> createIfChange b
+  flip FKT rel <$> createIfChange k <*> createIfChange b
 
 diffShowable ::
      (Show a, Ord a, Patch a) => FTB a -> FTB a -> Maybe (PathFTB (Index a))
@@ -1061,13 +1070,13 @@ liftPFK (PFK rel l i) = liftPRel l rel i
 
 liftPRel ::
      (Show b, Show k, Ord k)
-  => [PathAttr k b]
+  => TBIdx k b
   -> [Rel k]
   -> PathFTB (TBIdx k b)
   -> PathFTB (PTBRef k b)
-liftPRel l rel f = liftA3 PTBRef (F.foldl' (flip mergePFK) (PAtom []) rels) f (pure  [])
+liftPRel l rel f = liftA3 PTBRef (F.foldl' (flip mergePFK) (PAtom mempty) rels) f (pure  mempty)
   where
-    rels = catMaybes $ findPRel l <$> rel
+    rels = catMaybes  $ findPRel l <$> rel
 
 filterPFK f (PatchSet l )  = PatchSet . Non.fromList <$> nonEmpty (Non.filter (isJust . filterPFK f) l)
 filterPFK f (POpt l) = Just . POpt. join $ filterPFK f <$> l
@@ -1079,13 +1088,13 @@ recoverRel ::
      Eq k => PathFTB ([b], TBIdx k b) -> ([PathFTB b], PathFTB (TBIdx k b))
 recoverRel i = (getZipList $ sequenceA $ ZipList . fst <$> i, snd <$> i)
 
-mergePFK :: Show a => PathFTB a -> PathFTB [a] -> PathFTB [a]
+mergePFK :: (Monoid a , Show a) => PathFTB a -> PathFTB a -> PathFTB a
 mergePFK (POpt i) (POpt j) = POpt $ mergePFK <$> i <*> j
 mergePFK (PatchSet i) (PatchSet j) = PatchSet $ Non.zipWith mergePFK i j
 mergePFK (PIdx ixi i) (PIdx ixj j)
   | ixi == ixj = PIdx ixi $ mergePFK <$> i <*> j
   | otherwise = error ("wrong idx: " ++ show (ixi, ixj))
-mergePFK (PAtom i) (PAtom l) = PAtom (i : l)
+mergePFK (PAtom i) (PAtom l) = PAtom (mappend i  l)
 mergePFK (POpt i) j = POpt $ flip mergePFK j <$> i
 mergePFK j (POpt i) = POpt $ mergePFK j <$> i
 mergePFK (PatchSet j) i = PatchSet $ flip mergePFK i <$> j
@@ -1094,8 +1103,8 @@ mergePFK (PIdx ix i) (PAtom l) = PIdx ix (flip mergePFK (PAtom l) <$> i)
 mergePFK i j = error (show (i, j))
 
 findPRel l (Rel k op j) = do
-  PAttr k v <- L.find (\(PAttr i v) -> i == _relOrigin k) l
-  return $ fmap (PAttr k . PAtom) v
+  PPrim v <- Map.lookup (Inline (_relOrigin k)) l
+  return $ Map.singleton (Inline $ _relOrigin k) . PPrim . PAtom <$>  v
 
 recoverPFK ::
      [Key]
@@ -1103,13 +1112,12 @@ recoverPFK ::
   -> PathFTB (PTBRef Key Showable)
   -> Maybe (PathAttr Key Showable)
 recoverPFK ori rel i =
-  PFK rel
-    (catMaybes $
+  (PFK rel
+    (Map.fromList . catMaybes $ 
      (\k ->
-        PAttr k <$>
-        (fmap join .
-         traverse
-           (fmap patchvalue .
-            L.find ((== Inline k) . index) . sourcePRef) $
-              i)) <$> ori) <$>
-      (fmap (\v -> targetPRef  v <> targetPRefEdit v) <$>  (filterPFK  ( \i -> not $ L.null $ targetPRef i <> targetPRefEdit i  ) i))
+       (Inline k,)  <$>
+        (fmap (PPrim . join) .
+         traverse (fmap pprim . Map.lookup (Inline k) . sourcePRef) $ i)) <$> ori) 
+      
+       ) <$> (fmap (\v -> fromMaybe mempty $ safeHead $ compact [targetPRef v , targetPRefEdit v ]) <$>  
+        (filterPFK  ( \i -> maybe False (not .  Map.null)  . safeHead$ compact [targetPRef i , targetPRefEdit i ] ) i))

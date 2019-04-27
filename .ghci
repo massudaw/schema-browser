@@ -1,3 +1,1 @@
-:set -fwarn-unused-imports
-:set args localhost 5439 incendio postgres jacapodre incendio 
-:set -j8
+:set args localhost 5432 incendio postgres jacapodre 

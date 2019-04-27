@@ -358,7 +358,7 @@ siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
       let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       row <- act (const ask )-< ()
-      returnA -< fmap ((\(TB1 (STime (STimestamp t))) -> (\v-> [PAttr "aproval_date" v]) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
+      returnA -< fmap (kvlistp . (\(TB1 (STime (STimestamp t))) -> (\v-> [PAttr "aproval_date" v]) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
 
 varM i =  fmap (BS.pack . renderShowable )  <$>  idxM i
 
@@ -391,7 +391,8 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
         let ao  (bv,taxa) =  kvlist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
             iat bv = IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ NonS.fromList $ reverse $ fmap convertAndamento bv)
-        returnA -< (\i -> [PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] []   (POpt $ Just $ PAtom $ patch i)]) .ao <$> b) -< cpf
+        returnA -< 
+            (\i -> kvlistp $ [PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] mempty   (POpt $ Just $ PAtom $ patch i)]) .ao <$> b) -< cpf
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
@@ -420,9 +421,9 @@ gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
                   let
                     total :: Int
                     total = length parcelas
-                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 . Just . ArrayTB1 $  NonS.zipWith (\valorParcela ix -> TB1 $ kvlist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (NonS.fromList [0 .. total]))
+                    pagamento = PFK [Rel "pagamentos" Equals "id_payment"] mempty (patch $ LeftTB1 . Just . ArrayTB1 $  NonS.zipWith (\valorParcela ix -> TB1 $ kvlist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ]) parcelas (NonS.fromList [0 .. total]))
                   returnA -<  pagamento ) -< par
-              returnA -<  Just [pg ]
+              returnA -<  Just (kvsingleton pg )
 
 pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxK "inicio"-< ()
@@ -571,7 +572,12 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)]
+        returnA -< Just 
+              (kvlistp [ PFK 
+                  [Rel "ofx" Equals "file_name" ] 
+                  (kvlistp $ [PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) 
+                  (POpt $ Just $ PIdx ix $ Just $ PAtom $ 
+                    (kvlistp $ patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" date])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -590,11 +596,11 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
 
       b <- act (\(TB1 (SBinary i )) -> liftIO . gpx $ BS.unpack i ) -< fn
       let ao :: Index (FTB (KV Text Showable))
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom .  fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom .  kvlistp . fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
           ref :: [TB Text Showable]
           ref = [uncurry Attr ("samples",ArrayTB1 $ NonS.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text Showable))
-          tbst =  Just (  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
+          tbst =  Just (kvlistp [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (kvlistp $ fmap patch ref) ao])
       returnA -< tbst
 
 
@@ -610,7 +616,7 @@ delayedDate = FPlugins "Juros Atraso" "transactions" (DiffPurePlugin url)
       m <- idxK "multa"  -< t
       j <- idxK "juros"  -< t
       odxR "multa_real" -< ()
-      returnA -< Just $ [PAttr "multa_real" (POpt . Just . patch $ a*(1 + m)*(1 + j)^(fromIntegral delta) -a )]
+      returnA -< Just . kvlistp $ [PAttr "multa_real" (POpt . Just . patch $ a*(1 + m)*(1 + j)^(fromIntegral delta) -a )]
 
 
 
@@ -621,7 +627,7 @@ jurosMulta = FPlugins "Valor Real" "transactions" $ DiffPurePlugin url
       d <- idxM "desconto" -< t
       m <- idxM "multa_real" -< t
       odxR "valor_real" -< ()
-      returnA -< Just $ [PAttr "valor_real" (POpt . Just $ patch $ fn - fromMaybe 0 d + fromMaybe 0 m)]
+      returnA -< Just . kvlistp $ [PAttr "valor_real" (POpt . Just $ patch $ fn - fromMaybe 0 d + fromMaybe 0 m)]
 
 importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
   where
@@ -652,11 +658,11 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
         ) -< t
       b <- act ofx -< (,) fn i
       let ao :: Index (FTB (KV Text Showable))
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch (fromJust (findFK ["account" ] row )):) <$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . kvlistp $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch (fromJust (findFK ["account" ] row )):) <$> b)
           ref :: [TB Text Showable]
           ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . NonS.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap (unSSerial . _tbattr) . L.find ((Inline "fitid"==). keyattr) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: Maybe (TBIdx Text Showable)
-          tbst = Just [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
+          tbst = Just . kvlistp $[PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (kvlistp $ fmap patch ref) ao]
 
       returnA -< tbst
     ofx (TB1 (SText i),TB1 (SBinary r))
@@ -677,7 +683,7 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ DiffIOPlugin url
                                returnA -< (, ) n  p  ) -< t
       b <- act (\(i, (j, a)) -> liftIO$ prefeituraNotaXML j a i ) -< (,) i r
       let ao =  Just [PAttr "nota_xml" (POpt $ fmap (POpt . Just .PAtom)  b)]
-      returnA -< ao
+      returnA -< fmap kvlistp ao
 
 checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url
   where
@@ -778,7 +784,7 @@ costPlugins  = FPlugins pname tname $ StatefullPlugin
       odxR "trust" -< ()
       odxR "progress" -< ()
       odxR "duration" -< ()
-      returnA -< (\v -> [ PAttr "cost" (PAtom . SDouble $ realToFrac (cost v))
+      returnA -< (\v -> kvlistp [ PAttr "cost" (PAtom . SDouble $ realToFrac (cost v))
                      , PAttr "trust" (PAtom . SDouble $ realToFrac (trust v))
                      , PAttr "progress" (PAtom . SDouble $ realToFrac (progress v))
                      , PAttr "duration" (PAtom . SDouble $ realToFrac (duration v))

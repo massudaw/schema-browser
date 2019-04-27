@@ -7,6 +7,7 @@ import Query
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 import Types.Patch
+import Debug.Trace
 import Plugins (plugList)
 import Plugins.Schema
 import Poller
@@ -57,7 +58,7 @@ main = do
   --  (ServerConfig <$> join (readMay <$> sp) <*> sh)
   print "Load GUI Server"
   let initGUI = do
-        RowPatch (ix,CreateRow c) <- addClientLogin metas
+        RowPatch (ix,CreateRow c) <- fmap traceShowId $ addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
                (\(Idex i) -> F.toList i) ix
         liftIO $ putStrLn $ "Initialize Client: " ++ show i

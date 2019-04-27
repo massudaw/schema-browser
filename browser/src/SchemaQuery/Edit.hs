@@ -130,12 +130,12 @@ noEdit k1 = trazipWithKVP (tbEdit k1)
 
 trazipWithKVP ::  (Column Key Showable -> Index (Column Key Showable) -> TransactionM (Index (Column Key Showable)) )
               -> KV Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
-trazipWithKVP f v j = concat <$> traverse editAValue (unkvlist v)
+trazipWithKVP f v j = kvlistp . concat <$> traverse editAValue (unkvlist v)
   where
     editAValue vi =
-        let edits = L.find ((key ==). index) j 
+        let edits = M.lookup key  j 
             key = index vi
-        in maybe (return []) (fmap pure <$> f vi ) edits
+        in maybe (return mempty) (fmap pure <$> f vi . rebuild key ) edits
 
 
 fullDiffEdit :: KVMetadata Key -> TBData Key Showable -> TBIdx Key Showable -> TransactionM (TBIdx Key Showable)
@@ -229,8 +229,8 @@ tbInsertEdit m f@(FKT pk rel2 t2) = do
 tbRefFun :: [Rel Key ] -> RelOperations (TBRef Key Showable)
 tbRefFun rel2 
   = (snd.unTBRef
-    ,(\(PTBRef i j k)  -> compact (j <> k) )
-    ,(\i -> PTBRef (maybe [] patch (reflectFK rel2 =<< createIfChange (i :: TBIdx Key Showable) :: Maybe (TBData Key Showable)) :: TBIdx Key Showable) i [])
+    ,(\(PTBRef i j k)  -> head $ compact [j ,k] )
+    ,(\i -> PTBRef (maybe mempty patch (reflectFK rel2 =<< createIfChange (i :: TBIdx Key Showable) :: Maybe (TBData Key Showable)) :: TBIdx Key Showable) i mempty)
     ,(\tb -> TBRef (fromMaybe (kvlist []) $ reflectFK rel2 tb,tb))
     ,fullDiffEdit
     ,recInsert)

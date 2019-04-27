@@ -200,7 +200,7 @@ joinPatch isLeft rel targetTable prefix evs (TableRep (m,sidxs,base)) =
           concat . fmap (\(p,_,i) -> M.toList p) $ G.projectIndex rel predIndex idx
         resScan idx =  -- traceShow ("resScan", predScanOut) $ 
           catMaybes $  (\i->  (G.getIndex m i,) <$>     G.checkPredId i predScanOut)  <$> {-G.filterRows predScanIn -}(G.toList idx)
-        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  [joinPathRelation isLeft rel t pattr]) ) <$> ts
+        convertPatch (pk,ts) = (\t -> RowPatch (pk ,PatchRow  (kvlistp [joinPathRelation isLeft rel t pattr])) ) <$> ts
     search idxM (RowPatch (Idex v, CreateRow _ )) = [] 
     search idxM (RowPatch (Idex v, DropRow )) = [] 
         
@@ -220,20 +220,20 @@ joinPathFTB i p =  go i
         matcher PIdOpt   = POpt . Just
     go (G.TipPath j) = PAtom (p j)
 
-joinPathRelation :: (Eq a,Show a) => Bool -> [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
+joinPathRelation :: (Compact a,Eq a,Show a) => Bool -> [Rel Key] -> G.AttributePath Key () -> TBIdx Key a -> PathAttr Key a
 joinPathRelation isLeft prel (G.PathForeign rel i) p 
   | prel == rel =
-      PFK prel [] (joinPathFTB i (const p)) 
+      PFK prel mempty (joinPathFTB i (const p)) 
   | otherwise   = 
-      PFK rel  [] (joinPathFTB i nested)
+      PFK rel  mempty (joinPathFTB i nested)
   where
     -- TODO: Remove  L.nub hack to fix duplication of patches 
-    nested  (Many i) =  L.nub $ flip (joinPathRelation isLeft prel) p <$> i
+    nested  (Many i) =  kvlistp $ L.nub $ flip (joinPathRelation isLeft prel) p <$> i
 joinPathRelation isLeft rel (G.PathInline r i) p = PInline r (joinPathFTB i  nested)
   where
     -- TODO: Remove L.nub hack to fix duplication of patches 
-    nested  (Many i) =  L.nub $ flip (joinPathRelation isLeft rel) p <$> i
-joinPathRelation isLeft rel (G.PathAttr i v) p   = PFK (relUnComp $ relLast (relComp rel)) [] ((if isLeft && not (isLeftTB1 v) then (POpt . Just) else id) $ joinPathFTB v (const p))
+    nested  (Many i) =  kvlistp $ L.nub $ flip (joinPathRelation isLeft rel) p <$> i
+joinPathRelation isLeft rel (G.PathAttr i v) p   = PFK (relUnComp $ relLast (relComp rel)) mempty ((if isLeft && not (isLeftTB1 v) then (POpt . Just) else id) $ joinPathFTB v (const p))
   where isLeftTB1 (G.NestedPath PIdOpt _ ) = True
         isLeftTB1 _ = False
 

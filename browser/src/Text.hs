@@ -97,8 +97,8 @@ instance (Show a, PrettyRender a) => PrettyRender (TBIndex a) where
 instance (Ord a,Show a, Show b, PrettyRender a , PrettyRender b) =>  PrettyRender (RowPatch a b) where
   render (RowPatch (ix,op)) = wrapBrackets "PK => " (render ix) <> render op
 
-renderRowPatch :: (PrettyRender b,Show a) => TBIdx a b-> [(Int,String)]
-renderRowPatch i =  concat $ renderPatch  <$> i
+renderRowPatch :: (PrettyRender b,Ord a,Show a) => TBIdx a b-> [(Int,String)]
+renderRowPatch i =  concat $ renderPatch  <$> unkvlistp i
 
 instance  (Ord a , Show a ,PrettyRender1 f, PrettyRender b) => PrettyRender (FKV a f b ) where
   render = renderTable
@@ -116,10 +116,10 @@ wrapBrackets i l
         next = L.filter ((==0).fst) l
 
 offset ix =  fmap (first (+ix))
-renderPatch :: (PrettyRender b ,Show a) => PathAttr a b ->  [(Int,String)]
+renderPatch :: (Ord a,PrettyRender b ,Show a) => PathAttr a b ->  [(Int,String)]
 renderPatch (PFK rel k v )
   = wrapBrackets  (L.intercalate " && " (fmap renderRel rel) ++ " => ")
-  ((concat $ renderPatch <$> k) 
+  ((renderRowPatch  k) 
   ++  offset 1 (render v))
 renderPatch (PAttr k v ) = wrapBrackets (show k ++ " => ") (render v) 
 renderPatch (PInline k v ) = wrapBrackets (show k ++ " => ") (render v) 
@@ -150,7 +150,7 @@ instance PrettyRender a => PrettyRender (FTB a) where
   render  = renderFTB render
 instance PrettyRender a => PrettyRender (PathFTB a) where
   render  = renderFTBPatch render
-instance (Show k ,PrettyRender a) => PrettyRender (TBIdx k a) where
+instance (Ord k ,Show k ,PrettyRender a) => PrettyRender (TBIdx k a) where
   render  = renderRowPatch 
 
 

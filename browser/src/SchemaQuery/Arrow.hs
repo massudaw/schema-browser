@@ -329,7 +329,7 @@ joinRelation
      -> Rel Key 
      -> G.GiST (TBIndex Showable) (KV Key Showable)
      -> TBData Key Showable
-     -> [PathAttr Key  Showable]
+     -> TBIdx Key  Showable
 joinRelation preinf join@(JoinV j l LeftJoin _ ) index amap =  do
     let
       origin = sourceTable preinf join 
@@ -343,12 +343,12 @@ joinRelation preinf join@(JoinV j l LeftJoin _ ) index amap =  do
             where targetRel = (L.sortOn (\ i -> L.elemIndex (simplifyRel $ _relTarget i) (fmap simplifyRel targetPK ))  i )
                   pk = G.getUnique targetRel (kvlist v)
 
-          indexTarget rel' v = Just . PFK  rel []. POpt $  indexContainer (findRef rel ) (checkLength v rel <$> liftOrigin rel (unkvlist (tableNonRef v)))
+          indexTarget rel' v = Just . PFK  rel mempty . POpt $  indexContainer (findRef rel ) (checkLength v rel <$> liftOrigin rel (unkvlist (tableNonRef v)))
             where rel = relUnComp  rel' 
                   checkLength tb rel v 
                     | L.length rel == L.length v = v
                     | otherwise = error $ "missing parameters : " ++ show  (rel,v,index,tb)
-      joined i = [ joinFK i]
+      joined i = kvsingleton ( joinFK i)
      in joined 
 
 
@@ -372,11 +372,11 @@ indexRelation
 indexRelation f (RelAccess (Inline key ) nt) r
  = do 
    let i = justError ("ref error: " <> show key <>  (ident . render $ r)) $ refLookup (Inline key) r
-   PInline key . fmap pure <$> indexContainer (indexRelation f nt) i
+   PInline key . fmap kvsingleton <$> indexContainer (indexRelation f nt) i
 indexRelation f n@(RelAccess nk nt )  r
  = do
    let i = justError ("rel error" <> show nk) $ relLookup nk r 
-   PFK (relUnComp nk) [] . fmap pure <$> indexContainer allRefs i
+   PFK (relUnComp nk) mempty . fmap kvsingleton <$> indexContainer allRefs i
   where
     allRefs (TBRef (i,v))=  indexRelation f nt v
 indexRelation f a  r

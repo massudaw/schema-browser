@@ -160,7 +160,7 @@ tableChooser  inf tables legendStyle tableFilter iniTables = do
   old <- ui $ accumT (sel0,S.empty)  diffSet
   ui $ onEventDyn
     (fmap ordPK . F.toList . snd <$> rumors old)
-    (traverse (transaction (meta inf) . patchFrom (lookMeta (meta inf) "ordering") . (,PatchRow incClick)))
+    (traverse (transaction (meta inf) . patchFrom (lookMeta (meta inf) "ordering") . (,PatchRow $ kvlistp incClick)))
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all, getElement filterInp] # set UI.style [("display","inline-flex")]

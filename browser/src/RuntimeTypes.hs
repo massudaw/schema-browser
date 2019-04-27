@@ -634,17 +634,17 @@ liftPatchRow inf t (k,PatchRow i) = (k,PatchRow $ liftPatch inf t i)
 liftPatchRow inf t (ix,CreateRow i) = (ix,CreateRow $ liftTable' inf t i)
 liftPatchRow inf t (ix,DropRow ) = (ix,DropRow   )
 
-liftPatch :: (Show a , a ~ Index a )=> InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
-liftPatch inf t  p =  fmap (liftPatchAttr inf t) p
+liftPatch :: (Compact a, Show a, a ~ Index a) => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
+liftPatch inf t  p =kvlistp $   fmap (liftPatchAttr inf t) (unkvlistp p)
 
 
-liftPatchAttr :: (Show a ,a ~ Index a) => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
+liftPatchAttr :: (Compact a, Show a ,a ~ Index a) => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
 liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
 liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (liftPatch inf tname2 <$>  e)
   where
     FKInlineTable _ (_,tname2) = justError ("cannot lift patch: "  ++ show (tname,p )) $ unRecRel <$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
     ta = lookTable inf tname
-liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
+liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (liftPatch inf tname pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
   where
     FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show ("liftPatchAttr",rel2 ,tname,rawFKS ta)) $ L.find (\r->  S.map (keyValue ._relOrigin ) (pathRelRel r) == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
     ta = lookTable inf tname
@@ -808,20 +808,20 @@ notException e =  if isJust eb || isJust es || isJust as then Nothing else Just 
 
 showFKText inf m v = L.take 50 . L.intercalate "," $  (renderShowable <$> allKVRec' inf m v)
 
-patchNoRef :: TBIdx k i -> TBIdx k i 
-patchNoRef l =  concat $ attrNoRef <$> l
+patchNoRef :: (Show i ,Show k ,Compact i, Ord k) =>  TBIdx k i -> TBIdx k i 
+patchNoRef l =  kvlistp $ concat $ attrNoRef <$> unkvlistp l
   where
-    attrNoRef (PFK _ l _ ) = l
-    attrNoRef (PInline i l ) = PInline i <$> (traverse (fmap pure. patchNoRef) l)
+    attrNoRef (PFK _ l _ ) = unkvlistp l
+    attrNoRef (PInline i l ) = [PInline i (fmap patchNoRef l)]
     attrNoRef (PFun _ _ _) = []
     attrNoRef i = [i]
 
-rowPatchNoRef :: Ord i => RowPatch i j -> Maybe (RowPatch i j)
+rowPatchNoRef :: (Show i , Compact j,Show j ,Ord i) => RowPatch i j -> Maybe (RowPatch i j)
 rowPatchNoRef (RowPatch (i,j )) = RowPatch . (i,) <$> rowOperationNoRef j
 rowPatchNoRef (BatchPatch i j ) = BatchPatch i <$> rowOperationNoRef j
 
-rowOperationNoRef :: Ord i => RowOperation i j -> Maybe (RowOperation i j)
-rowOperationNoRef (PatchRow j) = PatchRow <$> nonEmpty (patchNoRef j)
+rowOperationNoRef :: (Show i, Compact j ,Show j ,Ord i) => RowOperation i j -> Maybe (RowOperation i j)
+rowOperationNoRef (PatchRow j) = PatchRow <$> nonEmptyM (patchNoRef j)
 rowOperationNoRef (CreateRow j) = CreateRow <$> kvNonEmpty (tableNonRef j)
 rowOperationNoRef DropRow = Just DropRow 
 

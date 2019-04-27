@@ -49,7 +49,7 @@ defaultAttrs k = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (evaluateK
 
 -- TODO: Double check if FKT defaulting is correct
 defaultFKS inf prev (FKJoinTable i j )
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = Just $ PFK i  (catMaybes (defaultAttrs .  _relOrigin  <$> filter (not. (`S.member` prev) ._relOrigin) i)) (POpt Nothing)
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin) i = Just $ PFK i  (kvlistp $ catMaybes (defaultAttrs .  _relOrigin  <$> filter (not. (`S.member` prev) ._relOrigin) i)) (POpt Nothing)
   | otherwise  = Nothing
   where isRel Rel{} = True
         isRel _ = False
@@ -57,7 +57,7 @@ defaultFKS inf prev (FKInlineTable k i) =
   case _keyFunc $ keyType k of
     KOptional :_ -> Just (PInline k (POpt Nothing))
     KSerial :_ -> Just (PInline k (POpt Nothing))
-    [] -> PInline k . PAtom  <$> nonEmpty (defaultTableType rinf (lookTable rinf (snd i)))
+    [] -> PInline k . PAtom  <$> nonEmptyM (defaultTableType rinf (lookTable rinf (snd i)))
     _ ->  Nothing
   where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultFKS _ prev (FunctionField  k _ _ ) = defaultAttrs k
@@ -76,7 +76,7 @@ defaultTB inf prev (FKInlineTable k i) (IT _ l) = PInline k <$>  go (_keyFunc $ 
         case i of
           Just i -> POpt . Just <$> go xs i
           Nothing -> Just (POpt Nothing)
-    go  [] (TB1  v) = PAtom  <$> nonEmpty (defaultTableData rinf (lookTable rinf (snd i)) v)
+    go  [] (TB1  v) = PAtom  <$> nonEmptyM (defaultTableData rinf (lookTable rinf (snd i)) v)
     go  _  _ = Nothing
     rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultTB inf prev j@FKJoinTable {} _ = defaultFKS inf prev j
@@ -85,20 +85,20 @@ defaultTableData
   :: InformationSchemaKV Key Showable
      -> TableK (FKey (KType (Prim KPrim (T.Text, T.Text))))
      -> TBData Key Showable
-     -> [PathAttr (FKey (KType CorePrim)) Showable]
+     -> TBIdx (FKey (KType CorePrim)) Showable
 defaultTableData inf table v =
   let
     nonFKAttrs = nonFKS table
- in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (kvLookup (relComp $ pathRelRel ix) v)) (rawFKS table)
+ in kvlistp $ if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList  nonFKAttrs) (\pred ix -> maybe (defaultFKS inf pred ix) (defaultTB inf pred ix) (kvLookup (relComp $ pathRelRel ix) v)) (rawFKS table)
 
 defaultTableType
   :: InformationSchemaKV Key Showable
      -> TableK (FKey (KType (Prim KPrim (T.Text, T.Text))))
-     -> [PathAttr (FKey (KType CorePrim)) Showable]
+     -> TBIdx (FKey (KType CorePrim)) Showable
 defaultTableType inf table =
   let
     nonFKAttrs = nonFKS table
-  in if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList nonFKAttrs) (defaultFKS inf)  (rawFKS table)
+  in kvlistp $ if rawIsSum table then [] else catMaybes $ fmap defaultAttrs  nonFKAttrs <> foldTopologicaly (S.fromList nonFKAttrs) (defaultFKS inf)  (rawFKS table)
 
 nonFKS :: Table -> [Key]
 nonFKS table =  nonFKAttrs

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,GADTs #-}
+{-# LANGUAGE FlexibleContexts,FlexibleInstances,GADTs #-}
 module ClientAccess where
 
 import Control.Monad.Reader
@@ -65,7 +65,7 @@ addClientLogin inf =  transactionNoLog inf $ do
       let
         pt = [PAttr (lookKey inf "clients" "up_time") (PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))]
       transactionNoLog inf $
-        patchFrom m  (head $ index i,PatchRow pt)
+        patchFrom m  (head $ index i,PatchRow $ kvlistp pt)
       return ()
     return i
 
@@ -92,10 +92,15 @@ trackTable minf cid table six ix = do
     closeDynamic $ transactionNoLog minf $
       patchFrom mcli (mkPatch dpatch))
 
-atClient idClient =  (Idex [LeftTB1 . Just . num $ idClient],)
-atSchema  six v = PInline "selection" (POpt $ Just $ PIdx six $ Just$ PAtom v)
-atTable tix v = PInline "selection" (POpt $ Just $ PIdx tix $ Just$ PAtom v)
-atRow rix v = PInline "selection" (POpt $ Just $ PIdx rix $ Just$ PAtom v)
+
+atClient :: Int -> [PathAttr Text Showable] -> (TBIndex Showable, TBIdx Text Showable)
+atClient idClient =  (Idex [LeftTB1 . Just . num $ idClient],).kvlistp
+atSchema :: Int -> [PathAttr Text Showable] -> PathAttr Text Showable
+atSchema  six v = PInline "selection" (POpt $ Just $ PIdx six $ Just$ PAtom (kvlistp v))
+atTable :: Int -> [PathAttr Text Showable] -> PathAttr Text Showable
+atTable tix v = PInline "selection" (POpt $ Just $ PIdx tix $ Just$ PAtom (kvlistp v))
+atRow :: Int -> [PathAttr Text Showable] -> (PathAttr Text Showable)
+atRow rix v = PInline "selection" (POpt $ Just $ PIdx rix $ Just$ PAtom (kvlistp  v))
 
 removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 removeTable idClient now table  six tix = atClient idClient [atSchema six
@@ -104,11 +109,11 @@ removeTable idClient now table  six tix = atClient idClient [atSchema six
 addTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 addTable idClient now table  six tix
   = atClient idClient [atSchema six
-     [atTable tix (patch $ encodeT (ClientTableSelection (tableName table) (startTime now) []))]]
+     [atTable tix (unkvlistp . patch $ encodeT (ClientTableSelection (tableName table) (startTime now) mempty))]]
 
 
 addRow idClient now tdi six tix rix
-  =  atClient idClient [atSchema six [atTable tix [atRow rix $ patch (encodeT $ createRow now tdi)]]]
+  =  atClient idClient [atSchema six [atTable tix [atRow rix . unkvlistp $ patch (encodeT $ createRow now tdi)]]]
 removeRow idClient now six tix rix
   =  atClient idClient [atSchema six [atTable tix [atRow rix
             [PAttr "up_time" ( PInter False (Interval.Finite $ patch (time now),True ))]]]]
@@ -190,7 +195,7 @@ data ClientPK
 
 addSchema :: Int -> UTCTime -> InformationSchema -> Int -> (TBIndex Showable,TBIdx Text Showable)
 addSchema idClient now inf tix
-  = atClient idClient  [atSchema  tix (patch$
+  = atClient idClient  [atSchema  tix ( unkvlistp .patch$
        encodeT (ClientSchemaSelection (schemaId inf) (startTime now) []))]
 
 
