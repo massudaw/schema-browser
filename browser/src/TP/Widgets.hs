@@ -477,7 +477,7 @@ listBoxElEq eq list bitems bsel bdisplay = do
     iniList <- currentValue (facts bitems)
     selEv <- fmap Just <$> UI.selectionChange list
     let idxIni = lookupIndex iniList ini
-    selBh <- ui $ stepper  (traceShow (idxIni ,ini,iniList ) idxIni) selEv
+    selBh <- ui $ stepper  idxIni selEv
     let
         eindexes = (\l i-> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <#> tidings selBh selEv
     let

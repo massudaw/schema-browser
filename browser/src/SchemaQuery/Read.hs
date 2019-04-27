@@ -494,7 +494,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             Just i -> do
               liftIO . putStrLn $ "Load complement from existing page " <> show pageidx
                  -- <> "\n"<> ident (render  i )
-              readNew sq tbf 
+                 -- TODO: Investigate if we can optimize Read only complement
+              readNew sq tbf -- i 
             Nothing -> do
               -- Check if interval is inside the current interval in case is not complete
               if (sq  ==  G.size reso || G.size reso >= pageidx )
@@ -533,13 +534,13 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                       liftIO . putStrLn $ "New pagetoken but current table is complete  : " <> show (tableName table, sq, G.size reso, pageidx)
                       return ((max (G.size reso) sq,idx), (sidx,reso))
                 Just (_,(proj,_)) -> do
-                  if isJust (recComplement inf (tableMeta table) tbf fixed proj )
-                    then do
+                  case (recComplement inf (tableMeta table) tbf fixed proj ) of
+                    Just comp -> do
                       liftIO $ putStrLn $ "Existing token with remaining complement " <> show (tableName table, sq,G.size reso)
                       -- ++  maybe ""  (ident . render ) (recComplement inf (tableMeta table) tbf fixed proj )
                       -- TODO : Investigate if we can optimize just loading complements
-                      readNew sq tbf
-                    else do 
+                      readNew sq tbf 
+                    Nothing -> do 
                       liftIO . putStrLn $ "Existing token current table is complete: " <> show (tableName table, sq,G.size reso)
                       -- liftIO $ putStrLn $ "Old proj \n" ++ ( ident $ render  proj)
                       -- liftIO $ putStrLn $ "New proj \n" ++ ( ident $ render  tbf)
@@ -563,15 +564,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                 --readNew maxBound tbf
                 return ((G.size reso ,M.empty), (sidx,reso))
               False -> do
-                if L.length  complements  == 1
-                   then do
-                     liftIO $ putStrLn $ "Loading complement : " <> show (tableName table, G.size reso)
-                     -- TODO : Investigate if we can optimize just loading complements
-                     readNew maxBound tbf 
-                   -- TODO: Compute the max of complements for now just use all required
-                   else do
-                     liftIO $ putStrLn $ "Loading Not unique complement : " <> show (tableName table, G.size reso)
-                     readNew maxBound tbf
+                liftIO $ putStrLn $ "Loading not null complement : " <> show (tableName table, G.size reso)
+                readNew maxBound tbf -- (foldr1 kvMerge complements)
            else do
              liftIO $ putStrLn $ "Loading predicate: "  
                   <> renderPredicateWhere fixed 

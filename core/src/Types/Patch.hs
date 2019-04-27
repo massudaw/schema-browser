@@ -54,7 +54,9 @@ module Types.Patch
   , upperPatch
   , lowerPatch
   , PathAttr(..)
+  , FPathAttr(..)
   , TBIdx
+  , FTBIdx
   , firstPatch
   , firstPatchAttr
   , PatchConstr
@@ -63,6 +65,7 @@ module Types.Patch
   , RowOperation(..)
   , RowPatch(..)
   ) where
+
 import Control.DeepSeq
 import qualified Control.Lens as Le
 import Control.Monad.Reader
@@ -297,22 +300,28 @@ instance Address (RowPatch k v) where
   content (BatchPatch _ i ) = i
   rebuild i j = if L.length i > 1 then BatchPatch  i j else RowPatch (head i, j)
 
--- type TBIdx k a = Map (Set k) [PValue k a]
-type TBIdx k a = [PathAttr k a]
+type DeltaFKV k a = Map (RelSort k) [PValue k a]
 
-data PathAttr k a
+type TBIdx k a = FTBIdx k PathFTB a
+type FTBIdx k f a = [FPathAttr k f a]
+type PathAttr k a = FPathAttr k PathFTB a
+
+data FPathAttr k f a
   = PAttr k
-        (PathFTB a)
+        (f a)
   | PFun k
         (Expr, [Rel k])
-        (PathFTB a)
+        (f a)
   | PInline k
-        (PathFTB (TBIdx k a))
+        (f (FTBIdx k f a))
   | PFK [Rel k]
-        [PathAttr k a]
-        (PathFTB (TBIdx k a))
-  deriving (Eq, Ord, Show, Functor, Generic)
+        [FPathAttr k f a]
+        (f (FTBIdx k f a))
+  deriving ( Functor, Generic)
 
+deriving instance (Eq k , Eq a ) => Eq (PathAttr k a) 
+deriving instance (Ord k , Ord a ) => Ord (PathAttr k a) 
+deriving instance (Show k , Show a ) => Show (PathAttr k a) 
 
 patchEditor i
   | L.length i == 0 = Keep
@@ -626,13 +635,18 @@ type PatchConstr k a
 type PAttr k a = (Rel k, PValue k a)
 
 
+type PValue k a = FPValue k PathFTB a
 
-data PValue k a
-  = PPrim { pprim :: PathFTB a }
-  | PRel { prel :: TBIdx k a
-         , pref :: PathFTB (TBIdx k a) }
-  | PRef { pref :: PathFTB (TBIdx k a) }
-  deriving (Eq, Ord, Show, Functor, Generic)
+data FPValue k f a
+  = PPrim { pprim :: f a }
+  | PRel { prel :: FTBIdx k f a
+         , pref :: f (FTBIdx k f a) }
+  | PRef { pref :: f (FTBIdx k f a) }
+  deriving (Functor, Generic)
+
+deriving instance (Eq k , Eq a ) => Eq (PValue k a) 
+deriving instance (Ord k , Ord a ) => Ord (PValue k a) 
+deriving instance (Show k , Show a ) => Show (PValue k a) 
 
 patchvalue (PAttr _ v) = v
 patchvalue (PFun _ _ v) = v

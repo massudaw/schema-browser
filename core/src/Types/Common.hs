@@ -15,6 +15,7 @@ module Types.Common
   , TBF(..)
   , AValue(..)
   , FAValue(..)
+  , RelSort(..)
   , TBRef(..)
   , FKV(..)
   , _fkttable
@@ -75,6 +76,8 @@ module Types.Common
   , TBData
   , unKV
   , kvlist
+  ,kvMerge
+  ,kvUnion
   , kvlistMerge
   , kvkeys
   , kvToMap
@@ -97,7 +100,6 @@ module Types.Common
   , sortRels
   , sortValues
   , kvmap
-  , kattr
   , aattr
   , nonRefTB
   , tableNonRef
@@ -296,6 +298,12 @@ kvlist = KV . mapFromTBList
 
 kvlistMerge = KV .mapFromTBListMerge
 
+kvMerge :: (Applicative f, Ord k )=> FKV k f a -> FKV k f a -> FKV k f a
+kvMerge i j = kvlistMerge (unkvlist i ++ unkvlist j ) 
+
+kvUnion :: (Applicative f, Ord k )=> [FKV k f a] -> FKV k f a
+kvUnion i = kvlistMerge (concat $ unkvlist <$> i  ) 
+
 kvToMap :: Ord k => KV k a -> Map.Map (Rel k) (FTB a)
 kvToMap = fmap _aprim . Map.fromList .fmap (first originalRel).  Map.toList . _kvvalues
 
@@ -323,8 +331,8 @@ mergeKV (KV i ) (KV j) = KV $ Map.unionWith const i j
 
 mergeKVWith
   :: (Show k,Show v,Ord k) =>
-     (AValue k a -> AValue k a -> v)
-     -> (AValue k a -> v) -> KV k a -> KV k a -> [(Rel k, v)]
+     (FAValue k f a -> FAValue k f a -> v)
+     -> (FAValue k f a -> v) -> FKV k f a -> FKV k f a -> [(Rel k, v)]
 mergeKVWith diff create (KV v ) (KV o) = first originalRel <$> (Map.toList (Map.intersectionWith  diff v o) <> created)
   where created = fmap (fmap create) $  filter (not . flip Set.member (S.fromList $ Map.keys v). fst ) (Map.toList o) 
 
@@ -799,15 +807,6 @@ nonRefTB (IT j k) = [IT j (restrictTable nonRefTB <$> k)]
 nonRefTB (Fun _ _ _) = []
 nonRefTB i = [i]
 
-kattr :: Ord k => Column k a -> [FTB a]
-kattr (Attr _ i) = [i]
-kattr (Fun _ _ i) = [i]
-kattr (FKT i _ _) = L.concat $ kattr <$> unkvlist i
-kattr (IT _ i) = recTB i
-  where
-    recTB (TB1 i) = L.concat $ fmap kattr (unkvlist i)
-    recTB (ArrayTB1 i) = L.concat $ F.toList $ fmap recTB i
-    recTB (LeftTB1 i) = L.concat $ F.toList $ fmap recTB i
 
 aattr :: Ord k => TB k a -> [(k, FTB a)]
 aattr (Attr k i) = [(k, i)]
@@ -835,6 +834,7 @@ instance Ord k => Semigroup (FKV k f a) where
 
 instance Ord k => Monoid (FKV k f a) where
   mempty = KV Map.empty
+  mappend = (<>)
 
 
 findFK :: (Show k, Ord k, Show a) => [k] -> (TBData k a) -> Maybe (TB k a)
