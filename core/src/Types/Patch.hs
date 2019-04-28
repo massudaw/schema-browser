@@ -777,7 +777,7 @@ applyRecordChange v k =
         let edits = Map.lookup key k
         in Compose . fmap (swap. fmap (maybe mempty (Map.singleton key ). safeHead)) $ foldUndo vi (maybeToList edits)
     add (v, p) =
-      (foldr (\p v -> maybe v (\i -> addAttr  i v) (createIfChange p) ) v $
+      (foldr (\p v -> maybe (error $ "could not create attr" ++ show p ) (\i -> addAttr  i v) (createIfChange p) ) v $
         filter (isNothing . flip kvLookup v . index) (unkvlistp k)
       , p)
 
@@ -841,6 +841,7 @@ createAttrChange (PFun k rel s) = Fun k rel <$> createIfChange s
 createAttrChange (PInline k s) = IT k <$> createIfChange s
 createAttrChange (PFK rel k b) =
   flip FKT rel <$> createIfChange k <*> createIfChange b
+  <|> flip FKT rel <$> Just mempty <*> createIfChange b
 
 diffShowable ::
      (Show a, Ord a, Patch a) => FTB a -> FTB a -> Maybe (PathFTB (Index a))

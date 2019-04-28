@@ -6,6 +6,7 @@ import Control.Monad.RWS hiding (pass)
 import Control.Monad.Writer hiding (pass)
 import Data.Bifunctor
 import Data.Either
+import Safe
 import qualified Data.Foldable as F
 import Data.Functor.Apply
 import Data.Interval (Extended(..), upperBound)
@@ -234,10 +235,10 @@ insertMod m j  = do
       let
         table = lookTable inf (_kvname m)
         defs = defaultTableData inf table j
-        ini = L.head $ compact [defs , patch j]
+        ini = fromMaybe mempty $ safeHead $ compact [defs , patch j]
       d <- either error (maybe (return mempty) (insertPatch  inf (conn  inf) m) . kvNonEmpty . tableNonRef. filterWriteable ) (tableCheck m (create ini))
       l <- liftIO getCurrentTime
-      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (rawSchema table,rawName table)) (create $ L.head $ compact [ini ,d]))
+      return $ either (error . unlines ) (createRow' m) (typecheck (typeCheckTable (rawSchema table,rawName table)) (create $ justError "no elem" . safeHead $ compact [ini ,d]))
 
 
 deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (((RowPatch Key Showable)))

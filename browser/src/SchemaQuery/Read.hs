@@ -484,6 +484,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
             else do
               let final = either error ((\(TableRep (_,i,j)) -> (i,j)).fst) $ foldUndo ini  newRes
               liftIO . putStrLn $ "New fields " <> show (tableName table) <> " --------  " <> show (L.length resK, L.length newRes , G.size reso, G.size (snd final)) 
+              -- liftIO .putStrLn $ ident $ render (tableNonRef tbf)
               return (nidx,final)
 
     (nidx,(sidx2,ndata)) <- case hasIndex of
@@ -728,9 +729,9 @@ convertChanEvent inf table fixed select bres chan = do
     let
       patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> ({-oldRows <> -} nonEmpty newRows)
     --when (tableName table == "table_description")  $
-      --void $ traverse (\v -> do
-        --putStrLn $ "Logging new patches: " ++ renderPredicateWhere (fst fixed)
-       -- mapM_ (putStrLn . ident . render ) v) patches
+    --  void $ traverse (\v -> do
+    --    putStrLn $ "Logging new patches: " ++ renderPredicateWhere (fst fixed)
+    --    mapM_ (putStrLn . ident . render ) v) patches
 
     traverse h patches
     

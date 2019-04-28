@@ -377,7 +377,7 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
 
       chk <- buttonDivSetO (kvkeys fields)  (fmap index . safeHead <$> initialAttr)  marker sumButtom
       fks <- switchManyLayout (triding chk) fks2
-      -- element chk # set UI.style [("display","inline-flex")]
+      element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
         resei = (\j i ->  defaultInitial j =<< i) <$>  facts initialAttr <#> triding fks

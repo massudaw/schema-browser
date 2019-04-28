@@ -312,8 +312,15 @@ fixLeftJoinS (P j k) (P l n) srel index
               result <- pmerge 
                 (\j i ->  do
                   let joined = joinRelation inf joinS cindex (primary i )
-                  return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $ 
-                      (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))) 
+                      result = (\ jix ->  createRow' (tableMeta origin) $ apply jix (joined jix )  ) <$> (G.toList (primary j ))
+                  --liftIO $ when (tableName  target == "table_description") $ 
+                  --  void $ do 
+                  --    putStrLn (renderRel cindex)
+                  --    mapM (\i -> do
+                  --      putStrLn "@@@@================@@@"
+                  --      putStrLn . ident . render $ i ) result
+
+                  return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $  result) 
                 (\_ last i -> do 
                   return $ safeHead  $ joinPatch True (relUnComp cindex) target id [i] last )
                 (\ _ _ i -> return (Just i))  
