@@ -723,6 +723,7 @@ convertChanEvent inf table fixed select bres chan = do
                   then return $ Just [RowPatch (i,CreateRow j ) ]
                   else return Nothing
       match (BatchPatch i j) = nonEmpty . concat . catMaybes <$>  mapM (\ix -> match (RowPatch (ix,j)) ) i 
+      match i = return $ Just  [i]
       -- filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
     (newRows,_) <- runDynamic .transactionNoLog inf $ concat .catMaybes <$> mapM match deltas 
       -- oldRows = filterPredNot v deltas 
