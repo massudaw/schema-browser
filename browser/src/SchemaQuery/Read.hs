@@ -705,6 +705,7 @@ convertChanEvent inf table fixed select bres chan = do
                         when ( tableName table == "table_description" )$  do
                           liftIO $ putStrLn $ "match raw:\n" ++ show c
                           liftIO $ putStrLn $ "match pretty:\n" ++ ident (render c)
+                          -- TODO: Fetch missing columns from patch
                         return $ Just mempty -- Just . concat .maybeToList . snd <$> getFrom  table select i 
                       Nothing -> return $ Just mempty 
                   else return Nothing
@@ -724,6 +725,7 @@ convertChanEvent inf table fixed select bres chan = do
                   else return Nothing
       match (BatchPatch i j) = nonEmpty . concat . catMaybes <$>  mapM (\ix -> match (RowPatch (ix,j)) ) i 
       match i = return $ Just  [i]
+      --  TODO : Recover this code for cases where the Patch removes a item from the predicate
       -- filterPredNot j = nonEmpty . catMaybes . map (\d -> if L.any (\i -> isJust (G.lookup i j) ) (index d) && not (match d) then Just (rebuild (index d) DropRow )  else Nothing )
     (newRows,_) <- runDynamic .transactionNoLog inf $ concat .catMaybes <$> mapM match deltas 
       -- oldRows = filterPredNot v deltas 

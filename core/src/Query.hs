@@ -334,9 +334,10 @@ tbpredFK
   -> [Rel k]
   -> [Rel k]
   -> KV k a1 ->  Maybe (TBIndex a1)
-tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fmap (first projectRel).  filter ((`S.member` S.fromList un). fst )  $ M.toList (kvToMap v)
+tbpredFK rel un  pk2 v  = tbjust . Tra.traverse (Tra.traverse unSOptional) . fmap (first projectRel).  filter (containsPK . fst )  $ M.toList (kvToMap v)
   where
-    projectRel k = justError (show k) $ M.lookup k (flipTable  rel )
+    containsPK = (liftA2 (||) (`S.member` S.fromList un)(`S.member` S.fromList (fmap (Inline . _relOrigin ) un)) )
+    projectRel k = justError ("projectRel " ++  show (k,flipTable rel )) $ M.lookup k (flipTable  rel ) <|> M.lookup k (M.mapKeys (Inline . _relOrigin ) $ flipTable  rel )
     flipTable = M.fromList . fmap swap .M.toList
     tbjust = fmap (Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` (simplifyRel <$> pk2)). simplifyRel.fst)))
 
@@ -353,8 +354,10 @@ searchGist rel m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable 
   where
     relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
     lookGist rel un pk  v =  do
-       fk <- traceShowId (tbpredFK rel un (rawPK m) pk)
-       G.lookup fk v  -- <|> L.find (traceShowId . G.consistent (Right fk ) . traceShowId . Right .G.getIndex (tableMeta m)) v
+       fk@(Idex fkl ) <- tbpredFK rel un (simplifyRel <$> rawPK m) pk
+       G.lookup fk v  <|> (fmap (traceStack ("found missing row" ++ show (fk,pk,(L.length rel == L.length fkl),rel))) $
+            L.find ((&& (L.length rel == L.length fkl))  . G.consistent (Right fk ) .  Right .G.getIndex (tableMeta m)) v)
+            -- NOTE: Stack trace possible miss in lookup
 
     lookSGist sidsx rel un pk  v =  join res
       where res = fmap M.keys .flip G.lookup v <$> tbpredFK rel un sidsx pk
