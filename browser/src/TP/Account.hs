@@ -8,6 +8,7 @@
 module TP.Account where
 
 import GHC.Stack
+import Control.DeepSeq
 import Environment
 import TP.View
 import Data.Ord
@@ -17,6 +18,7 @@ import Control.Lens (_2,(^.))
 import qualified Data.Interval as Interval
 import NonEmpty (NonEmpty)
 import qualified NonEmpty as Non
+import qualified Data.Sequence.NonEmpty as NonS
 import Data.Functor.Identity
 import Control.Concurrent
 import Types.Patch
@@ -91,16 +93,20 @@ accountDef inf
           convField v = [("start",toLocalTime $v)]
           convField i = errorWithStackTrace (show i)
           scolor =  "#" <> renderPrim color
-          projf r desc efield@(SText field) (SText aafield)  = do
-              i <- unSOptional =<< recLookupInf inf tname (indexerRel field) r
-              accattr <- unSOptional =<< recLookupInf inf tname (indexerRel aafield) r
-              fields <- mapM (\(SText i) -> unSOptional =<< recLookupInf inf tname (indexerRel i) r) (fromMaybe pks desc)
-              return . M.fromList $
+          projfT ::  (Showable  ,Showable)
+                 -> PluginM (Union (G.AttributePath T.Text MutationTy))
+                            (Atom (TBData T.Text Showable))
+                            Identity () (M.Map String (FTB Showable))
+          projfT (efield@(SText field),SText aafield) = irecord $ proc _-> do
+              i <- convertRel inf tname field  -< ()
+              accattr <- convertRel inf tname aafield  -< ()
+              fields <- mapA buildRel (fromMaybe ((\(SText i) ->  splitRel inf tname i) <$> pks) ( fmap (liftRel inf tname ).  NonS.fromList. explodeTree   <$> desc) ) -< ()
+              returnA -< M.fromList $
                 [
-                ("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> F.toList fields))
+                ("title",txt (T.pack $  L.intercalate "," $ maybe "" renderShowable <$> F.toList fields))
                 ,("commodity", accattr )
                 ,("field", TB1 efield )] <> convField i
-          proj r = ( F.toList $ projf r (fmap toListTree desc) <$> efields <*> afields)
+          proj =  fmap (fmap Just ) . mapA projfT  $ (,)<$> efields <*> afields
         returnA -< (txt $ T.pack $ scolor ,lookTable inf tname,TB1 <$> efields,TB1 <$> afields,proj )
 
 
@@ -129,16 +135,20 @@ accountWidget (incrementT,resolutionT) sel inf = do
          els <- traverseUI
             (\(selected ,calT )->
               mapM (\(_,table,fields,efields,proj) -> do
-                let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
+                let pred = force $ WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
+                    selection = projectFields inf table (fst $ staticP proj) pred $ allFields inf table
                     fieldKey (TB1 (SText v))=   v
-                v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing pred
+                liftIO $ putStrLn . ident $ Text.render selection
+                (_,v,_) <- ui $ refTablesProj inf table Nothing pred (force selection)
+
+                -- v <-  ui $ transactionNoLog  inf $ selectFrom (tableName table) Nothing pred
                 els <- traverseUI
                   (\i -> do
                     let caption =  UI.caption # set text (T.unpack $ tableName table)
                         header = UI.tr # set items (sequence [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ])
                         row i = UI.tr # set items (sequence [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)])
                         body = fmap row dat <> if L.null dat then [] else [totalrow totalval]
-                        dat =  concatMap (catMaybes.proj)  $ G.toList (primary i)
+                        dat =  concatMap (catMaybes.evalPlugin proj)  $ G.toList (primary i)
 
                         totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
                           where
@@ -146,7 +156,7 @@ accountWidget (incrementT,resolutionT) sel inf = do
                             mindate = minimum $ justError "no" . M.lookup "start" <$> dat
                             maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
                         totalrow i = UI.tr # set items  (mapM (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
-                    UI.table # set items (sequence $ caption:header:body)) (collectionTid v)
+                    UI.table # set items (sequence $ caption:header:body)) (v)
                 UI.div # sink UI.children (pure <$> facts els)
                     ) (filter (flip L.elem (F.toList selected) .  (^. _2)) dashes )
 

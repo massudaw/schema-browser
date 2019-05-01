@@ -160,6 +160,13 @@ deriving instance (Eq k) => Eq (TBMeta k )
 deriving instance (Eq k) => Eq (AValueMeta k ) 
 
 
+deriving instance (NFData k) => NFData (KVMeta k )
+deriving instance (NFData k) => NFData (TBMeta k )
+--deriving instance (NFData a , NFData k) => NFData (TBRef k a)
+deriving instance (NFData k) => NFData (AValueMeta k )
+
+
+
 type CoreKey = FKey (KType CorePrim)
 
 showableDef (Primitive (KOptional:xs) i) =
@@ -222,6 +229,9 @@ data FPlugins =
       , _plugAction :: FPlugAction
       }deriving(Eq,Ord,Show)
 
+instance NFData (FPlugins ) where
+  rnf _ = ()
+
 
 instance KeyString Key where
   keyString = keyValue
@@ -237,6 +247,7 @@ data SqlOperationTK t k
   | Column k
   deriving (Eq, Ord, Show, Functor, Foldable, Generic)
 
+instance (NFData  t, NFData k ) => NFData (SqlOperationTK t k )
 
 
 isFunction :: SqlOperationK k -> Bool
@@ -390,7 +401,7 @@ instance NFData KTypePrim
 
 instance NFData a => NFData (KType a)
 
-showTy f (Primitive l i) = f i ++ join (showT <$> l)
+showTy (Primitive l i) = join (showT <$> l)
   where
     showT KArray = "[]"
     showT KOptional = "?"
@@ -703,6 +714,8 @@ data KVMetadata k = KVMetadata
   , _kvjoins :: [SqlOperationK k]
   , _kvrecrels :: [MutRec [[Rel k]]]
   } deriving (Functor, Foldable, Generic)
+
+instance NFData k => NFData (KVMetadata k)
 
 kvempty = KVMetadata "" "" False []  [] [] [] [] [] []
 

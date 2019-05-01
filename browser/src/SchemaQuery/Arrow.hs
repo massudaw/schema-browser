@@ -51,7 +51,7 @@ type InputType = (WherePredicateK T.Text , KVMeta Key )
 fromS
   :: T.Text
   -> DatabaseM (View T.Text T.Text)  (PStream InputType) (PStream (TableRep  Key Showable))
-fromS m  = P (FromV m ) (Kleisli (trace "fromtable" . fmap fst <$> fromTableS m ))
+fromS m  = P (FromV m ) (Kleisli (fmap fst <$> fromTableS m ))
 
 whereS
   :: DatabaseM (View T.Text T.Text)  (PStream InputType)  (PStream (TableRep  Key Showable))
@@ -198,12 +198,18 @@ innerJoinS (P j k) (P l n) srel =
       kv <- k -< i
       pred <- pmapPredicate joinS (relComp srel ) -< (i,kv )
       nv <- n -<  pred
-      Kleisli (pmerge (\i k -> innerJoin j l srel (primary i, primary k))  (\left last i -> do 
+      Kleisli (pmerge
+        (\i k -> innerJoin j l srel (primary i, primary k))
+        (\left last i -> do
             inf <- askInf 
             let origin = sourceTable inf (JoinV j l InnerJoin srel )
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $  safeHead   $ joinPatch False rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
+            return $  safeHead   $ joinPatch False rel target id [i] last )
+        (\right last p@(RowPatch (ix,i)) -> case i of
+                            PatchRow _  -> return $ if isJust (G.lookup ix (primary last)) then Just p else Nothing
+                            CreateRow v  -> (\(_,f) -> either (const Nothing) (Just . RowPatch . (ix,). CreateRow) $ f v) <$> innerJoinE j l srel (primary right))
+        ) -< (kv ,nv))
     where  
       joinS = JoinV j l InnerJoin srel
 
@@ -211,7 +217,7 @@ mapPatch f (RowPatch (ix,PatchRow i) ) = RowPatch (ix, PatchRow $ f i )
 
 primaryRep (TableRep (m,s,p)) = PrimaryRep (m,p)
 
-innerJoin j l srel (emap,amap) = do
+innerJoinE j l srel amap = do
         preinf <- askInf
         let 
           target = sourceTable preinf l
@@ -224,16 +230,20 @@ innerJoin j l srel (emap,amap) = do
             where
               replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
               taratt = getAtt tar (tableNonRef m)
-          joined i = flip addAttr i <$> joinFK i
-          result = (\(i,j,k) -> joined i)<$> G.getEntries emap
-        -- when (L.any isLeft result) . liftIO $do
-           --putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
-           -- print (L.length $ rights result)
-           --print ("Target Relation" , G.toList amap)
-           --print ("Target Relation" , (rawPK target) , G.getIndex (tableMeta target) <$>G.toList amap)
-           -- print (lefts result)
-        let idx = (F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) (createRow' (tableMeta origin)<$> rights (F.toList result) ) )
-        return  idx 
+        return (tableMeta origin ,(\i -> flip addAttr i <$> joinFK i))
+
+innerJoin j l srel (emap,amap) = do
+  (m,joined) <- innerJoinE j l srel amap
+  let
+    result = (\(i,j,k) -> joined i)<$> G.getEntries emap
+  -- when (L.any isLeft result) . liftIO $do
+     --putStrLn  $"Missing references: " ++  (L.intercalate "," $ renderRel <$> srel)
+     -- print (L.length $ rights result)
+     --print ("Target Relation" , G.toList amap)
+     --print ("Target Relation" , (rawPK target) , G.getIndex (tableMeta target) <$>G.toList amap)
+     -- print (lefts result)
+  let idx = (F.foldl' apply (TableRep (m, mempty ,mempty)) (createRow' m<$> rights (F.toList result) ) )
+  return  idx
 
 leftJoinS
   :: DatabaseM (View T.Text T.Text) (PStream (InputType)) (PStream  (TableRep Key Showable))
@@ -251,26 +261,33 @@ leftJoinS (P j k) (P l n) srel
             let origin = sourceTable inf joinS 
                 target = sourceTable inf l
                 rel = (\(Rel i o j) -> Rel (lkKey origin <$> i) o (lkKey target <$> j)) <$>  srel
-            return $ safeHead $ joinPatch True rel target id [i] last ) (\_ _ i -> return (Just i)) ) -< (kv ,nv))
+            return $ safeHead $ joinPatch True rel target id [i] last )
+            (\right last p@(RowPatch (ix,i)) -> case i of
+                            PatchRow _  -> return $ if isJust (G.lookup ix (primary last)) then Just p else Nothing
+                            CreateRow v  -> (\(_,f) -> (Just . RowPatch . (ix,). CreateRow) $ f v) <$> leftJoinE joinS (primary right))
+             ) -< (kv ,nv))
   where 
     joinS = JoinV j l LeftJoin srel
 
-leftJoin joinPred@(JoinV j l LeftJoin srel) (emap,amap)= do
-        preinf <- askInf
-        let
-          (origin ,inf) = updateTable preinf  joinPred 
-          target = sourceTable preinf l
-          rel = (\(Rel i o j ) -> Rel (lkKey origin <$> i ) o (lkKey target <$> j) )<$>  srel
-          tar = S.fromList $ _relOrigin <$> rel
-          joinFK :: TBData Key Showable ->  Column Key Showable
-          joinFK m  = FKT mempty rel (LeftTB1 $ joinRel2 (tableMeta target ) (fmap replaceRel $ taratt ) amap)
-            where
-              replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
-              taratt = getAtt tar (tableNonRef m)
-          joined i = addAttr (joinFK i) i
-        let result = joined <$> F.toList emap
-        let idx = (F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) (createRow' (tableMeta origin)<$> result ) )
-        return idx
+leftJoinE joinPred@(JoinV j l LeftJoin srel) amap= do
+  preinf <- askInf
+  let
+    (origin ,inf) = updateTable preinf  joinPred
+    target = sourceTable preinf l
+    rel = (\(Rel i o j ) -> Rel (lkKey origin <$> i ) o (lkKey target <$> j) )<$>  srel
+    tar = S.fromList $ _relOrigin <$> rel
+    joinFK :: TBData Key Showable ->  Column Key Showable
+    joinFK m  = FKT mempty rel (LeftTB1 $ joinRel2 (tableMeta target ) (fmap replaceRel $ taratt ) amap)
+      where
+        replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
+        taratt = getAtt tar (tableNonRef m)
+  return (tableMeta origin , \i -> addAttr (joinFK i) i)
+
+leftJoin joinPred (emap,amap) = do
+  (m,joined ) <- leftJoinE joinPred amap
+  let result = joined <$> F.toList emap
+  let idx = (F.foldl' apply (TableRep (m, mempty ,mempty)) (createRow' m<$> result ) )
+  return idx
 
 
 fixLeftJoinS
@@ -323,7 +340,11 @@ fixLeftJoinS (P j k) (P l n) srel index
                   return $ F.foldl' apply (TableRep (tableMeta origin, mempty ,mempty)) $  result) 
                 (\_ last i -> do 
                   return $ safeHead  $ joinPatch True (relUnComp cindex) target id [i] last )
-                (\ _ _ i -> return (Just i))  
+                (\right last p@(RowPatch (ix,i)) ->
+                  let joined = joinRelation inf joinS cindex (primary right)
+                  in case i of
+                            PatchRow _  -> return $ if isJust (G.lookup ix (primary last)) then Just p else Nothing
+                            CreateRow v  ->  (return  . Just . RowPatch . (ix,). CreateRow) $ apply  v (joined v))
                 (kv ,out)
               go (ix+1) (relAppend cindex consIndex)  p result 
                                          ) isEmpty 

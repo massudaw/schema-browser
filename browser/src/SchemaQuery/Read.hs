@@ -149,14 +149,18 @@ selectFrom t a d = do
   let tb = lookTable inf t
   tableLoader tb a d (allFields inf tb)
 
--- getFrom :: Table -> KVMeta Key -> KV Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
-getFrom table allFields b = mdo
-  inf <- askInf
-  let 
+pkPred  m b =  pred
+  where
     attrs = justError "missing attr" $ traverse (\ i-> (i, ) <$> kvLookup (simplifyRel i)   (tableNonRef b)) ( _kvpk m)
-    m = tableMeta table
     pred = WherePredicate . andColl $ 
         (\(i,v) -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ v ) <$> attrs
+
+getFrom :: Table -> KVMeta Key -> KV Key Showable -> TransactionM (DBRef Key Showable,Maybe (TBIdx Key Showable))
+getFrom table allFields b = {-(\i -> traverse (\i -> liftIO$ putStrLn $ "delta \n " ++ ident (render i)) (snd i) >> return i) =<<-}  do
+  inf <- askInf
+  let
+    m = tableMeta table
+    pred = pkPred m b
     comp = recComplement inf m allFields pred b
   ((IndexMetadata fixedmap,TableRep (_,sidx,reso)),dbvar)
       <- createTable pred (tableMeta table)
@@ -171,7 +175,7 @@ getFrom table allFields b = mdo
     (maybe (do
       liftIO . putStrLn $ "Local storage: get " <> T.unpack (tableName table) <>  " where "  <> (renderPredicateWhere pred) -- , new ,G.keys reso )
       return delta )  (\comp -> do
-      liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
+      -- liftIO . putStrLn $ "Loading complement\n"  <> (ident . render $ comp)
       v <- (getEd $ schemaOps inf) table (restrictTable nonFK comp) (G.getIndex m b)
       let newRow = apply (apply b (fromMaybe mempty delta)) v
       resFKS  <- getFKS inf pred table  [newRow] comp
@@ -179,14 +183,14 @@ getFrom table allFields b = mdo
         output = resFKS newRow
         result = either (const Nothing) (Just. patch )  output
       traverse (fetchPatches m [] . pure . (RowPatch . (G.getIndex m b,).PatchRow)) result
-      traverse (\i -> do
+      --traverse (\i -> do
         --liftIO . putStrLn $ "Pred\n" <> show pred
         --liftIO . putStrLn $ "Old\n" <> show b
         --liftIO . putStrLn $ "Delta\n" <> (maybe ("") show delta)
         --liftIO . putStrLn $ "Get\n" <> (show v)
         --liftIO . putStrLn $ "Result\n" <> (either show (ident.render) output)
         --liftIO . putStrLn $ "DiffResult\n" <> (maybe "" show  result)
-        liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe mempty delta) ) =<< result )
+        -- liftIO . putStrLn $ "Remaining complement\n"  <> (ident .render $ i)) $ (recComplement inf m allFields pred ) =<< (applyIfChange (apply b  (fromMaybe mempty delta) ) =<< result )
       return result) n)) comp
   return (dbvar,r)
 
@@ -692,32 +696,39 @@ convertChanEvent inf table fixed select bres chan = do
   (e,h) <- newEvent
   dynFork . forever $ catchJust notException (do
     ml <- atomically $ takeMany chan
-      
     TableRep (_,_,v) <- currentValue bres
     let
       
       meta = tableMeta table
       check r j  = if G.checkPred i (fst fixed) 
                   then do
-                    -- liftIO . putStrLn $ "patch: \n" ++ (ident . render $ j )
-                    case recComplement inf meta select mempty i  of
+                    case recComplement inf meta select (pkPred meta i) i  of
                       Just c ->  do 
-                        when ( tableName table == "table_description" )$  do
-                          liftIO $ putStrLn $ "match raw:\n" ++ show c
-                          liftIO $ putStrLn $ "match pretty:\n" ++ ident (render c)
+                        -- when ( tableName table == "table_description" )$  do
+                          -- liftIO $ putStrLn $ "match raw:\n" ++ show c
+                        -- reload <-  Just . maybeToList . snd <$> getFrom  table c i
+                        --liftIO $ putStrLn $ "!!! WARNING !!!! match pretty "
+                        --      ++ show (tableName table)
+                        --      ++ show (L.length (concat ml ))
+                        --      ++ renderPredicateWhere (fst fixed)
+                        --      ++ "\n" ++ ident (render (tableNonRef c) )
+                        --      ++ "\nCurrent\n" ++ ident (render i)
+                        --      ++ "\nOld\n" ++ ident (render r)
+                        --      ++ "\nDelta\n" ++ ident (render j)
+                        --      ++ "\nLoad\n" ++ maybe "" (concatMap (ident .render))  reload
                           -- TODO: Fetch missing columns from patch
-                        return $ Just mempty -- Just . concat .maybeToList . snd <$> getFrom  table select i 
+                        return $ Nothing -- Just [] -- reload
                       Nothing -> return $ Just mempty 
-                  else return Nothing
+                  else  return Nothing
             where 
                 i = apply r j 
-      deltas  =  tableDiff <$> concat  ml
+      deltas  =  tableDiff <$> compact (concat  ml)
       match :: RowPatch Key Showable -> TransactionM (Maybe [RowPatch Key Showable])
       match r@(RowPatch (i,PatchRow j)) 
             = case G.lookup i v  of
               Just r ->  do
                  delta <- check r j 
-                 return $ pure .(\ d -> RowPatch (i,PatchRow (head $ compact [j ,d]  )))  <$> delta
+                 return $ pure. (\ d -> RowPatch (i,PatchRow (head $ compact (j :d)  )))  <$> delta
               Nothing -> return Nothing 
       match (RowPatch (i,CreateRow j)) = do
                   if G.checkPred j  (fst fixed) 
@@ -731,10 +742,16 @@ convertChanEvent inf table fixed select bres chan = do
       -- oldRows = filterPredNot v deltas 
     let
       patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> ({-oldRows <> -} nonEmpty newRows)
-    --when (tableName table == "table_description")  $
-    --  void $ traverse (\v -> do
+    --when (tableName table == "clients") . void $do
+    --  (\v -> do
     --    putStrLn $ "Logging new patches: " ++ renderPredicateWhere (fst fixed)
-    --    mapM_ (putStrLn . ident . render ) v) patches
+    --    mapM_ (putStrLn . ident . render ) v) deltas
+    --  maybe
+    --    (putStrLn $ "WARNING: All patches filtered :" ++ renderPredicateWhere (fst fixed))
+
+    --    (\v -> do
+    --      putStrLn $ "Logging new filtered patches: " ++ renderPredicateWhere (fst fixed)
+    --      mapM_ (putStrLn . ident . render ) v) patches
 
     traverse h patches
     

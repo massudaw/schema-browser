@@ -48,10 +48,10 @@ instance PrettyRender1 FTB where
 
 instance PrettyRender1 KType where
   render1 = renderPrimitive 
+renderPrimitive l@(Primitive _ i ) = wrapBrackets (showTy l ++ " : ") (render i)
 
 instance (Show j ) => PrettyRender (Prim KPrim j ) where
   render i = [(0,showPrim i)]
-renderPrimitive l= [(0,showTy (ident . render) l)]
 
 instance PrettyRender () where
   render _ = []
@@ -68,8 +68,6 @@ noident :: Char ->  [(Int,String)] -> String
 noident sep = explode sep " " 
 
   
-instance PrettyRender i => PrettyRender (KType i ) where
-  render  p =  [(0,showTy (ident. render) p)]
 
 
 compressClosingBrackets :: [(Int,String)] -> [(Int,String)]
@@ -106,10 +104,11 @@ instance  (Ord a , Show a ,PrettyRender1 f, PrettyRender b) => PrettyRender (FKV
 renderTable :: (Ord a , Show a,PrettyRender1 f,PrettyRender b) => FKV a f b ->  [(Int,String)]
 renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
+-- wrapBrackets  i l | traceShow l False = undefined
 wrapBrackets i l 
   | nextLength > 3 = [(0,i ++ "{")]  ++ offset 1 l ++  [(0,"}")]
   | nextLength > 1 = [(0,i)] ++ offset 1 l 
-  | nextLength == 1 = [(0,i ++ snd (head next) )]  ++ offset 1 (L.filter ((/=0).fst)  l)
+  | nextLength == 1 =  [(0,i ++ snd (head next) )]  ++ offset 1 (L.filter ((/=0).fst)  l)
   | length l > 1 = [(0,i)] ++ offset 1 l 
   | otherwise = [(0, i  ++ maybe "" snd (safeHead l) )]
   where nextLength  =  L.length next 
@@ -134,15 +133,10 @@ renderPredicate (PrimColl (_,l) )= L.intercalate " AND " $ fmap (\(i,j)-> render
 renderAttr :: (Ord k, Show k,PrettyRender1 f,PrettyRender b) => TBF k f b->  [(Int,String)]
 renderAttr (FKT k rel v )
   =
-    ref
-    ++ [(0,L.intercalate " && " (fmap renderRel rel))]
-  ++ (first (+1) <$> render1 v)
-  where ref = concat $ renderAttr <$> unkvlist k
-renderAttr (Attr k v ) = breakLine  (render1 v)
-  where breakLine i 
-          | L.length i > 1 =  [(0,show k ++ " => ")]  ++ offset 1 i
-          |  otherwise = [(0,show k ++ " => " ++ ident i)]
-renderAttr (IT k v ) = (\i -> [(0,show k ++ " => ")] ++ i  )  (first (+1) <$> render1 v)
+    wrapBrackets (L.intercalate " && " (fmap renderRel rel))
+     (render k ++ offset 1 (render1 v))
+renderAttr (Attr k v ) = wrapBrackets  (show k ++ " => ") (render1 v)
+renderAttr (IT k v ) = wrapBrackets (show k ++ " => ") (render1 v)
 renderAttr (Fun i k v) = renderAttr (Attr i v)
 
 
@@ -172,7 +166,7 @@ renderFTB f (TB1 i) = f i
 renderFTB f (LeftTB1 i) = concat $ maybeToList $ fmap (renderFTB f ) i
 renderFTB f (ArrayTB1 i)
   | L.length (concat children) == NonS.length i =  [(0,"{" <> noident  ',' (concat children) <> "}")]
-  | otherwise = concat$ zipWith (\ i j -> (0,show i  ++ " :") : offset 1 j )  [0..]  children
+  | otherwise = concat$ zipWith (\ i j -> wrapBrackets (show i  ++ " :") j )  [0..]  children
     where children = (F.toList $ fmap (renderFTB f) i)
 renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
   where

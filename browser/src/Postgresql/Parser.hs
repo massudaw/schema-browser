@@ -284,14 +284,16 @@ parsePrimJSON i  v =
 
 executeLogged :: (ToRow q ,MonadIO m) => InformationSchema -> KVMetadata Key -> Query -> q -> m ()
 executeLogged inf table sqr args = liftIO $ do
-  logTable inf table . BS.unpack =<< formatQuery (conn inf) sqr args
-  fromIntegral <$> execute (conn inf) sqr args `catch` (\e -> print (e :: SomeException ) >> throw e )
+  queryS <- formatQuery (conn inf) sqr args
+  logTable inf table . BS.unpack  $ queryS
+  fromIntegral <$> execute (conn inf) sqr args `catch` (\e -> print queryS >> print (e :: SomeException ) >> throw e )
   return ()
 
 queryLogged :: (FromRow o ,ToRow q ,MonadIO m) => InformationSchema -> KVMetadata Key -> Query -> q -> m [o]
 queryLogged inf table sqr args = liftIO $ do
-  logTable inf table . BS.unpack =<< formatQuery (conn inf) sqr args
-  query (conn inf) sqr args `catch` (\e -> print (e :: SomeException ) >> throw e )
+  queryS <- formatQuery (conn inf) sqr args
+  logTable inf table . BS.unpack $ queryS
+  query (conn inf) sqr args `catch` (\e -> print queryS >> print (e :: SomeException ) >> throw e )
 
 
 -- parseGeom a | traceShow a False = undefined

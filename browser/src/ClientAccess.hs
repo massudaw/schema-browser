@@ -38,7 +38,8 @@ addSchemaIO clientId minf inf six = do
   now <- liftIO getCurrentTime
   let new = addSchema clientId  now inf six
       mkPatch = PatchRow . liftPatch minf "clients"
-  transactionNoLog minf $
+  transactionNoLog minf $ do
+    liftIO $ print ("Loading schema",mkPatch <$> new)
     patchFrom (tableMeta cli) (mkPatch <$>new)
   registerDynamic (void $ do
     now <- liftIO getCurrentTime
@@ -50,17 +51,15 @@ addSchemaIO clientId minf inf six = do
 
 addClientLogin
   :: InformationSchema -> Dynamic (RowPatch Key Showable)
-addClientLogin inf =  transactionNoLog inf $ do
+addClientLogin inf =  do
     now <- liftIO getCurrentTime
     let
       row = ClientState Nothing (startTime now) []
       obj = liftTable' inf "clients" (encodeT row)
       m = lookMeta inf  "clients"
     liftIO $ prerefTable inf (lookTable inf "clients")
-    liftIO $ print obj
-    i <-  fullInsert m obj
-    liftIO $ print "inserted"
-    lift . registerDynamic . closeDynamic $ do
+    i <- transactionNoLog inf $  fullInsert m obj
+    registerDynamic . closeDynamic $ do
       now <- liftIO getCurrentTime
       let
         pt = [PAttr (lookKey inf "clients" "up_time") (PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))]
@@ -208,7 +207,8 @@ getClient metainf clientId ccli = G.lookup (idex metainf "clients"  [("id",num c
 
 lookClient :: Int -> InformationSchema ->  Dynamic (Tidings (Maybe ClientState))
 lookClient clientId metainf = do
-  (_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))]))
+  let pred = WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))])
+  (_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing  pred
   return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId .primary<$> clientState)
 
 indexTable inf (tix,table) = (lookT =<<)
