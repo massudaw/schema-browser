@@ -99,15 +99,7 @@ sourceTableM (FromV i) = do
   return $ lookTable inf i
 sourceTableM (WhereV i j) = sourceTableM i
   
-instance Show v => Patch (WherePredicateK v) where
-  type Index (WherePredicateK v) = WherePredicateK v
-  applyUndo (WherePredicate (AndColl i)) (WherePredicate (AndColl j)) = Right $ (WherePredicate (AndColl (i <> j)),WherePredicate (AndColl i))
-  applyUndo (WherePredicate (OrColl i)) (WherePredicate (OrColl j)) = Right $ (WherePredicate (OrColl (i <> j)), WherePredicate (OrColl (i )))
-  applyUndo i j = Right ( i <> j  , i )
-  applyUndo i j = error (show (i,j))
-  diff i j = Nothing
-  patch i = i 
-  
+
 
 pmap' f fp  (PStream b e ) = PStream (f <$> b) (fp <$> e)
 

@@ -364,7 +364,7 @@ anyColumns
 anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  mdo
 
       let
-        projectAttr = ((L.filter (isJust .  unLeftItens) . unkvlist) =<<). maybeToList 
+        projectAttr = (L.find (isJust .  unLeftItens) . unkvlist =<<)
         initialAttr = projectAttr <$> oldItems
         fks2 = M.fromList  $ run <$> cols
         sumButtom itb =  do
@@ -375,29 +375,25 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
           element =<< labelCaseDiff inf kb prev  ((\i j-> fromMaybe Keep $ diff i =<< (applyIfChange i j)) <$> prev <*> edit)
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
-      chk <- buttonDivSetO (kvkeys fields)  (fmap index . safeHead <$> initialAttr)  marker sumButtom
+      chk <- buttonDivSetO (kvkeys fields)  (fmap index <$> initialAttr)  marker sumButtom
       fks <- switchManyLayout (triding chk) fks2
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
-        resei = (\j i ->  defaultInitial j =<< i) <$>  facts initialAttr <#> triding fks
+        resei = fmap defaultInitial  <$>  triding fks
           where
-            defaultInitial :: [TB Key Showable] -> PathAttr Key Showable ->  Editor (TBIdx Key Showable)
-            defaultInitial old new
-              = case safeHead old of
-                  Nothing -> case unLeftItens (create new  :: TB Key Showable) of
-                    Just n -> Diff $ kvlistp $ compact $ 
-                          (patch <$> (addDefault' <$> filter ((/= keyattr n ) . keyattr) (unkvlist fields) :: [TB Key Showable])) ++ [new]
-                    Nothing -> Keep
-                  Just ini -> if index ini == index new
-                     then maybe Delete (const (Diff  (kvsingleton new))) (unLeftItensP new)
-                     else  Diff $ kvlistp $ compact $ (patch  <$> ( addDefault <$> old :: [TB Key Showable]) )++ [new]
+            defaultInitial :: PathAttr Key Showable ->  TBIdx Key Showable
+            defaultInitial new
+              = kvlistp $ defaults ++ [new]
+                where defaults = patch <$> (addDefault' <$> filter ((/= index new ) . keyattr) (unkvlist fields) :: [TB Key Showable])
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
-      let computeResult i j = case (not $ L.null (projectAttr (apply i j)) ,not $ L.null (projectAttr i)) of
-            (False,True) -> Delete
-            (False,False)-> Keep
-            (_,_) -> j
+      let computeResult i j = -- trace (show result ++ show (projectAttr (apply i j )) ++  "\n" ++ maybe "" (ident . render) (apply i j) )
+                  result
+            where result = case (isJust (projectAttr (apply i j)) ,isJust (projectAttr i)) of
+                    (False,True) -> Delete
+                    (False,False)-> Keep
+                    (_,_) -> j
       return (LayoutWidget ( computeResult <$> facts oldItems <#> resei) listBody (getLayout fks))
   where
     meta = tableMeta table

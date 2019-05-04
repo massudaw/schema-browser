@@ -770,7 +770,7 @@ unLeftItens = unLeftTB
     unLeftTB i@(IT na (TB1 l)) = Just i
     unLeftTB (FKT ifk rel (LeftTB1 tb)) =
       (\ik -> FKT (kvlist ik) (Le.over relOri unKOptional <$> rel)) <$>
-      traverse ((traFAttr unSOptional) . (firstTB unKOptional)) (unkvlist ifk) <*>
+      traverse (Just .(firstTB unKOptional)) (unkvlist ifk) <*>
       tb
     unLeftTB i@(FKT ifk rel (TB1 _)) = Just i
     unLeftTB i = error (show i)

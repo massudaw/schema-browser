@@ -1,5 +1,5 @@
 {-# LANGUAGE RecordWildCards, Arrows, RankNTypes, RecursiveDo,
-  TypeFamilies, FlexibleContexts, OverloadedStrings, TupleSections
+  FlexibleInstances,TypeSynonymInstances,TypeFamilies, FlexibleContexts, OverloadedStrings, TupleSections
   #-}
 module SchemaQuery.Read
   (
@@ -31,6 +31,7 @@ module SchemaQuery.Read
   ) where
 
 import Control.Arrow
+import TP.Widgets(calmT)
 import Reactive.Threepenny.PStream
 import SchemaQuery.Store
 import Serializer
@@ -877,12 +878,25 @@ fromTableS origin whr = mdo
   (_,ini) <- liftIO . runDynamic $ do 
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) iniproj (psvalue t)  (patchVar ref)
     onEventIO ev (mapM h.compact)
-  lift $ onChangeDynIni ini (psvalue whr) (\(pred ,proj) -> do
-    liftIO . putStrLn $ "Listen fromTableS:  " <> show origin
+  t0 <- liftIO getCurrentTime
+  let filtered = filterJust $ (\i j -> let r = apply i j in if (fst i ==  fst r) then Nothing else traceShow (fst i,fst r) $ Just  r)   <$> psvalue whr <@> psevent whr
+  lift $ onEventDynIni ini  filtered (\(pred ,proj) -> do
+    liftIO . putStrLn $ "Listen fromTableS:  " <> show origin <> "\n" <> show (t0, L.length (renderPredicateWhere pred))
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) proj  (psvalue t)  (patchVar ref)
     onEventIO ev (mapM h.compact))
   t <- lift $ accumS rep e
   return (t,ref)
+
+instance (Eq v,Show v) => Patch (WherePredicateK v) where
+  type Index (WherePredicateK v) = WherePredicateK v
+  applyUndo (WherePredicate (AndColl i)) (WherePredicate (AndColl j)) = Right $ (WherePredicate (AndColl (L.nub $ i <> j)),WherePredicate (AndColl i))
+  applyUndo (WherePredicate (OrColl i)) (WherePredicate (OrColl j)) = Right $ (WherePredicate (OrColl (L.nub $ i <> j)), WherePredicate (OrColl (i )))
+  applyUndo (WherePredicate (OrColl i)) (WherePredicate j )= Right $ (WherePredicate (OrColl (L.nub $  i <> [j] )), WherePredicate (OrColl (i )))
+  applyUndo (WherePredicate (AndColl i)) (WherePredicate j) = Right $ (WherePredicate (AndColl (L.nub $ i <> [j] )), WherePredicate (AndColl (i )))
+  applyUndo i j = Right ( i <> j  , i )
+  applyUndo i j = error (show (i,j))
+  diff i j = Nothing
+  patch i = i
 
 
 fromTable origin whr proj = mdo
