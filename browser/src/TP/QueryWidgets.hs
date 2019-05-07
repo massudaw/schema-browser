@@ -381,11 +381,9 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
         resei = fmap defaultInitial  <$>  triding fks
-          where
-            defaultInitial :: PathAttr Key Showable ->  TBIdx Key Showable
-            defaultInitial new
-              = kvlistp $ defaults ++ [new]
-                where defaults = patch <$> (addDefault' <$> filter ((/= index new ) . keyattr) (unkvlist fields) :: [TB Key Showable])
+        defaultInitial new
+          = kvlistp $ defaults ++ [new]
+            where defaults = patch <$> (addDefault' <$> filter ((/= index new ) . keyattr) (unkvlist fields) :: [TB Key Showable])
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
       let computeResult i j = -- trace (show result ++ show (projectAttr (apply i j )) ++  "\n" ++ maybe "" (ident . render) (apply i j) )

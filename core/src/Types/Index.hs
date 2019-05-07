@@ -254,8 +254,9 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go l
       go (PrimColl (ix@(Inline i),op)) = match (justError ("cant find " ++ show i) $ M.lookup ix $ M.fromList op) (Right  $ fromMaybe (error $ "no index" ++ show (v,a,i))  $ atMay v  i)
-  match (WherePredicate a)  (Left (TBIndexNode v)) = F.all id $ fst $ go a ([],[] `cinterval`  [])
+  match (WherePredicate a)  (Left (TBIndexNode v)) = F.all id $ fst result
     where
+      result =go a ([],[] `cinterval`  [])
       -- Index the field and if not found return true to row filtering pass
 
       access (PrimColl (Inline  i,_) )  = i
@@ -268,7 +269,7 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
               -> ([Bool], Interval [v]) -> ([Bool], Interval [v])
       go (AndColl l) prev = (fmap (all id) bl ,last il)
         where (bl,il) = unzip $ scanl (flip go) prev (L.sortBy (comparing access) l)
-      go (OrColl l ) prev = (fmap (any id) bl , foldl Interval.hull  Interval.empty il)
+      go (OrColl l ) prev = ([any (any id) $ bl] , foldl Interval.hull  Interval.empty il)
         where (bl,il) = unzip $ flip go prev <$> (L.sortBy (comparing access)l)
       go (PrimColl (irel@(Inline  i),ops)) (b,prev)
         = case  getOp irel ops of

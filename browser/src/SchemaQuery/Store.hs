@@ -33,6 +33,7 @@ import Control.Concurrent.STM
 import Control.DeepSeq
 import Data.Time
 import Control.Monad.Catch
+import GHC.Conc
 import Control.Monad.RWS
 import qualified Data.Foldable as F
 import qualified Data.HashMap.Strict as HM
@@ -75,10 +76,12 @@ readIndex dbvar = do
 
 readState
   :: (Show k ,Ord k ,NFData k)
-      => (TBPredicate k Showable, [Rel k])
+      =>
+      Maybe Int
+       ->  (TBPredicate k Showable, [Rel k])
       -> DBRef k Showable
       -> STM (TableRep k Showable , TChan [TableModificationU k Showable])
-readState fixed dbvar = do
+readState size fixed dbvar = do
   rep <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- tryTakeMany chan
@@ -86,6 +89,14 @@ readState fixed dbvar = do
     TableRep (m,s,v) = either (error "no apply readState") fst $ foldUndo rep filterPred
     filterPred = {-filter (checkPatch  fixed) -} (fmap tableDiff $ concat patches)
     fv =  filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
+  traverse (\i ->
+    when (i /= G.size fv)  $ unsafeIOToSTM $ do
+      putStrLn $ renderPredicateWhere (fst fixed)
+      putStrLn  $ "WARNING: Size mismatch final" ++ show (G.keys fv)
+      -- putStrLn  $ "WARNING: Size mismatch filtered" ++ show (filter (G.match (fst pred )) fv)
+      putStrLn  $ "WARNING: Size mismatch original" ++ show (G.keys v)) size
+
+
   return (TableRep (m,s,fv),chan)
 
 cloneDBVar
@@ -95,8 +106,9 @@ cloneDBVar
   -> STM ((IndexMetadata k Showable, TableRep k Showable), DBRef k Showable)
 cloneDBVar pred dbvar@DBRef{..} = do
   ix <- readTVar refSize
-  (i,idxchan) <- readIndex dbvar
-  (s,statechan) <- readState pred dbvar
+  (i@(IndexMetadata m ),idxchan) <- readIndex dbvar
+  let metadata = fst <$> M.lookup (fst pred) m
+  (s,statechan) <- readState metadata pred dbvar
   let clonedVar = DBRef dbRefTable  (ix+1) refSize statechan idxVar idxchan collectionState [] dblogger
   return $ ((i,s),clonedVar)
 

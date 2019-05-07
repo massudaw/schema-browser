@@ -510,7 +510,7 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                   return ((sq,idx), (sidx,reso))
                 else do
                   -- BUG: DEBUG why this is happening
-                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (tableName table,sq, G.size reso,pageidx) -- <> (ident . render $ tbf)
+                  liftIO . putStrLn $ "WARNING: Load missing filter: " <> show (tableName table,sq, G.size reso,pageidx) <> concatMap (ident . render)  reso
                   readNew sq tbf 
           Nothing -> do
             liftIO . putStrLn $ "New page requested: " <> show pageidx
@@ -879,7 +879,7 @@ fromTableS origin whr = mdo
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin inipred, rawPK table) iniproj (psvalue t)  (patchVar ref)
     onEventIO ev (mapM h.compact)
   t0 <- liftIO getCurrentTime
-  let filtered = filterJust $ (\i j -> let r = apply i j in if (fst i ==  fst r) then Nothing else traceShow (fst i,fst r) $ Just  r)   <$> psvalue whr <@> psevent whr
+  let filtered = filterJust $ (\i j -> let r = apply i j in if (fst i ==  fst r) then Nothing else  Just  r)   <$> psvalue whr <@> psevent whr
   lift $ onEventDynIni ini  filtered (\(pred ,proj) -> do
     liftIO . putStrLn $ "Listen fromTableS:  " <> show origin <> "\n" <> show (t0, L.length (renderPredicateWhere pred))
     ev <- convertChanEvent inf table (liftPredicateF lookupKeyName inf origin pred, rawPK table) proj  (psvalue t)  (patchVar ref)
