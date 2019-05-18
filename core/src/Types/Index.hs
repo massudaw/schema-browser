@@ -102,10 +102,11 @@ getUnique ks = Idex . fmap snd . L.sortBy (comparing (pkIndexM  ks.simplifyRel .
 getUniqueM :: (Show k, Ord k) => [Rel k] -> TBData k a -> Maybe (TBIndex a)
 getUniqueM un = notOptionalM . getUnique  un
 
-getIndex :: (Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
-getIndex m  = getUnique  (_kvpk m) 
+getIndex :: (Show a,Show k ,Ord k ) => KVMetadata k -> TBData k a -> TBIndex  a
+getIndex m  v = sizeCheck $ getUnique  (_kvpk m)  v
+  where sizeCheck (Idex i) = if L.length (_kvpk m) == L.length i  then (Idex i ) else error $ "index size mismatch" ++ show (_kvpk m ) ++ show i ++ show v
 
-getBounds :: (Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
+getBounds :: (Show a,Show k,Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Interval (TBIndex a)
 getBounds m [] = (ER.NegInf,False) `interval` (ER.PosInf,False)
 getBounds m ls = (ER.Finite i,True) `interval` (ER.Finite j,False)
   where i = getIndex m (head ls)
@@ -118,7 +119,7 @@ notOptionalM (Idex m) =
 notOptional :: Show a => TBIndex a -> TBIndex a
 notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
-primaryKeyM :: (Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
+primaryKeyM :: (Show a,Show k, Ord k) => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
 primaryKeyM m = notOptionalM . getIndex m 
 
 primaryKey :: (Show k, Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
@@ -269,6 +270,7 @@ instance (Show v,Affine v ,Range v, Positive (Tangent v), Semigroup (Tangent v),
               -> ([Bool], Interval [v]) -> ([Bool], Interval [v])
       go (AndColl l) prev = (fmap (all id) bl ,last il)
         where (bl,il) = unzip $ scanl (flip go) prev (L.sortBy (comparing access) l)
+      -- TODO: Review this logic if is ok to have two any here
       go (OrColl l ) prev = ([any (any id) $ bl] , foldl Interval.hull  Interval.empty il)
         where (bl,il) = unzip $ flip go prev <$> (L.sortBy (comparing access)l)
       go (PrimColl (irel@(Inline  i),ops)) (b,prev)

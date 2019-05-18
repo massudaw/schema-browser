@@ -88,6 +88,7 @@ instance DecodeTB1 Maybe  where
   isoFTB = SIso [KOptional] (tell . encFTB) decFTB
     where
       decFTB (LeftTB1 i) =  fmap unTB1 i
+      decFTB (TB1 i) = Just i
       encFTB i = LeftTB1 $ fmap TB1  i
 
 unjoin (TB1 i) = TB1 (TB1 i)
@@ -454,8 +455,16 @@ instance DecodeShowable Text where
   encodeS = SText
   isoS = SIso PText (tell . pure .encodeS ) (decodeS. onlyLast )
 
+instance DecodeShowable Position where
+  decodeS (SGeo (SPosition i)) = i
+  encodeS i = SGeo $ SPosition i
+  isoS = SIso (PGeom  3 PPosition ) (tell . pure .encodeS ) (decodeS. onlyLast )
+
+
+
 instance DecodeShowable UTCTime where
   decodeS (STime (STimestamp i)) = i
+  decodeS (STime (SDate i)) = UTCTime i 0
   encodeS i = STime (STimestamp i)
   isoS = SIso (PTime (PTimestamp Nothing) )(tell . pure .encodeS ) (decodeS. onlyLast )
 

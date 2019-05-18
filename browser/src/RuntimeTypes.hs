@@ -261,7 +261,7 @@ applyGiSTChange ::
   -> RowPatch k (Index a)
   -> Either String ((KVMetadata k,G.GiST (TBIndex a) (TBData k a)),RowPatch k (Index a))
 applyGiSTChange (m,l) (RowPatch (patom,DropRow))=
-  traceStack ("dropping" ++ show (patom , G.keys l))  $ maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
+  {-traceStack ("dropping" ++ show (patom , G.keys l))  $-} maybe (Right $ ((m,l),RowPatch (patom,DropRow))) Right $
     ((m,G.delete (create <$> patom) G.indexParam l) ,) . mapRowPatch patch .  RowPatch . (create <$> patom ,) . CreateRow <$> G.lookup (create <$> patom) l
 applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
   first (m,) <$>case  flip G.lookup l =<< (G.notOptionalM i)  of
@@ -281,7 +281,8 @@ applyGiSTChange (m,l) (RowPatch (ipa,PatchRow  patom)) =
 applyGiSTChange (m,l) p@(RowPatch (idx,CreateRow elp)) =
   maybe (Right ((m,l),p)) Right $
     first (m,) <$> case G.lookup ix  l of
-      Just v -> Just (G.update  ix (maybe id (flip apply ) (diff v el)) l,RowPatch (idx,DropRow ))
+      Just v -> {-traceStack (show ix ++ "\n"++ (maybe "" show (diff v el))) $-}
+        Just (G.update  ix (maybe id (flip apply ) (diff v el)) l,RowPatch (idx,DropRow ))
       Nothing -> Just (G.insert (el, ix) G.indexParam l,RowPatch (idx,DropRow ))
     where
       el = fmap create elp
@@ -759,7 +760,7 @@ liftAccess = liftAccessF lookupKeyName
 liftAccessU inf t = fmap (liftAccess inf t )
 
 lookAccess :: InformationSchema -> Text -> (Rel Text , [(Rel Text,AccessOp Showable )]) -> (Rel Key, [(Rel Key,AccessOp Showable )])
-lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (fmap (lookKey inf tname)) <$> l2 )
+lookAccess inf tname (l1,l2) = (liftRel inf tname l1 , first (liftRel inf tname) <$> l2 )
 
 lookAccessM :: InformationSchema -> Text -> (Rel Text , [(Rel Text,AccessOp Showable )]) -> Maybe (Rel Key, [(Rel Key,AccessOp Showable )])
 lookAccessM inf tname (l1,l2) = (,) <$> liftRelM inf tname l1 <*>  traverse (fmap swap . traverse (traverse (lookKeyM inf tname)) .swap ) l2 
@@ -812,7 +813,7 @@ patchNoRef :: (Show i ,Show k ,Compact i, Ord k) =>  TBIdx k i -> TBIdx k i
 patchNoRef l =  kvlistp $ concat $ attrNoRef <$> unkvlistp l
   where
     attrNoRef (PFK _ l _ ) = unkvlistp l
-    attrNoRef (PInline i l ) = [PInline i (fmap patchNoRef l)]
+    attrNoRef (PInline i l ) = maybeToList $ PInline i <$> traverse nonEmptyM (fmap patchNoRef l)
     attrNoRef (PFun _ _ _) = []
     attrNoRef i = [i]
 
@@ -837,7 +838,7 @@ mergeCreate Nothing Nothing = Nothing
 -- TODO: Does not handle RelAccess predicates
 -- TODO: Evaluate if should have two functions one for plain complement and one for auxiliary data for querying 
 --  does filterTBData gives all we want?
-recComplement :: forall f a . (Foldable f,Applicative f,Show a) => InformationSchema -> KVMetadata Key ->  KVMeta Key  -> WherePredicate -> FKV Key f a -> Maybe (KVMeta Key )
+recComplement :: forall f a . (PrettyRender a,PrettyRender1 f, Foldable f,Applicative f,Show a ) => InformationSchema -> KVMetadata Key ->  KVMeta Key  -> WherePredicate -> FKV Key f a -> Maybe (KVMeta Key )
 recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
   where
     attrList  = fst <$> F.toList i
@@ -875,6 +876,7 @@ recComplement inf m p (WherePredicate i) r =  filterAttrs True attrList m r p
         k = _keyAtom $ keyType it
     go top r m _ _ v@(Attr k a) = if L.elem (Inline k) (if not top then _kvpk m <> r else r ) then Just v else Nothing
     go top r m _ _ v@(Fun _ _ _) = Nothing
+    go top r m _ i j = Nothing -- error $ "no match recComplement" ++ (ident $ render i  ++ render j)
 
 relOutputSets s = S.unions (relOutputSet <$> s )
 

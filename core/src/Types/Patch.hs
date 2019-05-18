@@ -424,8 +424,7 @@ unLeftItensP = unLeftTB
     unLeftTB (PFun k rel v) = PFun (unKOptional k) rel <$> unSOptionalP v
     unLeftTB (PInline na l) = PInline (unKOptional na) <$> unSOptionalP l
     unLeftTB (PFK rel ifk tb) =
-      (\ik -> PFK (Le.over relOri unKOptional <$> rel) ik) <$>
-      Map.traverseWithKey (\k -> fmap content . unLeftTB. rebuild k ) ifk <*>
+      (PFK (Le.over relOri unKOptional <$> rel) ifk) <$>
       unSOptionalP tb
     unLeftTB i = error (show i)
 

@@ -168,7 +168,8 @@ resRange b "year" d =
           (if b
                then -6
                else 6)
-          (utctDay d)
+          (utctDay d),
+      utctDayTime = if b then 0 else  86399
     }
 resRange b "month" d =
     d
@@ -176,7 +177,8 @@ resRange b "month" d =
           (if b
                then -1
                else 1)
-          (utctDay d)
+          (utctDay d),
+      utctDayTime = if b then 0 else  86399
     }
 resRange b "day" d =
     d
@@ -184,7 +186,8 @@ resRange b "day" d =
           (if b
                then -1
                else 1)
-          (utctDay d)
+          (utctDay d),
+      utctDayTime = if b then 0 else  86399
     }
 resRange b "week" d =
     d
@@ -192,7 +195,8 @@ resRange b "week" d =
           (if b
                then -7
                else 7)
-          (utctDay d)
+          (utctDay d),
+      utctDayTime = if b then 0 else  86399
     }
 resRange b "hour" d =
    addUTCTime (if b

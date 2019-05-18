@@ -224,8 +224,8 @@ batchEd m i =  do
       where names ix = "r" <> T.pack (show ix)
             tables = zip (names <$> [0..]) ((\(i,_,_) -> i ) <$> l)
     l = codeGen  . firstPatchRow (recoverFields inf) <$> catMaybes  (rowPatchNoRef . filterWritableRowPatch <$> F.toList i)
-  l <- queryLogged inf m (fromString $ T.unpack query) (concat $ (\(_,i,_) -> i) <$> l)
-  liftIO $ print (l :: [Only(Maybe Int)])
+  l <- traverse (queryLogged inf m (fromString $ T.unpack query)) (nonEmpty $ concat $ (\(_,i,_) -> i) <$> l)
+  liftIO $ print (l :: (Maybe [Only(Maybe Int)]))
   return i
 
 insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (RowPatch Key Showable)

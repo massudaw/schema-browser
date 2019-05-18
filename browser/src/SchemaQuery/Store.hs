@@ -16,6 +16,7 @@ module SchemaQuery.Store
   , lookDBVar
   -- Transaction Operations
   , transactionNoLog
+  , maxLoadedSize
   , transaction
   -- Create table
   , createTable
@@ -87,10 +88,11 @@ readState size fixed dbvar = do
   patches <- tryTakeMany chan
   let
     TableRep (m,s,v) = either (error "no apply readState") fst $ foldUndo rep filterPred
-    filterPred = {-filter (checkPatch  fixed) -} (fmap tableDiff $ concat patches)
+    filterPred = {-filter (checkPatch  fixed) -} (concat $ fmap tableDiffs $ concat patches)
     fv =  filterfixedS (dbRefTable dbvar) (fst fixed) (s,v)
   traverse (\i ->
     when (i /= G.size fv)  $ unsafeIOToSTM $ do
+      print (i, G.size fv)
       putStrLn $ renderPredicateWhere (fst fixed)
       putStrLn  $ "WARNING: Size mismatch final" ++ show (G.keys fv)
       -- putStrLn  $ "WARNING: Size mismatch filtered" ++ show (filter (G.match (fst pred )) fv)
@@ -99,6 +101,13 @@ readState size fixed dbvar = do
 
   return (TableRep (m,s,fv),chan)
 
+
+maxLoadedSize :: Ord k => WherePredicateK k -> IndexMetadata k v -> Maybe Int
+maxLoadedSize pred (IndexMetadata m) =   maxSize =<< M.lookup pred m
+  where
+    maxSize  (i,m) = min i.fst .fst <$> M.maxViewWithKey m
+
+
 cloneDBVar
   :: (NFData k ,Show k,Ord k)
   => (WherePredicateK k,[Rel k])
@@ -106,9 +115,8 @@ cloneDBVar
   -> STM ((IndexMetadata k Showable, TableRep k Showable), DBRef k Showable)
 cloneDBVar pred dbvar@DBRef{..} = do
   ix <- readTVar refSize
-  (i@(IndexMetadata m ),idxchan) <- readIndex dbvar
-  let metadata = fst <$> M.lookup (fst pred) m
-  (s,statechan) <- readState metadata pred dbvar
+  (i,idxchan) <- readIndex dbvar
+  (s,statechan) <- readState (maxLoadedSize (fst pred) i) pred dbvar
   let clonedVar = DBRef dbRefTable  (ix+1) refSize statechan idxVar idxchan collectionState [] dblogger
   return $ ((i,s),clonedVar)
 
@@ -424,7 +432,7 @@ updateTable inf (DBRef {..})
         patches <- fmap concat $ takeMany patchVar
         e <- readTVar collectionState
         let cpatches = compact patches
-        let out = foldUndo e (concat $ tableDiffs <$> cpatches)
+        let out = foldUndo e (compact $ concat $ tableDiffs <$> cpatches)
         traverse (\v -> writeTVar collectionState . fst$  v) out
         return  $ zip cpatches . snd <$> out
     either (putStrLn  .("### Error applying: " ++ ) . show ) (
@@ -460,7 +468,7 @@ createTable fixed m = do
   predbvar <- liftIO (lookDBVar inf mmap m)
   ((fixedmap,table),dbvar)
       <- liftIO . atomically $
-        cloneDBVar  (fixed ,_kvpk m) predbvar
+        cloneDBVar (fixed ,_kvpk m) predbvar
   (log ,logix)<-case M.lookup m map of
     Just (_,i,l) -> return $ (concat $ tableDiffs <$> i,l)
     Nothing -> do

@@ -12,7 +12,9 @@ module TP.QueryWidgets (
     metaTable,
     ) where
 
+import ClientAccess (otherClients)
 import Debug.Trace
+import Environment
 import Safe
 import Reactive.Threepenny.PStream  (accumS,PStream(..))
 import qualified Data.Functor.Contravariant as C
@@ -48,7 +50,7 @@ import Default
 import Expression
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (apply,render)
-import Graphics.UI.Threepenny.Internal (ui)
+import Graphics.UI.Threepenny.Internal (ui,wId)
 import qualified NonEmpty as Non
 import qualified Data.Sequence.NonEmpty as NonS
 import Query
@@ -156,6 +158,7 @@ pluginUI inf oldItems pl@(idp,FPlugins n t p) =
     headerUI
       = UI.button
       # set UI.class_ "btn btn-sm"
+      # set UI.style [("width","100%")]
       # set text (T.unpack n)
       # sink UI.enabled (isJust <$> facts tdInput)
       # set UI.style [("color","white")]
@@ -245,7 +248,7 @@ goAttSize (Primitive l (AtomicPrim i)) = go l
       KArray  -> let (i1,i2) = go l in (i1,i2*8)
       KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
-getRelOrigin :: Ord k => [TBF k f b ] -> [k ]
+getRelOrigin :: Ord k => [TBF k f b ] -> [k]
 getRelOrigin =  fmap _relOrigin .  concatMap (relUnComp .keyattr)
 
 attributeLabel :: TBMeta Key -> String
@@ -380,10 +383,10 @@ anyColumns inf hasLabel el constr table refs plugmods  fields oldItems cols =  m
       element chk # set UI.style [("display","inline-flex")]
       let
         resei :: Tidings (Editor (TBIdx CoreKey Showable))
-        resei = fmap defaultInitial  <$>  triding fks
-        defaultInitial new
+        resei = (\ i j -> defaultInitial  j <$> i ) <$>  triding fks <*> initialAttr
+        defaultInitial old new
           = kvlistp $ defaults ++ [new]
-            where defaults = patch <$> (addDefault' <$> filter ((/= index new ) . keyattr) (unkvlist fields) :: [TB Key Showable])
+            where defaults = patch <$> (addDefault' <$> filter ((\i -> i /= index new  && (maybe True ((==i) . index) old)) . keyattr) (unkvlist fields) :: [TB Key Showable])
       listBody <- UI.div #  set children (getElement chk : [getElement fks])
 
       let computeResult i j = -- trace (show result ++ show (projectAttr (apply i j )) ++  "\n" ++ maybe "" (ident . render) (apply i j) )
@@ -705,14 +708,17 @@ crudUITable inf table reftb@(_,gist ,_) refs pmods ftb  preoldItems2 = do
   (panelItems ,e) <- processPanelTable listBody inf reftb tablebdiff table preoldItems
 
   
-  navMeta  <- buttonDivSet  ["Status","Backend Log","Changes","Schema","Indexes"] (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
-  info <- switchManyLayout (triding navMeta) 
-    (M.fromList [
-       ("Status", emptyLayout  $ printErrors e)
-      ,("Backend Log", emptyLayout $ logConsole inf table)
-      ,("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)
-      ,("Indexes", emptyLayout $ tableIndexes reftb table)
-      ,("Schema", emptyLayout $ tableSchema table)])
+  let tabs = M.fromList [
+               ("Clients", emptyLayout $ editingHere inf table )
+              ,("Status", emptyLayout  $ printErrors e)
+              ,("Backend Log", emptyLayout $ logConsole inf table)
+              ,("Changes", emptyLayout $ debugConsole   preoldItems tablebdiff)
+              ,("Indexes", emptyLayout $ tableIndexes reftb table)
+              ,("Schema", emptyLayout $ tableSchema table)]
+  navMeta  <- buttonDivSet  (M.keys tabs ) (pure $ Just "Status") (\i -> UI.button # set UI.text i # set UI.style [("font-size","unset")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-left")
+
+
+  info <- switchManyLayout (triding navMeta)  tabs
   
   out <- UI.div # set children [title,listBody,panelItems,getElement navMeta,getElement info]
   return $ LayoutWidget tablebdiff out layout
@@ -928,6 +934,13 @@ processPanelTable lbox inf reftb@(_,trep,_) inscrudp table oldItemsi = do
 
   let diffEvs = [diffEdit,diffInsert,diffMerge,diffDelete]
   return (transaction,unions $ fmap (fmap (\(Left i) -> i) . filterE isLeft) diffEvs)
+
+editingHere inf table = do
+  w <- askWindow
+  cli <- ui $ otherClients (wId w) inf  table
+  errors <- UI.div # sink UI.text (show <$> facts cli)
+  return errors
+
 
 printErrors diffEvs = do
   errors <- UI.div
@@ -1418,9 +1431,7 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
           return $ [nav,pan] ++ celem
         selector True = do
           pred <- ui $ currentValue (facts predicate)
-          reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
           let newSel = fmap join $ applyIfChange <$> (fmap (fst .unTBRef) <$> facts oldItems) <#> (fmap sourcePRef <$> inipl)
-          let  tdi = ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<<  v) <$> gist  <*> newSel)
           cliZone <- jsTimeZone
           metaMap <- mapWidgetMeta inf
           metaAgenda <- eventWidgetMeta inf
@@ -1440,24 +1451,42 @@ fkUITablePrim inf (rel,targetTable) constr nonInjRefs plmods  oldItems  prim = d
                 (triding navMeta)
                 (M.fromList
                   [("List" , do
+                    reftb@(_,gist,_) <- ui $ refTablesDesc inf targetTable Nothing (fromMaybe mempty pred)
+                    let  tdi = ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<<  v) <$> gist  <*> newSel)
                     itemListEl <- UI.select # set UI.class_ "fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("left","0px"),("top","22px")]
                     (lbox , l) <- selectListUI inf targetTable itemListEl (pure mempty) reftb constr (recPKDesc inf (tableMeta targetTable) fields) tdi
                     element l # set UI.class_ selSize
                     return (LayoutWidget lbox l (pure (6,1)))),
                   ("Map" ,do
-                    let selection = conv $ fromJust hasMap
+                    let selection@(_,t,(_,geoFields),proj) = conv $ fromJust hasMap
+                        fields = fst $ staticP proj
+                        projection = projectFields inf t fields mempty $ allFields inf t
                         conv (i ,t, j ,l) = (i,t,j ,l)
                     t <- liftIO getCurrentTime
-                    TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, pure Nothing)
+                    reftb@(_,gist,_) <- ui $ refTablesProj inf targetTable Nothing (fromMaybe mempty pred) projection
+                    let tdi = ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<<  v) <$> gist  <*> newSel)
+                        positionList (Position a b c) = [b,a,c]
+                        positionList (Position2D a b ) = [b,a,0]
+                    let positionT = (fmap ((\i -> (fromJust . unFin $ Interval.upperBound i, fromJust . unFin $Interval.lowerBound i)) . traceShowId . fmap (positionList . decodeS)  . G.unFTBNode . G.bound . _tbattrvalue  ) . join . fmap (\t -> (foldl1 (<|>)  . fmap ( traceShowId . flip kvLookup t. traceShow t. traceShowId . splitRel inf (tableName targetTable)) ) (fmap decodeS geoFields))  <$> tdi)
+                    TrivialWidget i el <- mapSelector inf (pure mempty ) selection (pure (t,"month")) tdi (never, positionT)
                     element el # set UI.class_ selSize
+                              # set UI.style [("position","absolute"),("border","solid"),("z-index","999"),("background","white")]
                     return (LayoutWidget i el (pure (12,1)))),
                   ("Agenda" ,do
-                    let selection = conv $ fromJust hasAgenda
+                    let metaselection@(_,t,(_,timeFields),proj) = conv $ fromJust hasAgenda
+                        fields = fst $ staticP proj
+                        selection = projectFields inf t fields mempty $ allFields inf t
                         conv (i ,j ,k,l) = (i,j , k ,l)
-                    (sel ,(j,i)) <- calendarSelector
+
+                    reftb@(_,gist,_) <- ui $ refTablesProj inf targetTable Nothing (fromMaybe mempty pred) selection
+                    let  tdi = ((\(TableRep (_,s,g)) v -> searchGist rel targetTable g s =<<  v) <$> gist  <*> newSel)
+                    (sel ,(j,i)) <- calendarSelector  (join .fmap (fmap decodeS . decFTB . _tbattrvalue  ) . join . fmap (\t -> (foldl1 (<|>)  . fmap ( traceShowId . flip kvLookup t. traceShow t. traceShowId . splitRel inf (tableName targetTable)) ) timeFields)  <$> tdi)
                     el <- traverseUI (\(delta ,time) -> do
-                      (e,l) <- calendarView inf mempty cliZone [selection] (pure (S.singleton targetTable )) Basic delta time
+                      liftIO $ print (delta,time)
+                      (e,l) <- calendarView inf mempty cliZone [metaselection] (pure (S.singleton targetTable )) Basic delta (fmap (targetTable ,) <$> tdi) time
                       c <- UI.div # set children e
+                                  # set (UI.strAttr "tabindex") "0"
+                                  # set UI.style [("position","absolute"),("border","solid"),("z-index","999"),("background","white")]
                       return (TrivialWidget (fmap snd <$> l) c)) $ (,) <$> i <*> j
                     el2 <- UI.div  # sink children (pure . getElement <$> facts el)
                     tsource <- ui $ joinT (triding <$> el)

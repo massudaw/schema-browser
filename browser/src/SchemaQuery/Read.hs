@@ -152,7 +152,7 @@ selectFrom t a d = do
 
 pkPred  m b =  pred
   where
-    attrs = justError "missing attr" $ traverse (\ i-> (i, ) <$> kvLookup (simplifyRel i)   (tableNonRef b)) ( _kvpk m)
+    attrs = justError ("missing attr: " ++ show (_kvpk m,tableNonRef b)) $ traverse (\ i-> (i, ) <$> kvLookup (simplifyRel i)   (tableNonRef b)) ( _kvpk m)
     pred = WherePredicate . andColl $ 
         (\(i,v) -> PrimColl . (simplifyRel i ,) .  pure . (simplifyRel i,). Left . (,Equals) . _tbattr $ v ) <$> attrs
 
@@ -427,7 +427,7 @@ tableLoader' = do
             case G.lookup (G.getIndex (tableMeta table) i) reso of
                 Just orig ->  case recComplement inf (tableMeta table) tbf predicate orig   of
                     Just d -> Left (apply orig (patch i))
-                    Nothing -> Right  orig
+                    Nothing -> Right  (apply orig (patch i))
                 Nothing -> Left i
     result <- if L.any isLeft preresult
       then do
@@ -493,7 +493,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
               return (nidx,final)
 
     (nidx,(sidx2,ndata)) <- case hasIndex of
-      Just (sq,idx) ->
+      Just (sq,idx) -> do
+        liftIO $ putStrLn $ "Existing index: "  <> T.unpack (tableName table)
         if (sq > G.size reso)
         then case  M.lookup pageidx idx of
           Just v -> case recComplement inf (tableMeta table)  tbf fixed (fst v) of
@@ -540,7 +541,15 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                       liftIO . putStrLn $ "New pagetoken but current table is complete  : " <> show (tableName table, sq, G.size reso, pageidx)
                       return ((max (G.size reso) sq,idx), (sidx,reso))
                 Just (_,(proj,_)) -> do
-                  case (recComplement inf (tableMeta table) tbf fixed proj ) of
+                  let complement = (recComplement inf (tableMeta table) tbf fixed proj )
+                  when (tableName table == "stmttrn") $ liftIO $ do
+                    putStrLn "previous"
+                    putStrLn (ident . render  $ proj)
+                    putStrLn "current"
+                    putStrLn (ident . render $ tbf)
+                    putStrLn "complement"
+                    putStrLn (maybe "" (ident . render ) complement)
+                  case  complement of
                     Just comp -> do
                       liftIO $ putStrLn $ "Existing token with remaining complement " <> show (tableName table, sq,G.size reso)
                       -- ++  maybe ""  (ident . render ) (recComplement inf (tableMeta table) tbf fixed proj )
@@ -548,6 +557,8 @@ pageTable method table page fixed tbf = debugTime ("pageTable: " <> T.unpack (ta
                       readNew sq tbf 
                     Nothing -> do 
                       liftIO . putStrLn $ "Existing token current table is complete: " <> show (tableName table, sq,G.size reso)
+                      -- let complements = catMaybes $ (recComplement inf (tableMeta table) tbf fixed ) <$> G.toList reso
+                      -- when (not $ L.null complements) $ liftIO $ putStrLn (concatMap (ident . render) (tableNonRef <$> complements))
                       -- liftIO $ putStrLn $ "Old proj \n" ++ ( ident $ render  proj)
                       -- liftIO $ putStrLn $ "New proj \n" ++ ( ident $ render  tbf)
                       return ((max (G.size reso) sq,idx), (sidx,reso))
@@ -665,10 +676,12 @@ restrictPatch v = fmap kvlistp . nonEmpty . mapMaybe (\i -> flip restrictPAttr i
 
 -- NOTE : When we have a foreign key and only want the field we need to restrict the fields by using tableNonRef
 restrictRow :: KVMeta Key -> KV Key Showable -> Maybe (KV Key Showable)
-restrictRow v n = kvNonEmpty (directMatch <> nonRefMatch )  -- (\i -> F.foldl' (<|> ) (restrictField i) (restrictField <$> nonRefTB i) )
-    where restrictField i = flip restrictAttr i =<< kvLookup (index i) v
-          directMatch = mapKVMaybe restrictField  n 
-          nonRefMatch = mapKVMaybe restrictField (tableNonRef $ kvFilterWith (\k _ -> isNothing (kvLookup k directMatch) ) $ n )
+restrictRow v n =  (\r -> if kvSize r == kvSize v then r else {-trace (show (kvSize r , kvSize v) ++ "\n" ++ ident (render n <> render r ))-} r) <$> result
+    where
+      result = kvNonEmpty (directMatch <> nonRefMatch )
+      restrictField i = flip restrictAttr i =<< kvLookup (index i) v
+      directMatch = mapKVMaybe restrictField  n
+      nonRefMatch = mapKVMaybe restrictField (tableNonRef $ kvFilterWith (\k _ -> isNothing (kvLookup k directMatch) ) $ n )
 
 restrictOp :: KVMeta Key -> RowOperation Key Showable -> Maybe (RowOperation Key Showable)
 restrictOp tbf v = case v of
@@ -708,7 +721,7 @@ convertChanEvent inf table fixed select bres chan = do
                         -- when ( tableName table == "table_description" )$  do
                           -- liftIO $ putStrLn $ "match raw:\n" ++ show c
                         -- reload <-  Just . maybeToList . snd <$> getFrom  table c i
-                        --liftIO $ putStrLn $ "!!! WARNING !!!! match pretty "
+                        liftIO $ putStrLn $ "!!! WARNING !!!! match pretty "
                         --      ++ show (tableName table)
                         --      ++ show (L.length (concat ml ))
                         --      ++ renderPredicateWhere (fst fixed)
@@ -723,7 +736,7 @@ convertChanEvent inf table fixed select bres chan = do
                   else  return Nothing
             where 
                 i = apply r j 
-      deltas  =  tableDiff <$> compact (concat  ml)
+      deltas  = compact $  concat $ tableDiffs <$> (concat  ml)
       match :: RowPatch Key Showable -> TransactionM (Maybe [RowPatch Key Showable])
       match r@(RowPatch (i,PatchRow j)) 
             = case G.lookup i v  of
@@ -742,7 +755,7 @@ convertChanEvent inf table fixed select bres chan = do
     (newRows,_) <- runDynamic .transactionNoLog inf $ concat .catMaybes <$> mapM match deltas 
       -- oldRows = filterPredNot v deltas 
     let
-      patches = join $ nonEmpty . catMaybes . fmap (restrict select) <$> ({-oldRows <> -} nonEmpty newRows)
+      patches = join $ nonEmpty . catMaybes  . fmap (restrict select) <$> ({-oldRows <> -} nonEmpty newRows)
     --when (tableName table == "clients") . void $do
     --  (\v -> do
     --    putStrLn $ "Logging new patches: " ++ renderPredicateWhere (fst fixed)

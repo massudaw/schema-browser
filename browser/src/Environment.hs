@@ -385,9 +385,9 @@ projectFields inf table l w v = projectFields' inf table (validateAttributePath 
 projectFields' :: InformationSchema -> Table -> [Union (G.AttributePath Key MutationTy)] -> WherePredicate -> KVMeta Key  -> KVMeta Key
 -- projectFields' _ _ l  w _ | traceShow ("projectFields",l,w) False = undefined
 projectFields' inf t s (WherePredicate pred) l 
-  =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> (attrList ))
+  =  kvlistMerge . concat. catMaybes $ (pattr l <$> (F.toList =<< s )) <> ((\i -> fmap pure $ kvLookup i l <|> kvLookup i (tableNonRef l )) <$> attrList )
   where 
-    attrList = fst <$> F.toList pred 
+    attrList = (fst <$> F.toList pred )  <> rawPK t
     fkAttrList = concat $ fmap mappath  (F.toList  =<< s )  
       where mappath (G.PathForeign i _ ) =  concat $ explodeRel <$> i
             mappath _ = [] 
@@ -396,7 +396,7 @@ projectFields' inf t s (WherePredicate pred) l
             explodeRel (RelComposite l ) = concat $ explodeRel <$> l
 
     -- pattr v i | traceShow ("pattr",i , kvkeys v) False = undefined
-    pattr :: KVMeta Key  -> G.AttributePath Key MutationTy -> Maybe [TBMeta Key ]
+    pattr :: KVMeta Key  -> G.AttributePath Key MutationTy -> Maybe [TBMeta Key]
     pattr v (G.PathAttr key  _) 
       = fmap pure $  kvLookup (Inline key ) v
         <|> (findRef =<< kvFind (\v -> _relOutputs v == Just [key]) v )

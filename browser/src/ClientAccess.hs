@@ -5,6 +5,7 @@ import Control.Monad.Reader
 import Data.Bifunctor (first)
 import Utils
 import Safe
+import Data.Time
 import qualified Data.ExtendedReal as ER
 import Graphics.UI.Threepenny hiding (meta)
 import Graphics.UI.Threepenny.Internal (wId)
@@ -209,7 +210,22 @@ lookClient :: Int -> InformationSchema ->  Dynamic (Tidings (Maybe ClientState))
 lookClient clientId metainf = do
   let pred = WherePredicate (AndColl [PrimColl $ fixrel (keyRef (lookKey metainf "clients" "id") , Left (num clientId,Equals))])
   (_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing  pred
-  return (fmap (decodeT. mapKey' keyValue). getClient metainf clientId .primary<$> clientState)
+  return (fmap (decodeT . mapKey' keyValue) . getClient metainf clientId . primary<$> clientState)
+
+otherClients :: Int -> InformationSchema -> Table ->  Dynamic (Tidings [ClientTableSelection])
+otherClients clientId inf  table = do
+  now <- liftIO getCurrentTime
+  let pred = WherePredicate $ (AndColl [PrimColl $ fixrel $ (liftRel (meta inf) "clients" "id"  ,Left  (num clientId ,Equals))
+                                       ,PrimColl $ fixrel $ (liftRel (meta inf) "clients" $ RelAccess "selection" "schema"  ,Left  (num (schemaId inf),Equals))
+                                       ,PrimColl $ fixrel $ (liftRel (meta inf) "clients" $ (RelAccess "selection" $ RelAccess "selection"  "table") ,Left  (txt (tableName table),Equals))])
+  (_,clientState,_)  <- refTables' (meta inf) (lookTable (meta inf) "clients") Nothing  pred
+  let transformTable t =  t {row_selection = filter (\r -> Interval.member now (row_up_time r) ) (row_selection t) }
+  return (fmap transformTable . filter (\i -> table_sel i == tableName table && Interval.member now  (table_up_time i) ) .
+    concatMap table_selection . filter (\i-> Interval.member now  (schema_up_time i) && (schema_sel i == schemaId inf )) .
+    concatMap schema_selection. filter (\i-> Interval.member now  (client_up_time i) ) .
+    fmap (decodeT . mapKey' keyValue) . F.toList . primary<$> clientState)
+
+
 
 indexTable inf (tix,table) = (lookT =<<)
   where

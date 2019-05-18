@@ -10,6 +10,7 @@ import TP.Selector
 import TP.Extensions
 import Control.Exception
 import ClientAccess
+import Debug.Trace
 import Query
 import Safe
 import GHC.IO.Unsafe
@@ -117,10 +118,10 @@ setup smvar bstate plugList w = void $ do
 
       bset <- tableChooser inf  kitems (fst <$> triding tfilter ) (snd <$> triding tfilter) initKey
       posSel <- positionSel
-      (sidebar,calendarT) <- calendarSelector
+      (sidebar,calendarT) <- calendarSelector (pure Nothing)
       tbChooser <- UI.div
           # set UI.class_ "col-xs-2"
-          # set UI.style ([("height","89vh"),("overflow-y","hidden")] ++ borderSchema inf)
+          # set UI.style ([("height","92vh"),("overflow-y","hidden")] ++ borderSchema inf)
           # set children [sidebar,posSel ^._1,getElement bset]
           # sink0 UI.style (facts $ noneShow <$> triding menu)
       let cliTables = (join . fmap (flip atMay six) <$> cliTid)
@@ -190,7 +191,7 @@ setup smvar bstate plugList w = void $ do
             el <- UI.div # set children  (pure subels)
             st <- once (buttonStyle,const True)
             return  $ TrivialWidget st el )])
-      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","89vh"),("overflow-y","auto")] ++ borderSchema inf)
+      bd <- UI.div # set children [(getElement tfilter)] # set UI.style ([("height","92vh"),("overflow-y","auto")] ++ borderSchema inf)
                        # sink0 UI.class_ (facts $ expand <$> triding menu)
       element body # set children [tbChooser,bd]
       return tfilter
@@ -250,7 +251,7 @@ loginWidget userI passI =  do
     userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-12"
     passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-12"
     usernameT <- ui $ stepperT userI usernameE
-    passwordT <- ui $stepperT passI passwordE
+    passwordT <- ui $ stepperT passI passwordE
     return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
 
 form :: Tidings a -> Event b -> Tidings a
@@ -267,7 +268,7 @@ loadSchema smvar schemaN user auth =
 databaseChooser cookies smvar metainf sargs plugList init = do
   let rCookie = T.pack . BS.unpack . cookieValue <$> L.find ((=="auth_cookie"). cookieName) cookies
   cookiesMap <- ui $ transactionNoLog metainf $  selectFrom "auth_cookies" Nothing mempty
-  let loginCookie = (\m -> (\ck -> decodeT .mapKey' keyValue <$> G.lookup (Idex [TB1 $ SNumeric ck]) (primary m)) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
+  let loginCookie = (\m -> (\ck -> (\i -> traceShow (ck,i,G.keys (primary m)) i ) $ decodeT .mapKey' keyValue <$> G.lookup (Idex [TB1 $ SNumeric ck]) (primary m)) =<< readMay . T.unpack =<< rCookie )  <$> collectionTid cookiesMap
       -- userMap <- ui $ transactionNoLog metainf $  selectFrom "user" Nothing Nothing [] mempty
   cookieUser <- currentValue . facts $  loginCookie
   (widT,widE) <- loginWidget (Just $ user sargs  ) Nothing 

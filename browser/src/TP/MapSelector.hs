@@ -112,7 +112,7 @@ mapDef inf
             efields' = fmap TB1 . Non.fromList . F.toList <$> evfields
             unPred (WherePredicate e)  =e
             fieldKey (TB1 (SText v))=  v
-      returnA -< ("#" <> renderPrim color, table, pred, proj)
+      returnA -< ("#" <> renderPrim color, table, (pred,efields), proj)
 
 
 
@@ -140,10 +140,10 @@ mapSelector
      -> Tidings (Maybe (TBPredicate Key Showable))
      -> (String,
          TableK Key,
-          Maybe (TBPredicate Key Showable)
+          (Maybe (TBPredicate Key Showable)
                      -> Maybe ([Double], [Double])
                      -> (UTCTime, String)
-                     -> WherePredicate,
+                     -> WherePredicate, NonS.NonEmptySeq Showable),
          PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () [Maybe A.Object]
          )
      -> Tidings (UTCTime, String)
@@ -151,7 +151,7 @@ mapSelector
      -> (Event ([Double], [Double]),
          Tidings (Maybe ([Double], [Double])))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
+mapSelector inf pred (_,tb,(wherePred,_),proj) mapT sel (cposE,positionT) = do
         innermap <- UI.div # set UI.style [("height","250px"),("width","100%")]
         (eselg,hselg) <- ui newEvent
         (egselg,hgselg) <- ui newEvent
@@ -185,7 +185,8 @@ mapSelector inf pred (_,tb,wherePred,proj) mapT sel (cposE,positionT) = do
           traverseUI (createLayers innermap tname . A.toJSON . catMaybes  . concatMap (evalPlugin  proj)) v
           let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just (G.lookup pk j) else Nothing) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
           onEvent evsel (liftIO . hselg)) pcal
-        mapSel <- ui $ stepperT Nothing (fmap snd <$> eselg )
+        inisel <- currentValue (facts sel)
+        mapSel <- ui $ stepperT inisel (unionWith const (rumors sel ) (fmap snd <$> eselg ))
         return (TrivialWidget mapSel innermap)
 
               

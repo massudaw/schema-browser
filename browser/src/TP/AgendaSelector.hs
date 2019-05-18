@@ -135,13 +135,13 @@ agendaDefProjection inf =  fields
                   ,("table",txt tname)
                   ,("color" , txt $ T.pack  scolor )
                   ,("field", TB1 efield )] <> (convField i)
-            proj =  fmap (fmap Just ) . mapA projfT  $ efields
+            proj =  fmap (fmap Just ) . mapA projfT  $ traceShowId efields
             wherePred predicate  time  =  pred
               where
                 pred = WherePredicate . AndColl $ [timePred inf table (fieldKey . TB1 <$> efields ) time] ++ fmap unPred (maybeToList predicate)
-                fieldKey (TB1 (SText v))=   v
-                unPred (WherePredicate i) = i
-          returnA -< ( txt $ T.pack $ scolor ,table,wherePred ,proj )
+            fieldKey (TB1 (SText v))=   v
+            unPred (WherePredicate i) = i
+          returnA -< ( txt $ T.pack $ scolor ,table,(wherePred,fieldKey . TB1 <$> efields ) ,proj )
 
 
 calendarView
@@ -149,28 +149,34 @@ calendarView
      InformationSchema
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
-     -> [(t, TableK Key,  Maybe (TBPredicate Key Showable)
-                            -> (UTCTime, String) -> WherePredicate ,
+     -> [(t, TableK Key,  (Maybe (TBPredicate Key Showable)
+                            -> (UTCTime, String) -> WherePredicate , a),
           PluginM (Union (G.AttributePath T.Text MutationTy))  (Atom (TBData T.Text Showable))  Identity () [Maybe A.Object]
          )]
     -> Tidings (S.Set (TableK Key))
      -> Mode
      -> [Char]
+     -> Tidings (Maybe (Table,TBData Key Showable))
      -> UTCTime
      -> UI ([Element], Tidings (Maybe (Table,TBData Key Showable)))
-calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
+calendarView inf predicate cliZone dashes sel  agenda resolution tdi incrementT = do
     (eselg,hselg) <- ui $ newEvent
-    bhsel <- ui $ stepper Nothing eselg
+    ini <- currentValue (facts tdi)
+    bhsel <- ui $ stepper ini (unionWith const (rumors tdi ) eselg)
     let
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
     traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
-      traverse (\(_,t,pred,proj)-> do
-        let  selection = projectFields inf t (fst $ staticP proj) whereClause $ allFields inf t
+      traverse (\(_,t,(pred,_),proj)-> do
+        let  fields = fst $ staticP proj
+             selection = projectFields inf t fields whereClause $ allFields inf t
              whereClause = pred predicate (incrementT,resolution)
+        liftIO $ putStrLn "SELECT "
         liftIO $ putStrLn . ident $ Text.render selection
+        liftIO $ putStrLn "WHERE "
+        liftIO $ putStrLn  $ Text.renderPredicateWhere whereClause
         reftb <- ui $ refTablesProj inf t Nothing whereClause selection
         let output  = reftb ^. _2
             evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk (primary j) else Nothing  ) <$> facts output <@>  evc

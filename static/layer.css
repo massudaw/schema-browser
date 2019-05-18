@@ -31,9 +31,18 @@
   width:75%
 }
 
-
-label {
-  margin:0px
+.label {
+  margin:0px;
+  text-overflow:clip;
+  display:inline-block;
+  word-wrap:break-word;
+  max-width:100%;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.label:hover {
+  max-width: unset;
+  white-space:pre-line;
 }
 input[type="checkbox"]{
   width: 16px;
@@ -98,6 +107,7 @@ input[type="checkbox"]{
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
 .buttonSel:enabled{
   background-color:darkgray;
   border-color:2px solid lightgray;
@@ -116,10 +126,12 @@ input[type="checkbox"]{
 }
 
 .buttonSet:enabled{
+  background-color:darkgray;
+  border-color:2px solid lightgray;
   
 }
 .buttonSet:disabled{
-  background-color:lightgray;
+  background-color:gray;
   display:none;
 }
 

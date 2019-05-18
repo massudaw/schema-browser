@@ -50,7 +50,7 @@ import Types.Patch
 import Utils
 
 
-calendarSelector = do
+calendarSelector ini = do
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
           where transRes = M.fromList [("year","Ano"),("month","Mês"),("week","Semana"),("day","Dia"),("hour","Hora")]
         defView = "week"
@@ -59,6 +59,7 @@ calendarSelector = do
         capitalize [] = []
 
     iday <- liftIO getCurrentTime
+    v <- currentValue (facts ini)
     resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
 
     next <- UI.button  # set text ">"
@@ -71,10 +72,11 @@ calendarSelector = do
     prevE <- UI.click prev
     todayE <- UI.click today
     let
-      currentE = concatenate <$> unions  [ resRange False  <$> facts (triding resolution) <@ nextE
+      currentE = concatenate <$> unions  [ const <$> filterJust (rumors ini)
+                                       , resRange False  <$> facts (triding resolution) <@ nextE
                                        , resRange True   <$> facts (triding resolution) <@ prevE
                                        , const (const iday) <$> todayE ]
-    increment <- ui $ accumB iday  currentE
+    increment <- ui $ accumB (fromMaybe iday v) currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
 
     -- currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )

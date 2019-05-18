@@ -88,7 +88,7 @@ mapWidget (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             onEvent move (liftIO . h. Just)
             onEvent (filterJust $ rumors prepositionT) (setPosition innermap )
 
-            fin <- mapM (\(_,tb,wherePred,proj) -> do
+            fin <- mapM (\(_,tb,(wherePred,_),proj) -> do
               let pcal =  liftA2 (wherePred mempty) positionT mapT
                   tname = tableName tb
               traverseUIInt (\pred ->

@@ -7,6 +7,7 @@ module TP.Agenda (eventWidget,agendaDefS,eventWidgetMeta,testAgendaDef) where
 
 import TP.AgendaSelector
 import Control.Monad.Writer as Writer
+import Debug.Trace
 import Query
 import Text
 import SchemaQuery
@@ -41,7 +42,7 @@ eventWidget (incrementT,resolutionT) sel inf cliZone = do
             ) item
       chooser = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i -> UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
-        out <- traverseUI id $ (\i -> calendarView inf Nothing cliZone i sel) <$>  v <*> triding agenda <*> resolutionT <*> incrementT
+        out <- traverseUI id $ (\i j k -> calendarView inf Nothing cliZone i  sel j k (pure Nothing)  ) <$>  v <*> triding agenda <*> resolutionT <*> incrementT
         selector <- UI.div 
         traverseUI (traverseUI (traverse (\(t,tdi) -> do
           reftb <- ui $ refTables inf t

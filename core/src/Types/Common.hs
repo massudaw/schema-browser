@@ -969,7 +969,7 @@ renderRel (RelFun k expr rel) = renderRel k ++ " = " ++ renderFun expr rel
         go (Value i) = renderRel $ justError "no value" $ ac `atMay` i
 renderRel (RelComposite l ) =  "(" <> L.intercalate ","  (renderRel <$> l) <> ")"
 renderRel (RelAccess i l) =
-  renderRel i ++ "." ++ renderRel l
+  renderRel i ++ ". " ++ renderRel l
 renderRel (Rel i Equals k)
   | show i == show k = "[" <> renderRel i <> "]"
 renderRel (Rel i op k) = "[" <> renderRel i <> " " <> renderBinary op <> " "<> renderRel k <> "]"
@@ -1038,7 +1038,7 @@ replaceRecRel i = foldr (\(MutRec l) v -> foldr (\a -> recOverKV a l) v l) i
 kvSingleton  :: Ord k => TB k a -> KV k a
 kvSingleton i = KV $ Map.singleton (relSort $ keyattr i ) (valueattr i)
 
-kvSize :: Ord k => KV k a ->  Int
+kvSize :: Ord k => FKV k f a ->  Int
 kvSize (KV i) = Map.size i
 
 kvNonEmpty :: Ord k => KV k a ->  Maybe (KV k a)

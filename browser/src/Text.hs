@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections,TypeApplications,FlexibleInstances,TypeSynonymInstances #-}
-module Text (PrettyRender(..),ident, render,renderShowable , readPrim,renderPrim,renderPredicateWhere,readType) where
+module Text (PrettyRender(..),PrettyRender1,ident, render,renderShowable , readPrim,renderPrim,renderPredicateWhere,readType) where
 
 import Types
 import Types.Patch
@@ -139,6 +139,8 @@ renderAttr (Attr k v ) = wrapBrackets  (show k ++ " => ") (render1 v)
 renderAttr (IT k v ) = wrapBrackets (show k ++ " => ") (render1 v)
 renderAttr (Fun i k v) = renderAttr (Attr i v)
 
+instance (Ord k, Show k,PrettyRender1 f,PrettyRender b) => PrettyRender (TBF k f b) where
+  render = renderAttr
 
 instance PrettyRender a => PrettyRender (FTB a) where
   render  = renderFTB render
