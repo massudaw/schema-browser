@@ -15,6 +15,7 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Types.Patch
   -- Class Patch Interface
@@ -52,7 +53,8 @@ module Types.Patch
   , kvlistp
   , recoverPFK
   , liftPFK
-  , PathFTB(..)
+  , PatchStep(..)
+  , PathFTB(PatchOne, PatchSet, PAtom, POpt, PIdx, PInter)
   , PathTID(..)
   , upperPatch
   , lowerPatch
@@ -188,15 +190,53 @@ nonRefPatch i = Map.singleton (index i )  (content i)
 kvsingleton :: Address a => a -> Map (Idx a) (Content a)
 kvsingleton i = Map.singleton (index i)  (content i)
 
+-- | Structural patch step — one level of navigation into an FTB tree.
+--   Separated from 'PathFTB' so that functions which only need to handle
+--   structural cases can pattern-match exhaustively without a 'PatchSet' arm.
+data PatchStep a
+  = PAtomS a
+  | POptS (Maybe (PathFTB a))
+  | PIdxS Int
+          (Maybe (PathFTB a))
+  | PInterS Bool
+             (Extended (PathFTB a), Bool)
+  deriving (Eq, Ord, Functor, Generic, Foldable, Traversable)
+
+-- | A patch on an 'FTB' value: either a single structural step ('PatchOne')
+--   or a sequence of patches to apply in order ('PatchSet').
 data PathFTB a
-  = PAtom a
-  | POpt (Maybe (PathFTB a))
-  | PIdx Int
-         (Maybe (PathFTB a))
-  | PInter Bool
-           (Extended (PathFTB a), Bool)
+  = PatchOne !(PatchStep a)
   | PatchSet (Non.NonEmpty (PathFTB a))
-  deriving (Show, Eq, Ord, Functor, Generic, Foldable, Traversable)
+  deriving (Eq, Ord, Functor, Generic, Foldable, Traversable)
+
+-- Backward-compatible pattern synonyms
+pattern PAtom :: a -> PathFTB a
+pattern PAtom a = PatchOne (PAtomS a)
+
+pattern POpt :: Maybe (PathFTB a) -> PathFTB a
+pattern POpt a = PatchOne (POptS a)
+
+pattern PIdx :: Int -> Maybe (PathFTB a) -> PathFTB a
+pattern PIdx i a = PatchOne (PIdxS i a)
+
+pattern PInter :: Bool -> (Extended (PathFTB a), Bool) -> PathFTB a
+pattern PInter b a = PatchOne (PInterS b a)
+
+{-# COMPLETE PAtom, POpt, PIdx, PInter, PatchSet #-}
+
+-- Custom Show that uses the pattern synonym names for readability
+instance Show a => Show (PatchStep a) where
+  showsPrec d (PAtomS a) = showParen (d > 10) $ showString "PAtomS " . showsPrec 11 a
+  showsPrec d (POptS a) = showParen (d > 10) $ showString "POptS " . showsPrec 11 a
+  showsPrec d (PIdxS i a) = showParen (d > 10) $ showString "PIdxS " . showsPrec 11 i . showChar ' ' . showsPrec 11 a
+  showsPrec d (PInterS b a) = showParen (d > 10) $ showString "PInterS " . showsPrec 11 b . showChar ' ' . showsPrec 11 a
+
+instance Show a => Show (PathFTB a) where
+  showsPrec d (PAtom a) = showParen (d > 10) $ showString "PAtom " . showsPrec 11 a
+  showsPrec d (POpt a) = showParen (d > 10) $ showString "POpt " . showsPrec 11 a
+  showsPrec d (PIdx i a) = showParen (d > 10) $ showString "PIdx " . showsPrec 11 i . showChar ' ' . showsPrec 11 a
+  showsPrec d (PInter b a) = showParen (d > 10) $ showString "PInter " . showsPrec 11 b . showChar ' ' . showsPrec 11 a
+  showsPrec d (PatchSet l) = showParen (d > 10) $ showString "PatchSet " . showsPrec 11 l
 
 data PatchFTBC  a 
  = PAtomicC a
@@ -664,8 +704,10 @@ instance (Binary k, Binary a) => Binary (PathAttr k a)
 
 instance (NFData k, NFData a) => NFData (PathAttr k a)
 
+instance (NFData k) => NFData (PatchStep k)
 instance (NFData k) => NFData (PathFTB k)
 
+instance (Binary k) => Binary (PatchStep k)
 instance (Binary k) => Binary (PathFTB k)
 
 traverseWithAttr f = Map.traverseWithKey (\k -> fmap content . f . rebuild k )
