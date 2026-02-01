@@ -14,8 +14,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Clone local dependencies
+        env:
+          GH_TOKEN: ${{ secrets.DEPS_TOKEN }}
         run: |
           mkdir -p deps
+
+          # Configure git to use token for private repos
+          if [ -n "$GH_TOKEN" ]; then
+            git config --global url."https://${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          fi
+
           git clone --depth 1 https://github.com/massudaw/patch.git            deps/patch
           git clone --depth 1 https://github.com/massudaw/master-plan.git       deps/master-plan
           git clone --depth 1 https://github.com/massudaw/postgresql-simple.git deps/postgresql-simple
